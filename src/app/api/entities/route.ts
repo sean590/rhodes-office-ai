@@ -1,0 +1,206 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
+import type { Jurisdiction } from "@/lib/types";
+
+export async function GET() {
+  try {
+    const supabase = await createClient();
+
+    // Fetch all entities (exclude soft-deleted)
+    const { data: entities, error: entitiesError } = await supabase
+      .from("entities")
+      .select("*")
+      .neq("status", "deleted")
+      .order("name");
+
+    if (entitiesError) {
+      return NextResponse.json({ error: entitiesError.message }, { status: 500 });
+    }
+
+    if (!entities || entities.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    const entityIds = entities.map((e) => e.id);
+
+    // Fetch related data in parallel
+    const [registrationsRes, managersRes, membersRes, relationshipsFromRes, relationshipsToRes] =
+      await Promise.all([
+        supabase
+          .from("entity_registrations")
+          .select("id, entity_id, jurisdiction, last_filing_date, filing_exempt")
+          .in("entity_id", entityIds),
+        supabase
+          .from("entity_managers")
+          .select("id, entity_id, name")
+          .in("entity_id", entityIds),
+        supabase
+          .from("entity_members")
+          .select("id, entity_id, name, ref_entity_id, directory_entry_id")
+          .in("entity_id", entityIds),
+        supabase
+          .from("relationships")
+          .select("id, from_entity_id")
+          .in("from_entity_id", entityIds),
+        supabase
+          .from("relationships")
+          .select("id, to_entity_id")
+          .in("to_entity_id", entityIds),
+      ]);
+
+    if (registrationsRes.error) {
+      return NextResponse.json({ error: registrationsRes.error.message }, { status: 500 });
+    }
+    if (managersRes.error) {
+      return NextResponse.json({ error: managersRes.error.message }, { status: 500 });
+    }
+    if (membersRes.error) {
+      return NextResponse.json({ error: membersRes.error.message }, { status: 500 });
+    }
+    if (relationshipsFromRes.error) {
+      return NextResponse.json({ error: relationshipsFromRes.error.message }, { status: 500 });
+    }
+    if (relationshipsToRes.error) {
+      return NextResponse.json({ error: relationshipsToRes.error.message }, { status: 500 });
+    }
+
+    const registrations = registrationsRes.data || [];
+    const managers = managersRes.data || [];
+    const members = membersRes.data || [];
+    const relationshipsFrom = relationshipsFromRes.data || [];
+    const relationshipsTo = relationshipsToRes.data || [];
+
+    // Build enriched entity list
+    const enriched = entities.map((entity) => {
+      const entityRegistrations = registrations.filter((r) => r.entity_id === entity.id);
+      const entityManagers = managers.filter((m) => m.entity_id === entity.id);
+      const entityMembers = members.filter((m) => m.entity_id === entity.id);
+
+      // Count relationships where this entity is either from or to
+      const relCount =
+        relationshipsFrom.filter((r) => r.from_entity_id === entity.id).length +
+        relationshipsTo.filter((r) => r.to_entity_id === entity.id).length;
+
+      // Calculate filing status across all jurisdictions
+      // Collect all jurisdictions: formation_state + registration jurisdictions
+      const allJurisdictions: { jurisdiction: Jurisdiction; lastFiled: string | null; filingExempt: boolean }[] = [];
+
+      // Formation state - find the registration record for it, or use null
+      const formationReg = entityRegistrations.find(
+        (r) => r.jurisdiction === entity.formation_state
+      );
+      allJurisdictions.push({
+        jurisdiction: entity.formation_state as Jurisdiction,
+        lastFiled: formationReg?.last_filing_date || null,
+        filingExempt: formationReg?.filing_exempt || false,
+      });
+
+      // Other registration jurisdictions
+      for (const reg of entityRegistrations) {
+        if (reg.jurisdiction !== entity.formation_state) {
+          allJurisdictions.push({
+            jurisdiction: reg.jurisdiction as Jurisdiction,
+            lastFiled: reg.last_filing_date || null,
+            filingExempt: reg.filing_exempt || false,
+          });
+        }
+      }
+
+      const filingStatuses = allJurisdictions.map((j) =>
+        calculateFilingStatus(j.lastFiled, j.jurisdiction, j.filingExempt)
+      );
+      const worstStatus = getWorstFilingStatus(filingStatuses);
+
+      return {
+        ...entity,
+        registrations: entityRegistrations,
+        managers: entityManagers,
+        members: entityMembers,
+        filing_status: worstStatus,
+        relationship_count: relCount,
+      };
+    });
+
+    return NextResponse.json(enriched);
+  } catch (err) {
+    console.error("GET /api/entities error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = createAdminClient();
+    const body = await request.json();
+
+    const {
+      name,
+      type,
+      formation_state,
+      ein,
+      formed_date,
+      registered_agent,
+      address,
+      parent_entity_id,
+      notes,
+    } = body;
+
+    if (!name || !type || !formation_state) {
+      return NextResponse.json(
+        { error: "name, type, and formation_state are required" },
+        { status: 400 }
+      );
+    }
+
+    // Create the entity
+    const { data: entity, error: entityError } = await supabase
+      .from("entities")
+      .insert({
+        name,
+        type,
+        formation_state,
+        ein: ein || null,
+        formed_date: formed_date || null,
+        registered_agent: registered_agent || null,
+        address: address || null,
+        parent_entity_id: parent_entity_id || null,
+        notes: notes || null,
+      })
+      .select()
+      .single();
+
+    if (entityError) {
+      return NextResponse.json({ error: entityError.message }, { status: 500 });
+    }
+
+    // Create the initial registration for the formation state
+    const { error: regError } = await supabase.from("entity_registrations").insert({
+      entity_id: entity.id,
+      jurisdiction: formation_state,
+    });
+
+    if (regError) {
+      console.error("Failed to create initial registration:", regError.message);
+    }
+
+    // Auto-create trust_details record for trust entities
+    if (type === "trust") {
+      const { error: trustError } = await supabase.from("trust_details").insert({
+        entity_id: entity.id,
+        trust_type: "revocable",
+        situs_state: formation_state,
+      });
+
+      if (trustError) {
+        console.error("Failed to create trust details:", trustError.message);
+      }
+    }
+
+    return NextResponse.json(entity, { status: 201 });
+  } catch (err) {
+    console.error("POST /api/entities error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
