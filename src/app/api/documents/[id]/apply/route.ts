@@ -393,11 +393,13 @@ export async function POST(
           default:
             results.push({ action: item.action, success: false, error: `Unknown action: ${item.action}` });
         }
-      } catch (err) {
+      } catch (err: unknown) {
+        const errObj = err as Record<string, unknown>;
+        const message = errObj?.message ?? errObj?.details ?? errObj?.code ?? JSON.stringify(err) ?? 'Unknown error';
         results.push({
           action: item.action,
           success: false,
-          error: err instanceof Error ? err.message : 'Unknown error',
+          error: String(message),
         });
       }
     }
