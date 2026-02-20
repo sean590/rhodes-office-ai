@@ -67,6 +67,7 @@ export default function SettingsPage() {
   const [inviteRole, setInviteRole] = useState<UserRole>("viewer");
   const [inviting, setInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
   // Fetch current user info
   const fetchCurrentUser = useCallback(async () => {
@@ -131,6 +132,24 @@ export default function SettingsPage() {
       setError(err instanceof Error ? err.message : "Failed to update role");
     } finally {
       setUpdatingRole(null);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string, email: string) => {
+    if (!confirm(`Remove ${email || "this user"}? This will delete their account and revoke access.`)) return;
+    setDeletingUser(userId);
+    setError(null);
+    try {
+      const res = await fetch(`/api/users/${userId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete user");
+      }
+      await fetchUsers();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete user");
+    } finally {
+      setDeletingUser(null);
     }
   };
 
@@ -577,6 +596,20 @@ export default function SettingsPage() {
                       >
                         Joined
                       </th>
+                      <th
+                        style={{
+                          textAlign: "right",
+                          padding: "8px 12px",
+                          fontSize: 11,
+                          fontWeight: 500,
+                          color: "#9494a0",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.05em",
+                          borderBottom: "1px solid #e8e6df",
+                          width: 60,
+                        }}
+                      >
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -684,6 +717,32 @@ export default function SettingsPage() {
                                   }
                                 )
                               : "—"}
+                          </td>
+                          <td
+                            style={{
+                              padding: "10px 12px",
+                              borderBottom: "1px solid #f0eeea",
+                              textAlign: "right",
+                            }}
+                          >
+                            {!isSelf && (
+                              <button
+                                onClick={() => handleDeleteUser(u.id, u.email)}
+                                disabled={deletingUser === u.id}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  color: deletingUser === u.id ? "#bbbbc4" : "#dc2626",
+                                  cursor: deletingUser === u.id ? "not-allowed" : "pointer",
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  opacity: deletingUser === u.id ? 0.6 : 1,
+                                  padding: "4px 8px",
+                                }}
+                              >
+                                {deletingUser === u.id ? "Removing..." : "Remove"}
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );

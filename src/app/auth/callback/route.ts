@@ -33,13 +33,29 @@ export async function GET(request: Request) {
         });
       }
 
-      // Ensure user_profiles row exists (needed for chat_sessions FK, etc.)
-      await admin.from("user_profiles").upsert({
-        id: data.user.id,
-        role: "viewer",
-        display_name: data.user.user_metadata?.full_name || null,
-        avatar_url: data.user.user_metadata?.avatar_url || null,
-      }, { onConflict: "id", ignoreDuplicates: true });
+      // Ensure user_profiles row exists and update name/avatar from OAuth
+      const displayName = data.user.user_metadata?.full_name || null;
+      const avatarUrl = data.user.user_metadata?.avatar_url || null;
+
+      const { data: existingProfile } = await admin
+        .from("user_profiles")
+        .select("id")
+        .eq("id", data.user.id)
+        .maybeSingle();
+
+      if (existingProfile) {
+        // Update name/avatar on each login (picks up Google profile info)
+        await admin.from("user_profiles")
+          .update({ display_name: displayName, avatar_url: avatarUrl })
+          .eq("id", data.user.id);
+      } else {
+        await admin.from("user_profiles").insert({
+          id: data.user.id,
+          role: "viewer",
+          display_name: displayName,
+          avatar_url: avatarUrl,
+        });
+      }
 
       return NextResponse.redirect(`${origin}${next}`);
     }
