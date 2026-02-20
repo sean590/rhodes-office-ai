@@ -16,7 +16,7 @@ export function SearchInput({ value, onChange, placeholder = "Search..." }: Sear
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        style={{ background: "none", border: "none", outline: "none", color: "#1a1a1f", fontSize: 13, fontFamily: "inherit", width: 160 }}
+        style={{ background: "none", border: "none", outline: "none", color: "#1a1a1f", fontSize: 13, fontFamily: "inherit", flex: 1, minWidth: 0 }}
       />
     </div>
   );
