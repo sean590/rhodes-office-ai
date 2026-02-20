@@ -33,6 +33,14 @@ export async function GET(request: Request) {
         });
       }
 
+      // Ensure user_profiles row exists (needed for chat_sessions FK, etc.)
+      await admin.from("user_profiles").upsert({
+        id: data.user.id,
+        role: "viewer",
+        display_name: data.user.user_metadata?.full_name || null,
+        avatar_url: data.user.user_metadata?.avatar_url || null,
+      }, { onConflict: "id", ignoreDuplicates: true });
+
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

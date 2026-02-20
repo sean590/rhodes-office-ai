@@ -5,16 +5,28 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function GET() {
   try {
     const supabase = await createClient();
+    const admin = createAdminClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data, error } = await supabase
+    // Resolve internal user ID from auth external_id
+    const { data: internalUser } = await admin
+      .from("users")
+      .select("id")
+      .eq("external_id", user.id)
+      .single();
+
+    if (!internalUser) {
+      return NextResponse.json({ error: "User profile not found" }, { status: 404 });
+    }
+
+    const { data, error } = await admin
       .from("chat_sessions")
       .select("*")
-      .eq("user_id", user.id)
+      .eq("user_id", internalUser.id)
       .order("updated_at", { ascending: false });
 
     if (error) {
@@ -31,20 +43,31 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const supabase = await createClient();
+    const admin = createAdminClient();
     const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Resolve internal user ID from auth external_id
+    const { data: internalUser } = await admin
+      .from("users")
+      .select("id")
+      .eq("external_id", user.id)
+      .single();
+
+    if (!internalUser) {
+      return NextResponse.json({ error: "User profile not found" }, { status: 404 });
+    }
+
     const body = await request.json().catch(() => ({}));
     const title = body.title || "New Chat";
 
-    const admin = createAdminClient();
     const { data, error } = await admin
       .from("chat_sessions")
       .insert({
-        user_id: user.id,
+        user_id: internalUser.id,
         title,
       })
       .select()
