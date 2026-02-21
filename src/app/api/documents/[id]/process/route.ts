@@ -123,6 +123,7 @@ IMPORTANT: Always set "entity_id" to the UUID of the existing entity this docume
 
 ### Guidelines:
 - Match entity names to existing entities by name when possible. Use the entity's UUID in your data.
+- IMPORTANT: If you are proposing a "create_entity" action AND also proposing other actions (add_member, add_manager, add_registration, update_cap_table, add_trust_role, add_role, add_partnership_rep, add_custom_field, etc.) that reference the new entity, use "new_entity" as the entity_id placeholder. The system will automatically replace "new_entity" with the real UUID once the entity is created.
 - Match people/organizations to existing directory entries by name OR by their aliases (AKA names). For example, if a directory entry has name "Sean Demetree" with AKA "S. Demetree", a document referencing "S. Demetree" should use that existing directory entry's UUID, NOT propose a new one.
 - If a person is mentioned who doesn't exist in the directory (and doesn't match any aliases), propose creating a directory entry AND then reference their role.
 - For dollar amounts in cap table, convert to cents (integer). E.g., $100,000 = 10000000.

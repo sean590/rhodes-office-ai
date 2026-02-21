@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Badge } from "@/components/ui/badge";
@@ -2604,14 +2604,16 @@ function DocumentsTab({
             const trustDetailId = (entityData as Record<string, unknown> | null)?.trust_details
               ? ((entityData as Record<string, unknown>).trust_details as { id?: string })?.id
               : undefined;
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            const isValidUuid = (v: unknown) => typeof v === 'string' && uuidRegex.test(v);
             const fixedActions = pendingActions.map((a: ProposedAction) => {
               const d = a.data as Record<string, unknown>;
               if (!d) return a;
               let fixed = a;
-              if ('entity_id' in d && !d.entity_id) {
+              if ('entity_id' in d && !isValidUuid(d.entity_id)) {
                 fixed = { ...fixed, data: { ...d, entity_id: entityId } };
               }
-              if (a.action === 'add_trust_role' && 'trust_detail_id' in d && !d.trust_detail_id && trustDetailId) {
+              if (a.action === 'add_trust_role' && 'trust_detail_id' in d && !isValidUuid(d.trust_detail_id) && trustDetailId) {
                 fixed = { ...fixed, data: { ...(fixed.data as Record<string, unknown>), trust_detail_id: trustDetailId } };
               }
               return fixed;
@@ -3688,12 +3690,13 @@ function DocumentsTab({
 export default function EntityDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const entityId = params.id as string;
 
   const [entity, setEntity] = useState<EntityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState(searchParams.get("tab") || "overview");
 
   // Documents state
   const [documents, setDocuments] = useState<DocRecord[]>([]);

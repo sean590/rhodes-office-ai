@@ -31,7 +31,19 @@ export async function POST(
     // Track entity_id → trust_detail_id for entities created in this batch
     const createdTrustDetailIds = new Map<string, string>();
 
+    // Helper to validate UUIDs — replace placeholders like "new_entity" with the real entity ID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const resolveEntityId = (value: unknown): string | null => {
+      if (typeof value === 'string' && uuidRegex.test(value)) return value;
+      // Use already-created entity from this batch, or the document's associated entity
+      return firstCreatedEntityId || doc.entity_id || null;
+    };
+
     for (const item of actions) {
+      // Fix non-UUID entity_id placeholders (e.g. "new_entity") before processing
+      if (item.data?.entity_id && !uuidRegex.test(item.data.entity_id)) {
+        item.data.entity_id = resolveEntityId(item.data.entity_id);
+      }
       try {
         switch (item.action) {
           case 'create_entity': {
