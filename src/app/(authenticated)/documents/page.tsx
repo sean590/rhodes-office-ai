@@ -360,6 +360,28 @@ export default function DocumentsPage() {
   /* ---- Expandable row state ---- */
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
 
+  /* ---- Inline rename state ---- */
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  const handleRename = async (docId: string) => {
+    const trimmed = editingName.trim();
+    if (!trimmed) return;
+    try {
+      const res = await fetch(`/api/documents/${docId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) throw new Error("Rename failed");
+      setEditingDocId(null);
+      setEditingName("");
+      fetchAll();
+    } catch (err) {
+      console.error("Rename error:", err);
+    }
+  };
+
   const inputStyle: React.CSSProperties = {
     background: "#fafaf7",
     border: "1px solid #ddd9d0",
@@ -1027,9 +1049,56 @@ export default function DocumentsPage() {
                       background: "#fafaf7",
                     }}
                   >
-                    {/* Full document name */}
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 10 }}>
-                      {doc.name}
+                    {/* Full document name — inline rename */}
+                    <div style={{ marginBottom: 10 }}>
+                      {editingDocId === doc.id ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <input
+                            autoFocus
+                            value={editingName}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") handleRename(doc.id);
+                              if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
+                            }}
+                            style={{
+                              flex: 1,
+                              fontSize: 14,
+                              fontWeight: 600,
+                              color: "#1a1a1f",
+                              background: "#fff",
+                              border: "1px solid #ddd9d0",
+                              borderRadius: 6,
+                              padding: "4px 8px",
+                              fontFamily: "inherit",
+                              outline: "none",
+                            }}
+                          />
+                          <button
+                            onClick={() => handleRename(doc.id)}
+                            style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => { setEditingDocId(null); setEditingName(""); }}
+                            style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }}
+                            title="Rename"
+                            style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}
+                          >
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     {/* All tags */}
