@@ -15,6 +15,7 @@ export async function buildChatContext() {
     capTableRes,
     partnershipRepsRes,
     entityRolesRes,
+    documentsRes,
   ] = await Promise.all([
     supabase.from("entities").select("*").order("name"),
     supabase.from("directory_entries").select("*").order("name"),
@@ -27,6 +28,7 @@ export async function buildChatContext() {
     supabase.from("cap_table_entries").select("*"),
     supabase.from("entity_partnership_reps").select("*"),
     supabase.from("entity_roles").select("*"),
+    supabase.from("documents").select("id, name, document_type, document_category, year, entity_id, ai_extracted, ai_extraction, created_at").is("deleted_at", null).order("created_at", { ascending: false }),
   ]);
 
   const entities = entitiesRes.data || [];
@@ -40,6 +42,7 @@ export async function buildChatContext() {
   const capTable = capTableRes.data || [];
   const partnershipReps = partnershipRepsRes.data || [];
   const entityRoles = entityRolesRes.data || [];
+  const documents = documentsRes.data || [];
 
   // Build entity name lookup
   const entityNames: Record<string, string> = {};
@@ -126,7 +129,22 @@ When referencing entities, always include their exact name so the UI can link to
     context += '\n';
   }
 
-  context += `\nAnswer questions about entities, relationships, compliance, and organizational structure. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.`;
+  if (documents.length > 0) {
+    context += `\n## Documents (${documents.length} total)\n\n`;
+    for (const doc of documents) {
+      const entName = doc.entity_id ? entityNames[doc.entity_id] : null;
+      const extraction = doc.ai_extraction as { summary?: string } | null;
+      const summary = extraction?.summary;
+      context += `- ${doc.name}`;
+      if (doc.document_category) context += ` [${doc.document_category}]`;
+      if (entName) context += ` — ${entName}`;
+      if (doc.year) context += ` (${doc.year})`;
+      if (summary) context += ` — ${summary}`;
+      context += '\n';
+    }
+  }
+
+  context += `\nAnswer questions about entities, relationships, compliance, organizational structure, and documents. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.`;
 
   return context;
 }

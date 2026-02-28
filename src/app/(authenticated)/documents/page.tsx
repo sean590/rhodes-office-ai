@@ -6,10 +6,10 @@ import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
-import { DocIcon, SearchIcon, XIcon, UploadIcon, SparkleIcon, PlusIcon } from "@/components/ui/icons";
-import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES } from "@/lib/constants";
+import { DocIcon, SearchIcon, XIcon, UploadIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
+import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import type { DocumentType } from "@/lib/types/enums";
-import type { Document as DocRecord } from "@/lib/types/entities";
+import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -68,16 +68,17 @@ export default function DocumentsPage() {
 
   // Upload state
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadName, setUploadName] = useState("");
-  const [uploadType, setUploadType] = useState<DocumentType | "">("");
-  const [uploadYear, setUploadYear] = useState("");
-  const [uploadNotes, setUploadNotes] = useState("");
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadCategory, setUploadCategory] = useState<DocumentCategory | "">("");
   const [uploadEntityId, setUploadEntityId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Bulk processing state
+  const [bulkProcessing, setBulkProcessing] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
 
   // AI processing state
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -121,8 +122,12 @@ export default function DocumentsPage() {
   const filtered = useMemo(() => {
     let result = documents;
     if (categoryFilter !== "all") {
-      const catTypes = DOCUMENT_TYPE_CATEGORIES[categoryFilter]?.types || [];
-      result = result.filter((d) => catTypes.includes(d.document_type));
+      result = result.filter((d) => {
+        // Prefer document_category if available, fall back to deriving from type
+        if (d.document_category) return d.document_category === categoryFilter;
+        const catTypes = DOCUMENT_TYPE_CATEGORIES[categoryFilter]?.types || [];
+        return catTypes.includes(d.document_type);
+      });
     }
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -139,7 +144,7 @@ export default function DocumentsPage() {
   const aiProcessed = documents.filter((d) => d.ai_extracted).length;
   const categoryCounts: Record<string, number> = {};
   documents.forEach((d) => {
-    const cat = getDocCategory(d.document_type);
+    const cat = d.document_category || getDocCategory(d.document_type);
     categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
   });
   const topCategories = Object.entries(categoryCounts)
@@ -147,77 +152,96 @@ export default function DocumentsPage() {
     .slice(0, 3);
 
   /* ---- Upload ---- */
-  const handleFileSelect = (file: File) => {
-    setUploadFile(file);
-    if (!uploadName) {
-      setUploadName(file.name.replace(/\.[^/.]+$/, ""));
-    }
+  const handleFilesSelect = (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    setUploadFiles((prev) => {
+      const combined = [...prev, ...fileArray];
+      if (combined.length > 10) {
+        setUploadError("Maximum 10 files per upload. Remove some files and try again.");
+        return prev;
+      }
+      setUploadError(null);
+      return combined;
+    });
+  };
+
+  const removeFile = (index: number) => {
+    setUploadFiles((prev) => prev.filter((_, i) => i !== index));
+    setUploadError(null);
   };
 
   const handleUpload = async () => {
-    if (!uploadFile || !uploadType) return;
+    if (uploadFiles.length === 0 || !uploadCategory) return;
 
     setUploading(true);
     setUploadError(null);
+    const uploadedDocIds: string[] = [];
     try {
-      const formData = new FormData();
-      formData.append("file", uploadFile);
-      formData.append("document_type", uploadType);
-      formData.append("name", uploadName || uploadFile.name);
-      if (uploadYear) formData.append("year", uploadYear);
-      if (uploadNotes) formData.append("notes", uploadNotes);
-      if (uploadEntityId) formData.append("entity_id", uploadEntityId);
+      // Upload all files sequentially
+      for (const file of uploadFiles) {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("document_category", uploadCategory);
+        formData.append("name", file.name.replace(/\.[^/.]+$/, ""));
+        if (uploadEntityId) formData.append("entity_id", uploadEntityId);
 
-      const res = await fetch("/api/documents", {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Upload failed (${res.status})`);
+        const res = await fetch("/api/documents", {
+          method: "POST",
+          body: formData,
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || `Upload failed for ${file.name} (${res.status})`);
+        }
+        const doc = await res.json();
+        uploadedDocIds.push(doc.id);
       }
 
-      const doc = await res.json();
-
       // Reset form
-      setUploadFile(null);
-      setUploadName("");
-      setUploadType("");
-      setUploadYear("");
-      setUploadNotes("");
+      setUploadFiles([]);
+      setUploadCategory("");
       setUploadEntityId("");
       setUploadError(null);
       setShowUpload(false);
 
-      // Trigger AI processing automatically
-      setProcessingId(doc.id);
-      try {
-        const processRes = await fetch(`/api/documents/${doc.id}/process`, {
-          method: "POST",
-        });
-        if (processRes.ok) {
-          const result = await processRes.json();
-          const actions = result.actions || [];
-          setProcessResult({
-            docId: doc.id,
-            count: actions.length,
-            entityId: doc.entity_id || null,
-            actions,
+      // Process all uploaded docs with AI sequentially
+      setBulkProcessing(true);
+      setBulkProgress({ current: 0, total: uploadedDocIds.length });
+
+      for (let i = 0; i < uploadedDocIds.length; i++) {
+        setBulkProgress({ current: i + 1, total: uploadedDocIds.length });
+        try {
+          const processRes = await fetch(`/api/documents/${uploadedDocIds[i]}/process`, {
+            method: "POST",
           });
+          if (processRes.ok && uploadedDocIds.length === 1) {
+            // For single file uploads, show the result banner like before
+            const result = await processRes.json();
+            const actions = result.actions || [];
+            setProcessResult({
+              docId: uploadedDocIds[i],
+              count: actions.length,
+              entityId: result.entity_id || null,
+              actions,
+            });
+          }
+        } catch {
+          // AI processing failure is non-fatal
         }
-      } catch {
-        // AI processing failure is non-fatal
-      } finally {
-        setProcessingId(null);
       }
 
+      setBulkProcessing(false);
       fetchAll();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Upload failed";
       setUploadError(msg);
-    } finally {
       setUploading(false);
+      setBulkProcessing(false);
+      // Still refresh to show any docs that did upload
+      if (uploadedDocIds.length > 0) fetchAll();
+      return;
     }
+    setUploading(false);
   };
 
   /* ---- AI Process ---- */
@@ -333,14 +357,8 @@ export default function DocumentsPage() {
     })),
   ];
 
-  /* ---- Document type options ---- */
-  const docTypeOptions = Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([, cat]) => ({
-    label: cat.label,
-    types: cat.types.map((t: string) => ({
-      value: t,
-      label: DOCUMENT_TYPE_LABELS[t as DocumentType] || t,
-    })),
-  }));
+  /* ---- Expandable row state ---- */
+  const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
 
   const inputStyle: React.CSSProperties = {
     background: "#fafaf7",
@@ -396,7 +414,7 @@ export default function DocumentsPage() {
       </div>
 
       {/* AI Processing Banner */}
-      {processingId && (
+      {(processingId || bulkProcessing) && (
         <div
           style={{
             background: "rgba(45,90,61,0.06)",
@@ -412,7 +430,11 @@ export default function DocumentsPage() {
           }}
         >
           <SparkleIcon size={16} />
-          <span>Processing document with AI...</span>
+          <span>
+            {bulkProcessing
+              ? `Processing with AI... (${bulkProgress.current}/${bulkProgress.total})`
+              : "Processing document with AI..."}
+          </span>
           <span
             style={{
               display: "inline-block",
@@ -604,26 +626,22 @@ export default function DocumentsPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
             <UploadIcon size={16} />
             <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>
-              Upload Document
+              Upload Documents
             </span>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            {/* Document type */}
+            {/* Document category */}
             <div>
-              <label style={labelStyle}>Document Type *</label>
+              <label style={labelStyle}>Category *</label>
               <select
-                value={uploadType}
-                onChange={(e) => setUploadType(e.target.value as DocumentType)}
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value as DocumentCategory)}
                 style={inputStyle}
               >
-                <option value="">Select type...</option>
-                {docTypeOptions.map((group) => (
-                  <optgroup key={group.label} label={group.label}>
-                    {group.types.map((t) => (
-                      <option key={t.value} value={t.value}>{t.label}</option>
-                    ))}
-                  </optgroup>
+                <option value="">Select category...</option>
+                {DOCUMENT_CATEGORY_OPTIONS.map((cat) => (
+                  <option key={cat.value} value={cat.value}>{cat.label}</option>
                 ))}
               </select>
             </div>
@@ -646,42 +664,6 @@ export default function DocumentsPage() {
             </div>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 12, marginBottom: 12 }}>
-            {/* Document name */}
-            <div>
-              <label style={labelStyle}>Document Name</label>
-              <input
-                value={uploadName}
-                onChange={(e) => setUploadName(e.target.value)}
-                placeholder="Auto-filled from file name"
-                style={inputStyle}
-              />
-            </div>
-
-            {/* Year */}
-            <div>
-              <label style={labelStyle}>Year</label>
-              <input
-                value={uploadYear}
-                onChange={(e) => setUploadYear(e.target.value)}
-                placeholder="2024"
-                type="number"
-                style={inputStyle}
-              />
-            </div>
-          </div>
-
-          {/* Notes */}
-          <div style={{ marginBottom: 12 }}>
-            <label style={labelStyle}>Notes</label>
-            <input
-              value={uploadNotes}
-              onChange={(e) => setUploadNotes(e.target.value)}
-              placeholder="Optional notes..."
-              style={inputStyle}
-            />
-          </div>
-
           {/* File drop zone */}
           <div
             onClick={() => fileInputRef.current?.click()}
@@ -690,13 +672,12 @@ export default function DocumentsPage() {
             onDrop={(e) => {
               e.preventDefault();
               setDragOver(false);
-              const file = e.dataTransfer.files[0];
-              if (file) handleFileSelect(file);
+              if (e.dataTransfer.files.length > 0) handleFilesSelect(e.dataTransfer.files);
             }}
             style={{
               border: `2px dashed ${dragOver ? "#2d5a3d" : "#ddd9d0"}`,
               borderRadius: 8,
-              padding: uploadFile ? "12px 16px" : "24px 16px",
+              padding: uploadFiles.length > 0 ? "12px 16px" : "24px 16px",
               textAlign: "center",
               cursor: "pointer",
               marginBottom: 12,
@@ -707,40 +688,48 @@ export default function DocumentsPage() {
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               style={{ display: "none" }}
               onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleFileSelect(f);
+                if (e.target.files && e.target.files.length > 0) handleFilesSelect(e.target.files);
+                e.target.value = "";
               }}
             />
-            {uploadFile ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-                <DocIcon size={14} />
-                <span style={{ fontSize: 13, color: "#1a1a1f" }}>{uploadFile.name}</span>
-                <span style={{ fontSize: 11, color: "#9494a0" }}>
-                  ({formatFileSize(uploadFile.size)})
-                </span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setUploadFile(null); }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    color: "#c73e3e",
-                    padding: 2,
-                  }}
-                >
-                  <XIcon size={12} />
-                </button>
+            {uploadFiles.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {uploadFiles.map((file, idx) => (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
+                    <DocIcon size={14} />
+                    <span style={{ fontSize: 13, color: "#1a1a1f" }}>{file.name}</span>
+                    <span style={{ fontSize: 11, color: "#9494a0" }}>
+                      ({formatFileSize(file.size)})
+                    </span>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        cursor: "pointer",
+                        color: "#c73e3e",
+                        padding: 2,
+                      }}
+                    >
+                      <XIcon size={12} />
+                    </button>
+                  </div>
+                ))}
+                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
+                  Click or drop to add more (max 10)
+                </div>
               </div>
             ) : (
               <>
                 <UploadIcon size={20} />
                 <div style={{ fontSize: 13, color: "#6b6b76", marginTop: 6 }}>
-                  Drop a file here or click to browse
+                  Drop files here or click to browse
                 </div>
                 <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
-                  PDF, images, or text documents
+                  PDF, images, or text documents — up to 10 files
                 </div>
               </>
             )}
@@ -752,11 +741,8 @@ export default function DocumentsPage() {
               variant="secondary"
               onClick={() => {
                 setShowUpload(false);
-                setUploadFile(null);
-                setUploadName("");
-                setUploadType("");
-                setUploadYear("");
-                setUploadNotes("");
+                setUploadFiles([]);
+                setUploadCategory("");
                 setUploadEntityId("");
                 setUploadError(null);
               }}
@@ -766,9 +752,11 @@ export default function DocumentsPage() {
             <Button
               variant="primary"
               onClick={handleUpload}
-              disabled={uploading || !uploadFile || !uploadType}
+              disabled={uploading || uploadFiles.length === 0 || !uploadCategory}
             >
-              {uploading ? "Uploading..." : "Upload & Process with AI"}
+              {uploading
+                ? "Uploading..."
+                : `Upload ${uploadFiles.length || ""} File${uploadFiles.length !== 1 ? "s" : ""} & Process with AI`}
             </Button>
           </div>
 
@@ -806,7 +794,7 @@ export default function DocumentsPage() {
         />
         <StatCard
           label="Top Categories"
-          value={topCategories.length > 0 ? topCategories.map(([k]) => DOCUMENT_TYPE_CATEGORIES[k]?.label || k).join(", ") : "\u2014"}
+          value={topCategories.length > 0 ? topCategories.map(([k]) => DOCUMENT_CATEGORY_LABELS[k as DocumentCategory] || DOCUMENT_TYPE_CATEGORIES[k]?.label || k).join(", ") : "\u2014"}
           sub={topCategories.map(([, count]) => count).join(" / ") + " docs"}
         />
       </div>
@@ -909,7 +897,7 @@ export default function DocumentsPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 140px 130px 60px 80px 70px 160px",
+              gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
               gap: 8,
               padding: "10px 18px",
               borderBottom: "1px solid #e8e6df",
@@ -922,162 +910,234 @@ export default function DocumentsPage() {
           >
             <div>Document</div>
             <div>Entity</div>
-            <div>Type</div>
-            <div>Year</div>
+            <div>Tags</div>
             <div>Uploaded</div>
             <div style={{ textAlign: "right" }}>Size</div>
-            <div style={{ textAlign: "right" }}>Actions</div>
+            <div />
           </div>
 
           {/* Table rows */}
-          {filtered.map((doc) => (
-            <div
-              key={doc.id}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 140px 130px 60px 80px 70px 160px",
-                gap: 8,
-                padding: "10px 18px",
-                borderBottom: "1px solid #f8f7f4",
-                fontSize: 13,
-                alignItems: "center",
-              }}
-            >
-              {/* Document name + AI indicator */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                <DocIcon size={14} />
-                <span
+          {filtered.map((doc) => {
+            const isExpanded = expandedDocId === doc.id;
+            const docCategory = doc.document_category || getDocCategory(doc.document_type);
+            const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
+            const extraction = doc.ai_extraction as { summary?: string; actions?: unknown[] } | null;
+
+            return (
+              <div key={doc.id}>
+                {/* Compact row */}
+                <div
+                  onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
                   style={{
-                    fontWeight: 500,
-                    color: "#1a1a1f",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    display: "grid",
+                    gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
+                    gap: 8,
+                    padding: "10px 18px",
+                    borderBottom: isExpanded ? "none" : "1px solid #f8f7f4",
+                    fontSize: 13,
+                    alignItems: "center",
+                    cursor: "pointer",
+                    transition: "background 0.1s",
                   }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
                 >
-                  {doc.name}
-                </span>
-                {doc.ai_extracted && (
-                  <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
-                    <SparkleIcon size={12} />
+                  {/* Document name + AI indicator */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <DocIcon size={14} />
+                    <span
+                      style={{
+                        fontWeight: 500,
+                        color: "#1a1a1f",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {doc.name}
+                    </span>
+                    {doc.ai_extracted && (
+                      <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
+                        <SparkleIcon size={12} />
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Entity link */}
+                  {doc.entity_id ? (
+                    <Link
+                      href={`/entities/${doc.entity_id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      style={{
+                        fontSize: 12,
+                        color: "#3366a8",
+                        textDecoration: "none",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {doc.entity_name}
+                    </Link>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>
+                      Unassigned
+                    </span>
+                  )}
+
+                  {/* Tags — category pill */}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "#2d5a3d",
+                      background: "rgba(45,90,61,0.08)",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                      whiteSpace: "nowrap",
+                      display: "inline-block",
+                      width: "fit-content",
+                    }}
+                  >
+                    {categoryLabel}
                   </span>
+
+                  {/* Uploaded */}
+                  <span style={{ fontSize: 11, color: "#9494a0" }}>
+                    {formatRelativeDate(doc.created_at)}
+                  </span>
+
+                  {/* Size */}
+                  <span style={{ fontSize: 11, color: "#9494a0", textAlign: "right" }}>
+                    {formatFileSize(doc.file_size)}
+                  </span>
+
+                  {/* Expand indicator */}
+                  <div style={{ textAlign: "center", color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                    <DownIcon size={12} />
+                  </div>
+                </div>
+
+                {/* Expanded detail */}
+                {isExpanded && (
+                  <div
+                    style={{
+                      padding: "12px 18px 16px",
+                      borderBottom: "1px solid #e8e6df",
+                      background: "#fafaf7",
+                    }}
+                  >
+                    {/* Full document name */}
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 10 }}>
+                      {doc.name}
+                    </div>
+
+                    {/* All tags */}
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                        {categoryLabel}
+                      </span>
+                      {doc.document_type !== "other" && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                          {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
+                        </span>
+                      )}
+                      {doc.year && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
+                          {doc.year}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* AI Summary */}
+                    {extraction?.summary && (
+                      <div
+                        style={{
+                          background: "#fff",
+                          border: "1px solid #e8e6df",
+                          borderRadius: 6,
+                          padding: "10px 14px",
+                          fontSize: 12,
+                          color: "#4a4a52",
+                          lineHeight: 1.5,
+                          marginBottom: 12,
+                        }}
+                      >
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                          AI Summary
+                        </div>
+                        {extraction.summary}
+                      </div>
+                    )}
+
+                    {/* Details row */}
+                    <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
+                      <span>Size: {formatFileSize(doc.file_size)}</span>
+                      <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
+                      {doc.mime_type && <span>Type: {doc.mime_type}</span>}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => handleProcess(doc.id)}
+                        disabled={processingId === doc.id}
+                        style={{
+                          background: "none",
+                          border: "1px solid #e8e6df",
+                          borderRadius: 6,
+                          padding: "5px 12px",
+                          cursor: processingId === doc.id ? "wait" : "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 5,
+                          fontSize: 12,
+                          color: "#c47520",
+                          fontWeight: 500,
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        <SparkleIcon size={12} />
+                        {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
+                      </button>
+                      <button
+                        onClick={() => handleDownload(doc.id)}
+                        style={{
+                          background: "none",
+                          border: "1px solid #e8e6df",
+                          borderRadius: 6,
+                          padding: "5px 12px",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          color: "#3366a8",
+                          fontWeight: 500,
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Download
+                      </button>
+                      <button
+                        onClick={() => handleDelete(doc.id)}
+                        style={{
+                          background: "none",
+                          border: "1px solid #e8e6df",
+                          borderRadius: 6,
+                          padding: "5px 12px",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          color: "#c73e3e",
+                          fontWeight: 500,
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
-
-              {/* Entity link */}
-              {doc.entity_id ? (
-                <Link
-                  href={`/entities/${doc.entity_id}`}
-                  style={{
-                    fontSize: 12,
-                    color: "#3366a8",
-                    textDecoration: "none",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {doc.entity_name}
-                </Link>
-              ) : (
-                <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>
-                  Unassigned
-                </span>
-              )}
-
-              {/* Type badge */}
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "#2d5a3d",
-                  background: "rgba(45,90,61,0.08)",
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  whiteSpace: "nowrap",
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  display: "inline-block",
-                  maxWidth: "100%",
-                }}
-              >
-                {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
-              </span>
-
-              {/* Year */}
-              <span style={{ fontSize: 12, color: "#6b6b76" }}>
-                {doc.year || "\u2014"}
-              </span>
-
-              {/* Uploaded */}
-              <span style={{ fontSize: 11, color: "#9494a0" }}>
-                {formatRelativeDate(doc.created_at)}
-              </span>
-
-              {/* Size */}
-              <span style={{ fontSize: 11, color: "#9494a0", textAlign: "right" }}>
-                {formatFileSize(doc.file_size)}
-              </span>
-
-              {/* Actions */}
-              <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                <button
-                  onClick={() => handleProcess(doc.id)}
-                  disabled={processingId === doc.id}
-                  title="Process with AI"
-                  style={{
-                    background: "none",
-                    border: "1px solid #e8e6df",
-                    borderRadius: 5,
-                    padding: "3px 6px",
-                    cursor: processingId === doc.id ? "wait" : "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 3,
-                    fontSize: 11,
-                    color: "#c47520",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  <SparkleIcon size={11} />
-                  {processingId === doc.id ? "..." : "AI"}
-                </button>
-                <button
-                  onClick={() => handleDownload(doc.id)}
-                  style={{
-                    background: "none",
-                    border: "1px solid #e8e6df",
-                    borderRadius: 5,
-                    padding: "3px 8px",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    color: "#3366a8",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Download
-                </button>
-                <button
-                  onClick={() => handleDelete(doc.id)}
-                  style={{
-                    background: "none",
-                    border: "1px solid #e8e6df",
-                    borderRadius: 5,
-                    padding: "3px 6px",
-                    cursor: "pointer",
-                    fontSize: 11,
-                    color: "#c73e3e",
-                    fontWeight: 500,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  <XIcon size={11} />
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </Card>
       )}
     </div>

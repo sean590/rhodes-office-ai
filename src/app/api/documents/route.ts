@@ -38,7 +38,8 @@ export async function POST(request: Request) {
     const formData = await request.formData();
 
     const file = formData.get("file") as File | null;
-    const documentType = formData.get("document_type") as string;
+    const documentType = (formData.get("document_type") as string) || "other";
+    const documentCategory = formData.get("document_category") as string | null;
     const name = (formData.get("name") as string) || file?.name || "Untitled";
     const year = formData.get("year") as string;
     const notes = formData.get("notes") as string;
@@ -48,8 +49,8 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "File is required" }, { status: 400 });
     }
 
-    if (!documentType) {
-      return NextResponse.json({ error: "Document type is required" }, { status: 400 });
+    if (!documentCategory) {
+      return NextResponse.json({ error: "Document category is required" }, { status: 400 });
     }
 
     // Get current user
@@ -82,6 +83,7 @@ export async function POST(request: Request) {
         entity_id: entityId || null,
         name,
         document_type: documentType,
+        document_category: documentCategory,
         year: year ? parseInt(year) : null,
         file_path: filePath,
         file_size: file.size,

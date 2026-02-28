@@ -1,4 +1,5 @@
 import { Jurisdiction, TrustRoleType, DocumentType } from './types/enums';
+import type { DocumentCategory } from './types/entities';
 
 export const US_STATES: { value: Jurisdiction; label: string }[] = [
   { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' }, { value: 'AZ', label: 'Arizona' },
@@ -106,6 +107,28 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   consent_of_members: 'Consent of Members',
   meeting_minutes: 'Meeting Minutes',
   power_of_attorney: 'Power of Attorney',
+  other: 'Other',
+};
+
+export const DOCUMENT_CATEGORY_OPTIONS: { value: DocumentCategory; label: string }[] = [
+  { value: 'formation', label: 'Formation' },
+  { value: 'tax', label: 'Tax' },
+  { value: 'investor', label: 'Investor' },
+  { value: 'contracts', label: 'Contracts' },
+  { value: 'compliance', label: 'Compliance' },
+  { value: 'insurance', label: 'Insurance' },
+  { value: 'governance', label: 'Governance' },
+  { value: 'other', label: 'Other' },
+];
+
+export const DOCUMENT_CATEGORY_LABELS: Record<DocumentCategory, string> = {
+  formation: 'Formation',
+  tax: 'Tax',
+  investor: 'Investor',
+  contracts: 'Contracts',
+  compliance: 'Compliance',
+  insurance: 'Insurance',
+  governance: 'Governance',
   other: 'Other',
 };
 

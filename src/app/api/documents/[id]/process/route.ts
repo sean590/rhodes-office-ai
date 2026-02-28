@@ -91,6 +91,9 @@ You MUST respond with valid JSON only — no markdown, no explanation. Return an
 \`\`\`json
 {
   "entity_id": "uuid of the primary existing entity this document is about, or null if proposing a new entity",
+  "summary": "A 2-3 sentence plain-text summary of what this document is and its key details (dates, parties, amounts, etc.)",
+  "document_type": "the specific document type from the list below that best matches this document",
+  "document_category": "the broad category: formation | tax | investor | contracts | compliance | insurance | governance | other",
   "actions": [
     {
       "action": "create_entity" | "update_entity" | "create_relationship" | "add_member" | "add_manager" | "add_registration" | "update_registration" | "add_trust_role" | "update_trust_details" | "update_cap_table" | "create_directory_entry" | "add_custom_field" | "add_partnership_rep" | "add_role",
@@ -101,6 +104,16 @@ You MUST respond with valid JSON only — no markdown, no explanation. Return an
   ]
 }
 \`\`\`
+
+### Document Type values (pick the most specific match):
+Formation: operating_agreement, amended_operating_agreement, certificate_of_formation, articles_of_incorporation, articles_of_organization, bylaws, partnership_agreement, trust_agreement, trust_amendment
+Tax: ein_letter, tax_return_1065, tax_return_1120s, tax_return_1041, tax_return_1040, k1, w9, w8ben, ca_form_3522, ca_form_3536, ca_form_100es, franchise_tax_payment
+Investor: subscription_agreement, capital_call_notice, distribution_notice, investor_questionnaire, side_letter, ppm, cap_table
+Contracts: management_agreement, advisory_agreement, consulting_agreement, service_agreement, license_agreement, lease_agreement, promissory_note, loan_agreement, guarantee, assignment, amendment
+Compliance: annual_report, statement_of_information, certificate_of_good_standing, foreign_qualification, registered_agent_appointment
+Insurance: certificate_of_insurance, insurance_policy
+Governance: board_resolution, consent_of_members, meeting_minutes, power_of_attorney
+Other: other
 
 IMPORTANT: Always set "entity_id" to the UUID of the existing entity this document primarily belongs to. This is used to associate the document with the correct entity. Even if you have zero proposed actions (all data is already up to date), you MUST still identify the entity. Only set it to null if the document is about a brand new entity that needs to be created.
 
@@ -273,9 +286,12 @@ ${text}
     const claudeResult = await claudeResponse.json();
     const responseText = claudeResult.content?.[0]?.text || "[]";
 
-    // Parse the response — Claude should return JSON object with entity_id + actions
+    // Parse the response — Claude should return JSON object with entity_id + actions + summary + type info
     let proposedActions: unknown[] = [];
     let identifiedEntityId: string | null = null;
+    let summary: string | null = null;
+    let aiDocumentType: string | null = null;
+    let aiDocumentCategory: string | null = null;
     try {
       // Strip any markdown code fences if present
       const cleanJson = responseText.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -287,6 +303,9 @@ ${text}
       } else if (parsed && typeof parsed === 'object') {
         identifiedEntityId = parsed.entity_id || null;
         proposedActions = Array.isArray(parsed.actions) ? parsed.actions : [];
+        summary = parsed.summary || null;
+        aiDocumentType = parsed.document_type || null;
+        aiDocumentCategory = parsed.document_category || null;
       }
     } catch {
       console.error("Failed to parse Claude response:", responseText);
@@ -296,11 +315,19 @@ ${text}
     // Auto-associate document with identified entity if it doesn't have one
     const docUpdate: Record<string, unknown> = {
       ai_extracted: true,
-      ai_extraction: { actions: proposedActions, identified_entity_id: identifiedEntityId },
+      ai_extraction: { actions: proposedActions, identified_entity_id: identifiedEntityId, summary },
       ai_extracted_at: new Date().toISOString(),
     };
     if (!doc.entity_id && identifiedEntityId) {
       docUpdate.entity_id = identifiedEntityId;
+    }
+    // Update document_type if AI identified a specific type (and current is 'other')
+    if (aiDocumentType && (doc.document_type === 'other' || !doc.document_type)) {
+      docUpdate.document_type = aiDocumentType;
+    }
+    // Update document_category if AI identified one
+    if (aiDocumentCategory) {
+      docUpdate.document_category = aiDocumentCategory;
     }
 
     const { error: updateError } = await admin
@@ -316,6 +343,9 @@ ${text}
       status: "processed",
       actions: proposedActions,
       entity_id: identifiedEntityId,
+      summary,
+      document_type: aiDocumentType,
+      document_category: aiDocumentCategory,
     });
   } catch (err) {
     console.error("POST /api/documents/[id]/process error:", err);

@@ -153,11 +153,14 @@ export interface CustomFieldWithValue extends CustomFieldDefinition {
   value: CustomFieldValue | null;
 }
 
+export type DocumentCategory = 'formation' | 'tax' | 'investor' | 'contracts' | 'compliance' | 'insurance' | 'governance' | 'other';
+
 export interface Document {
   id: string;
   entity_id: string;
   name: string;
   document_type: DocumentType;
+  document_category: DocumentCategory | null;
   year: number | null;
   file_path: string;
   file_size: number | null;
