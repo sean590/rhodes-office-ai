@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { session_id, message } = body;
+    const { session_id, message, page_context } = body;
 
     if (!session_id || !message) {
       return NextResponse.json({ error: "session_id and message are required" }, { status: 400 });
@@ -41,7 +41,21 @@ export async function POST(request: Request) {
       .order("created_at", { ascending: true });
 
     // Build context
-    const systemPrompt = await buildChatContext();
+    let systemPrompt = await buildChatContext();
+
+    // Append page context if provided
+    if (page_context?.entityId && page_context?.entityName) {
+      systemPrompt += `\n\nThe user is currently viewing the entity detail page for "${page_context.entityName}" (ID: ${page_context.entityId}). If they ask questions like "what are the managers?" or refer to "this entity," they mean this entity.`;
+    } else if (page_context?.page === "documents_list") {
+      systemPrompt += `\n\nThe user is currently viewing the Documents page.`;
+      if (page_context.filters?.entityId) {
+        systemPrompt += ` They have filtered to a specific entity.`;
+      }
+    } else if (page_context?.page === "directory") {
+      systemPrompt += `\n\nThe user is currently viewing the Directory page.`;
+    } else if (page_context?.page === "relationships") {
+      systemPrompt += `\n\nThe user is currently viewing the Relationships page.`;
+    }
 
     // Build messages array for Claude
     const messages = (history || []).map(m => ({

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
 import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, SearchIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
@@ -4449,6 +4450,19 @@ export default function EntityDetailPage() {
   useEffect(() => {
     fetchPicklist();
   }, [fetchPicklist]);
+
+  // Register page context for chat drawer
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    if (entity) {
+      setPageContext({
+        page: "entity_detail",
+        entityId: entity.id,
+        entityName: entity.name,
+      });
+    }
+    return () => setPageContext(null);
+  }, [entity?.id, entity?.name, setPageContext]);
 
   /* ---- Loading state ---- */
   if (loading) {

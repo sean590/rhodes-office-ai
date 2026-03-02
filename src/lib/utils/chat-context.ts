@@ -55,7 +55,8 @@ export async function buildChatContext() {
 
   let context = `You are an AI assistant for Rhodes, a family office entity management platform. You have full knowledge of all entities, relationships, directory entries, compliance filings, and financial data in the system.
 
-When referencing entities, always include their exact name so the UI can link to them.
+When referencing entities, always use their exact name as it appears in the database so the UI can create clickable links.
+When referencing documents, use the document name and include the year if available (e.g., "K-1 Tax Document (2023)").
 
 ## Entities (${entities.length} total)\n\n`;
 

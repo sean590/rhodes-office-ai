@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ChatIcon, SparkleIcon, PlusIcon, SearchIcon } from "@/components/ui/icons";
+import { MessageBubble, ThinkingBubble, StreamingBubble } from "@/components/chat/message-bubble";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { readChatStream } from "@/lib/utils/chat-stream";
+import type { LinkableRef } from "@/lib/utils/linkify";
 import type { ChatSession, ChatMessage } from "@/lib/types/chat";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -37,65 +41,6 @@ function relativeTime(dateStr: string): string {
   });
 }
 
-/**
- * Very minimal markdown-to-HTML for assistant messages.
- * Handles: **bold**, *italic*, `code`, ### headings, - bullet lists, \n\n paragraphs
- */
-function renderMarkdown(text: string): string {
-  let html = text
-    // Escape HTML entities
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    // Code blocks (```)
-    .replace(/```([\s\S]*?)```/g, '<pre style="background:#f0eeea;padding:10px 14px;border-radius:6px;font-size:12px;overflow-x:auto;margin:8px 0;font-family:monospace">$1</pre>')
-    // Inline code
-    .replace(/`([^`]+)`/g, '<code style="background:#f0eeea;padding:1px 5px;border-radius:3px;font-size:12px;font-family:monospace">$1</code>')
-    // Bold
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    // Italic
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    // Headings
-    .replace(/^### (.+)$/gm, '<div style="font-weight:700;font-size:14px;margin:12px 0 4px">$1</div>')
-    .replace(/^## (.+)$/gm, '<div style="font-weight:700;font-size:15px;margin:14px 0 6px">$1</div>')
-    .replace(/^# (.+)$/gm, '<div style="font-weight:700;font-size:16px;margin:16px 0 6px">$1</div>')
-    // Bullet lists
-    .replace(/^- (.+)$/gm, '<div style="padding-left:16px;position:relative;margin:2px 0"><span style="position:absolute;left:4px">•</span>$1</div>')
-    // Numbered lists
-    .replace(/^(\d+)\. (.+)$/gm, '<div style="padding-left:20px;position:relative;margin:2px 0"><span style="position:absolute;left:0;font-weight:600">$1.</span>$2</div>')
-    // Line breaks (double newline = paragraph break, single = <br>)
-    .replace(/\n\n/g, '<div style="margin:10px 0"></div>')
-    .replace(/\n/g, "<br>");
-
-  return html;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Entity linking helper                                              */
-/* ------------------------------------------------------------------ */
-
-interface EntityRef {
-  id: string;
-  name: string;
-}
-
-function linkifyEntities(html: string, entities: EntityRef[]): string {
-  // Sort longest names first to avoid partial matches
-  const sorted = [...entities].sort((a, b) => b.name.length - a.name.length);
-  let result = html;
-  for (const entity of sorted) {
-    // Escape special regex chars in entity name
-    const escaped = entity.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    // Only replace text outside of existing HTML tags
-    const regex = new RegExp(`(?<![">])\\b(${escaped})\\b(?![<"])`, "g");
-    result = result.replace(
-      regex,
-      `<a href="/entities/${entity.id}" style="color:#2d5a3d;font-weight:600;text-decoration:underline;text-decoration-color:rgba(45,90,61,0.3);text-underline-offset:2px;cursor:pointer">$1</a>`
-    );
-  }
-  return result;
-}
-
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -110,14 +55,21 @@ export default function ChatPage() {
   const [streamingText, setStreamingText] = useState("");
   const [loadingSessions, setLoadingSessions] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
-  const [entities, setEntities] = useState<EntityRef[]>([]);
+  const [refs, setRefs] = useState<LinkableRef[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
   const [mobileShowChat, setMobileShowChat] = useState(false);
 
   const isMobile = useIsMobile();
+  const setPageContext = useSetPageContext();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Register page context (so drawer knows we're on /chat)
+  useEffect(() => {
+    setPageContext({ page: "chat" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   // -------------------------------------------------------------------
   // Fetch sessions
@@ -140,15 +92,17 @@ export default function ChatPage() {
   // Fetch entities (for linking)
   // -------------------------------------------------------------------
 
-  const fetchEntities = useCallback(async () => {
+  const fetchRefs = useCallback(async () => {
     try {
       const res = await fetch("/api/entities");
       if (!res.ok) return;
       const data = await res.json();
-      setEntities(
+      setRefs(
         (data || []).map((e: { id: string; name: string }) => ({
           id: e.id,
           name: e.name,
+          type: "entity" as const,
+          href: `/entities/${e.id}`,
         }))
       );
     } catch {
@@ -158,8 +112,8 @@ export default function ChatPage() {
 
   useEffect(() => {
     fetchSessions();
-    fetchEntities();
-  }, [fetchSessions, fetchEntities]);
+    fetchRefs();
+  }, [fetchSessions, fetchRefs]);
 
   // -------------------------------------------------------------------
   // Load a session's messages
@@ -266,36 +220,7 @@ export default function ChatPage() {
           throw new Error("Failed to send message");
         }
 
-        // Read SSE stream
-        const reader = res.body?.getReader();
-        if (!reader) throw new Error("No reader");
-
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let fullText = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-
-          for (const line of lines) {
-            if (line.startsWith("data: ")) {
-              try {
-                const parsed = JSON.parse(line.slice(6));
-                if (parsed.text) {
-                  fullText += parsed.text;
-                  setStreamingText(fullText);
-                }
-              } catch {
-                // Skip
-              }
-            }
-          }
-        }
+        const fullText = await readChatStream(res, setStreamingText);
 
         // Streaming complete — add assistant message
         if (fullText) {
@@ -890,97 +815,18 @@ export default function ChatPage() {
               <MessageBubble
                 key={msg.id}
                 message={msg}
-                entities={entities}
+                refs={refs}
               />
             ))}
 
             {/* Streaming message */}
             {streamingText && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-start",
-                }}
-              >
-                <div
-                  style={{
-                    maxWidth: "85%",
-                    padding: "14px 18px",
-                    borderRadius: "16px 16px 16px 4px",
-                    background: "#ffffff",
-                    border: "1px solid #e8e6df",
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                    color: "#1a1a1f",
-                  }}
-                >
-                  <div
-                    dangerouslySetInnerHTML={{
-                      __html: renderMarkdown(streamingText),
-                    }}
-                  />
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 6,
-                      height: 16,
-                      background: "#2d5a3d",
-                      marginLeft: 2,
-                      verticalAlign: "text-bottom",
-                      animation: "blink 1s step-end infinite",
-                    }}
-                  />
-                  <style>{`@keyframes blink { 50% { opacity: 0; } }`}</style>
-                </div>
-              </div>
+              <StreamingBubble text={streamingText} />
             )}
 
             {/* Thinking indicator */}
             {sending && !streamingText && (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "flex-start",
-                }}
-              >
-                <div
-                  style={{
-                    padding: "14px 18px",
-                    borderRadius: "16px 16px 16px 4px",
-                    background: "#ffffff",
-                    border: "1px solid #e8e6df",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ display: "flex", gap: 4 }}>
-                    {[0, 1, 2].map((i) => (
-                      <span
-                        key={i}
-                        style={{
-                          width: 6,
-                          height: 6,
-                          borderRadius: "50%",
-                          background: "#9494a0",
-                          display: "inline-block",
-                          animation: `dotPulse 1.4s ease-in-out ${i * 0.2}s infinite`,
-                        }}
-                      />
-                    ))}
-                    <style>{`@keyframes dotPulse { 0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }`}</style>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "#9494a0",
-                      marginLeft: 4,
-                    }}
-                  >
-                    Thinking...
-                  </span>
-                </div>
-              </div>
+              <ThinkingBubble />
             )}
 
             <div ref={messagesEndRef} />
@@ -1096,71 +942,6 @@ export default function ChatPage() {
             line.
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  MessageBubble sub-component                                        */
-/* ------------------------------------------------------------------ */
-
-function MessageBubble({
-  message,
-  entities,
-}: {
-  message: ChatMessage;
-  entities: EntityRef[];
-}) {
-  const isUser = message.role === "user";
-
-  const bubbleStyle: React.CSSProperties = isUser
-    ? {
-        maxWidth: "75%",
-        padding: "12px 16px",
-        borderRadius: "16px 16px 4px 16px",
-        background: "#e8f5e9",
-        border: "1px solid #c8e6c9",
-        fontSize: 13,
-        lineHeight: 1.5,
-        color: "#1a1a1f",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
-      }
-    : {
-        maxWidth: "85%",
-        padding: "14px 18px",
-        borderRadius: "16px 16px 16px 4px",
-        background: "#ffffff",
-        border: "1px solid #e8e6df",
-        fontSize: 13,
-        lineHeight: 1.6,
-        color: "#1a1a1f",
-      };
-
-  const alignStyle: React.CSSProperties = {
-    display: "flex",
-    justifyContent: isUser ? "flex-end" : "flex-start",
-  };
-
-  if (isUser) {
-    return (
-      <div style={alignStyle}>
-        <div style={bubbleStyle}>{message.content}</div>
-      </div>
-    );
-  }
-
-  // Assistant: render markdown + entity links
-  let html = renderMarkdown(message.content);
-  if (entities.length > 0) {
-    html = linkifyEntities(html, entities);
-  }
-
-  return (
-    <div style={alignStyle}>
-      <div style={bubbleStyle}>
-        <div dangerouslySetInnerHTML={{ __html: html }} />
       </div>
     </div>
   );

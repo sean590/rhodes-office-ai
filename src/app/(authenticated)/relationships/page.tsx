@@ -11,6 +11,7 @@ import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES } from "@/lib/constants";
 import type { DocumentType } from "@/lib/types/enums";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -182,6 +183,12 @@ export default function RelationshipsPage() {
     fetchRelationships();
     fetchPicklist();
   }, [fetchRelationships, fetchPicklist]);
+
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    setPageContext({ page: "relationships" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   // -------------------------------------------------------------------
   // Derived data

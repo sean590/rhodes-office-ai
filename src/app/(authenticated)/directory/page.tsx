@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { PlusIcon, XIcon, BuildingIcon, AlertIcon } from "@/components/ui/icons";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -120,6 +121,12 @@ export default function DirectoryPage() {
   useEffect(() => {
     fetchEntries();
   }, [fetchEntries]);
+
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    setPageContext({ page: "directory" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   // -----------------------------------------------------------------------
   // Mutations

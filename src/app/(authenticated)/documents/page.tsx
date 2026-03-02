@@ -11,6 +11,7 @@ import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
@@ -112,6 +113,12 @@ export default function DocumentsPage() {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    setPageContext({ page: "documents_list" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   /** Light refresh — updates documents list without full-page loading state */
   const refreshDocuments = useCallback(async () => {

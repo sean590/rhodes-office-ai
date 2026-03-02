@@ -12,6 +12,7 @@ import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS } from "@/lib/utils/entity-color
 import { maskEin } from "@/lib/utils/format";
 import { getStateLabel } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 import type { EntityType } from "@/lib/types/enums";
 
 /* ------------------------------------------------------------------ */
@@ -87,6 +88,12 @@ export default function EntitiesPage() {
     }
     load();
   }, []);
+
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    setPageContext({ page: "entities_list" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   /* Filtered list */
   const filtered = useMemo(() => {

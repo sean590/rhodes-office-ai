@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useSetPageContext } from "@/components/chat/page-context-provider";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -256,6 +257,12 @@ export default function SettingsPage() {
       setLoading(false)
     );
   }, [fetchCurrentUser, fetchUsers]);
+
+  const setPageContext = useSetPageContext();
+  useEffect(() => {
+    setPageContext({ page: "settings" });
+    return () => setPageContext(null);
+  }, [setPageContext]);
 
   // Change a user's role
   const handleRoleChange = async (userId: string, newRole: UserRole) => {
