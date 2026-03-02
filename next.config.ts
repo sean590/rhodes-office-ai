@@ -38,7 +38,6 @@ export default withSentryConfig(nextConfig, {
   project: "rhodesoffice",
   silent: !process.env.CI,
   widenClientFileUpload: true,
-  disableLogger: true,
   tunnelRoute: "/monitoring",
   sourcemaps: {
     deleteSourcemapsAfterUpload: true,

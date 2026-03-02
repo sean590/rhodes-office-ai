@@ -21,6 +21,11 @@
     "resend": "^6.9.3",
     "zod": "^4.3.6"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@sentry/cli"
+    ]
+  },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
