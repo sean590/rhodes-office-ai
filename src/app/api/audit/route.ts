@@ -20,7 +20,7 @@ export async function GET(request: Request) {
 
     let query = supabase
       .from("audit_log")
-      .select("*, users:user_id(display_name, email)")
+      .select("*")
       .order("created_at", { ascending: false })
       .limit(Math.min(limit, 200));
 
