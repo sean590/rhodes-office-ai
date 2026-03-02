@@ -196,7 +196,7 @@ export function calculateNextDueDate(
     case "relative_to_fiscal_year_end": {
       // Assumes calendar year (Dec 31 FY end) for now
       const fyEndMonth = 11; // December (0-indexed)
-      let year = now.getFullYear();
+      const year = now.getFullYear();
       const dueMonth = fyEndMonth + formula.month_offset;
 
       let candidate = new Date(year, dueMonth, formula.day);
@@ -272,7 +272,7 @@ export function calculateNextDueDateAfterCompletion(
 
     case "relative_to_fiscal_year_end": {
       const fyEndMonth = 11;
-      let year = completed.getFullYear();
+      const year = completed.getFullYear();
       const dueMonth = fyEndMonth + formula.month_offset;
       let candidate = new Date(year, dueMonth, formula.day);
       if (candidate <= completed) {

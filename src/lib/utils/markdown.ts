@@ -4,7 +4,7 @@
  * - bullet lists, numbered lists, \n\n paragraphs
  */
 export function renderMarkdown(text: string): string {
-  let html = text
+  const html = text
     // Escape HTML entities
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

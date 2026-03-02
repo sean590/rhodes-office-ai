@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
@@ -185,12 +186,8 @@ export default function NewEntityPage() {
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
       {/* Back link */}
-      <a
+      <Link
         href="/entities"
-        onClick={(e) => {
-          e.preventDefault();
-          router.push("/entities");
-        }}
         style={{
           fontSize: 13,
           color: "#9494a0",
@@ -199,7 +196,7 @@ export default function NewEntityPage() {
         }}
       >
         &larr; Back to Entities
-      </a>
+      </Link>
 
       {/* Page title */}
       <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a1f", margin: "12px 0 20px" }}>

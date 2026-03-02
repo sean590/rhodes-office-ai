@@ -13,11 +13,14 @@ export async function PUT(
     const { trust_type, trust_date, grantor_name, situs_state } = body;
 
     // Find or create trust_details for this entity
-    let { data: trustDetails, error: fetchError } = await supabase
+    const fetchResult = await supabase
       .from("trust_details")
       .select("id")
       .eq("entity_id", id)
       .maybeSingle();
+
+    const fetchError = fetchResult.error;
+    let trustDetails = fetchResult.data;
 
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
