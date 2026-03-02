@@ -599,7 +599,7 @@ export default function ChatPage() {
                   margin: "0 0 8px",
                 }}
               >
-                Plinth AI Assistant
+                Rhodes AI
               </h2>
               <p
                 style={{

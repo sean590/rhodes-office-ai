@@ -1,4 +1,4 @@
-import { Jurisdiction, TrustRoleType, DocumentType } from './types/enums';
+import { Jurisdiction, TrustRoleType } from './types/enums';
 import type { DocumentCategory } from './types/entities';
 
 export const US_STATES: { value: Jurisdiction; label: string }[] = [
@@ -56,7 +56,7 @@ export function getStateLabel(code: Jurisdiction): string {
   return US_STATES.find(s => s.value === code)?.label || code;
 }
 
-export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
+export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   operating_agreement: 'Operating Agreement',
   amended_operating_agreement: 'Amended Operating Agreement',
   certificate_of_formation: 'Certificate of Formation',
@@ -77,7 +77,7 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   ca_form_3522: 'CA Form 3522 (LLC Tax Voucher)',
   ca_form_3536: 'CA Form 3536 (Estimated Fee)',
   ca_form_100es: 'CA Form 100-ES (Estimated Tax)',
-  franchise_tax_payment: 'Franchise Tax Payment',
+  franchise_tax_payment: 'State Tax Payment',
   subscription_agreement: 'Subscription Agreement',
   capital_call_notice: 'Capital Call Notice',
   distribution_notice: 'Distribution Notice',
@@ -107,6 +107,8 @@ export const DOCUMENT_TYPE_LABELS: Record<DocumentType, string> = {
   consent_of_members: 'Consent of Members',
   meeting_minutes: 'Meeting Minutes',
   power_of_attorney: 'Power of Attorney',
+  payment_confirmation: 'Payment Confirmation',
+  business_license_receipt: 'Business License Receipt',
   other: 'Other',
 };
 
@@ -132,7 +134,7 @@ export const DOCUMENT_CATEGORY_LABELS: Record<DocumentCategory, string> = {
   other: 'Other',
 };
 
-export const DOCUMENT_TYPE_CATEGORIES: Record<string, { label: string; types: DocumentType[] }> = {
+export const DOCUMENT_TYPE_CATEGORIES: Record<string, { label: string; types: string[] }> = {
   formation: {
     label: 'Formation',
     types: ['operating_agreement', 'amended_operating_agreement', 'certificate_of_formation', 'articles_of_incorporation', 'articles_of_organization', 'bylaws', 'partnership_agreement', 'trust_agreement', 'trust_amendment'],

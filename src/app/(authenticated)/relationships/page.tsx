@@ -539,32 +539,6 @@ export default function RelationshipsPage() {
       </div>
 
       {/* ----------------------------------------------------------------- */}
-      {/* Stats cards                                                        */}
-      {/* ----------------------------------------------------------------- */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 14,
-          marginBottom: 24,
-        }}
-      >
-        <StatCard
-          label="Total Relationships"
-          value={relationships.length}
-        />
-        <StatCard
-          label="Fees & Mgmt (Annual)"
-          value={formatMoney(totalAnnualFees)}
-          color="#c73e3e"
-        />
-        <StatCard
-          label="External Parties"
-          value={externalParties.size}
-        />
-      </div>
-
-      {/* ----------------------------------------------------------------- */}
       {/* New relationship form                                              */}
       {/* ----------------------------------------------------------------- */}
       {showForm && (

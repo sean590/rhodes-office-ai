@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
 import { DocIcon, SearchIcon, XIcon, UploadIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
+import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
+import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
@@ -66,19 +68,10 @@ export default function DocumentsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Upload state
+  // Pipeline upload state
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadCategory, setUploadCategory] = useState<DocumentCategory | "">("");
-  const [uploadEntityId, setUploadEntityId] = useState("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Bulk processing state
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  const [pipelineBatchId, setPipelineBatchId] = useState<string | null>(null);
+  const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
 
   // AI processing state
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -118,6 +111,17 @@ export default function DocumentsPage() {
     fetchAll();
   }, [fetchAll]);
 
+  /** Light refresh — updates documents list without full-page loading state */
+  const refreshDocuments = useCallback(async () => {
+    try {
+      const res = await fetch("/api/documents");
+      if (res.ok) {
+        const allDocs: DocWithEntity[] = await res.json();
+        setDocuments(allDocs);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   /* ---- Filtered documents ---- */
   const filtered = useMemo(() => {
     let result = documents;
@@ -150,99 +154,6 @@ export default function DocumentsPage() {
   const topCategories = Object.entries(categoryCounts)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
-
-  /* ---- Upload ---- */
-  const handleFilesSelect = (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    setUploadFiles((prev) => {
-      const combined = [...prev, ...fileArray];
-      if (combined.length > 10) {
-        setUploadError("Maximum 10 files per upload. Remove some files and try again.");
-        return prev;
-      }
-      setUploadError(null);
-      return combined;
-    });
-  };
-
-  const removeFile = (index: number) => {
-    setUploadFiles((prev) => prev.filter((_, i) => i !== index));
-    setUploadError(null);
-  };
-
-  const handleUpload = async () => {
-    if (uploadFiles.length === 0 || !uploadCategory) return;
-
-    setUploading(true);
-    setUploadError(null);
-    const uploadedDocIds: string[] = [];
-    try {
-      // Upload all files sequentially
-      for (const file of uploadFiles) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("document_category", uploadCategory);
-        formData.append("name", file.name.replace(/\.[^/.]+$/, ""));
-        if (uploadEntityId) formData.append("entity_id", uploadEntityId);
-
-        const res = await fetch("/api/documents", {
-          method: "POST",
-          body: formData,
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `Upload failed for ${file.name} (${res.status})`);
-        }
-        const doc = await res.json();
-        uploadedDocIds.push(doc.id);
-      }
-
-      // Reset form
-      setUploadFiles([]);
-      setUploadCategory("");
-      setUploadEntityId("");
-      setUploadError(null);
-      setShowUpload(false);
-
-      // Process all uploaded docs with AI sequentially
-      setBulkProcessing(true);
-      setBulkProgress({ current: 0, total: uploadedDocIds.length });
-
-      for (let i = 0; i < uploadedDocIds.length; i++) {
-        setBulkProgress({ current: i + 1, total: uploadedDocIds.length });
-        try {
-          const processRes = await fetch(`/api/documents/${uploadedDocIds[i]}/process`, {
-            method: "POST",
-          });
-          if (processRes.ok && uploadedDocIds.length === 1) {
-            // For single file uploads, show the result banner like before
-            const result = await processRes.json();
-            const actions = result.actions || [];
-            setProcessResult({
-              docId: uploadedDocIds[i],
-              count: actions.length,
-              entityId: result.entity_id || null,
-              actions,
-            });
-          }
-        } catch {
-          // AI processing failure is non-fatal
-        }
-      }
-
-      setBulkProcessing(false);
-      fetchAll();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setUploadError(msg);
-      setUploading(false);
-      setBulkProcessing(false);
-      // Still refresh to show any docs that did upload
-      if (uploadedDocIds.length > 0) fetchAll();
-      return;
-    }
-    setUploading(false);
-  };
 
   /* ---- AI Process ---- */
   const handleProcess = async (docId: string) => {
@@ -429,14 +340,34 @@ export default function DocumentsPage() {
         </div>
         <Button
           variant="primary"
-          onClick={() => setShowUpload(!showUpload)}
+          onClick={async () => {
+            if (showUpload) {
+              setShowUpload(false);
+              setPipelineBatchId(null);
+              setPipelinePhase("upload");
+              return;
+            }
+            // Create a new pipeline batch
+            try {
+              const res = await fetch("/api/pipeline/batches", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ context: "global", entity_discovery: true }),
+              });
+              if (res.ok) {
+                const batch = await res.json();
+                setPipelineBatchId(batch.id);
+                setShowUpload(true);
+              }
+            } catch { /* ignore */ }
+          }}
         >
-          <PlusIcon size={14} /> Upload Document
+          <PlusIcon size={14} /> Upload Documents
         </Button>
       </div>
 
       {/* AI Processing Banner */}
-      {(processingId || bulkProcessing) && (
+      {processingId && (
         <div
           style={{
             background: "rgba(45,90,61,0.06)",
@@ -452,11 +383,7 @@ export default function DocumentsPage() {
           }}
         >
           <SparkleIcon size={16} />
-          <span>
-            {bulkProcessing
-              ? `Processing with AI... (${bulkProgress.current}/${bulkProgress.total})`
-              : "Processing document with AI..."}
-          </span>
+          <span>Processing document with AI...</span>
           <span
             style={{
               display: "inline-block",
@@ -642,184 +569,48 @@ export default function DocumentsPage() {
         );
       })()}
 
-      {/* Upload Form */}
-      {showUpload && (
-        <Card style={{ marginBottom: 20, padding: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <UploadIcon size={16} />
-            <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>
-              Upload Documents
-            </span>
-          </div>
+      {/* Pipeline Upload */}
+      {showUpload && pipelineBatchId && (
+        <div style={{ marginBottom: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+          {pipelinePhase === "upload" && (
+            <>
+              <UploadDropZone
+                batchId={pipelineBatchId}
+                onFilesUploaded={async () => {
+                  // Start processing before switching phase so items are queued before polling starts
+                  await fetch(`/api/pipeline/batches/${pipelineBatchId}/process`, { method: "POST" });
+                  setPipelinePhase("processing");
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setShowUpload(false);
+                    setPipelineBatchId(null);
+                    setPipelinePhase("upload");
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </>
+          )}
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-            {/* Document category */}
-            <div>
-              <label style={labelStyle}>Category *</label>
-              <select
-                value={uploadCategory}
-                onChange={(e) => setUploadCategory(e.target.value as DocumentCategory)}
-                style={inputStyle}
-              >
-                <option value="">Select category...</option>
-                {DOCUMENT_CATEGORY_OPTIONS.map((cat) => (
-                  <option key={cat.value} value={cat.value}>{cat.label}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Entity selector — optional */}
-            <div>
-              <label style={labelStyle}>Entity (optional)</label>
-              <select
-                value={uploadEntityId}
-                onChange={(e) => setUploadEntityId(e.target.value)}
-                style={inputStyle}
-              >
-                <option value="">None — AI will determine</option>
-                {entities
-                  .sort((a, b) => a.name.localeCompare(b.name))
-                  .map((e) => (
-                    <option key={e.id} value={e.id}>{e.name}</option>
-                  ))}
-              </select>
-            </div>
-          </div>
-
-          {/* File drop zone */}
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              if (e.dataTransfer.files.length > 0) handleFilesSelect(e.dataTransfer.files);
-            }}
-            style={{
-              border: `2px dashed ${dragOver ? "#2d5a3d" : "#ddd9d0"}`,
-              borderRadius: 8,
-              padding: uploadFiles.length > 0 ? "12px 16px" : "24px 16px",
-              textAlign: "center",
-              cursor: "pointer",
-              marginBottom: 12,
-              background: dragOver ? "rgba(45,90,61,0.04)" : "#fafaf7",
-              transition: "all 0.15s",
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) handleFilesSelect(e.target.files);
-                e.target.value = "";
+          {(pipelinePhase === "processing" || pipelinePhase === "results") && (
+            <ProcessingView
+              batchId={pipelineBatchId}
+              entities={entities}
+              onDocumentsChanged={refreshDocuments}
+              onComplete={() => {
+                setShowUpload(false);
+                setPipelineBatchId(null);
+                setPipelinePhase("upload");
               }}
             />
-            {uploadFiles.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {uploadFiles.map((file, idx) => (
-                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "center" }}>
-                    <DocIcon size={14} />
-                    <span style={{ fontSize: 13, color: "#1a1a1f" }}>{file.name}</span>
-                    <span style={{ fontSize: 11, color: "#9494a0" }}>
-                      ({formatFileSize(file.size)})
-                    </span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        cursor: "pointer",
-                        color: "#c73e3e",
-                        padding: 2,
-                      }}
-                    >
-                      <XIcon size={12} />
-                    </button>
-                  </div>
-                ))}
-                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
-                  Click or drop to add more (max 10)
-                </div>
-              </div>
-            ) : (
-              <>
-                <UploadIcon size={20} />
-                <div style={{ fontSize: 13, color: "#6b6b76", marginTop: 6 }}>
-                  Drop files here or click to browse
-                </div>
-                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
-                  PDF, images, or text documents — up to 10 files
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setShowUpload(false);
-                setUploadFiles([]);
-                setUploadCategory("");
-                setUploadEntityId("");
-                setUploadError(null);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              onClick={handleUpload}
-              disabled={uploading || uploadFiles.length === 0 || !uploadCategory}
-            >
-              {uploading
-                ? "Uploading..."
-                : `Upload ${uploadFiles.length || ""} File${uploadFiles.length !== 1 ? "s" : ""} & Process with AI`}
-            </Button>
-          </div>
-
-          {uploadError && (
-            <div style={{
-              marginTop: 8,
-              padding: "8px 12px",
-              background: "rgba(220,38,38,0.06)",
-              border: "1px solid rgba(220,38,38,0.15)",
-              borderRadius: 6,
-              fontSize: 12,
-              color: "#dc2626",
-            }}>
-              {uploadError}
-            </div>
           )}
-        </Card>
+        </div>
       )}
-
-      {/* Stat cards */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap: 14,
-          marginBottom: 24,
-        }}
-      >
-        <StatCard label="Total Documents" value={documents.length} />
-        <StatCard
-          label="AI Processed"
-          value={aiProcessed}
-          sub={documents.length > 0 ? `${Math.round((aiProcessed / documents.length) * 100)}% of total` : undefined}
-          color="#2d5a3d"
-        />
-        <StatCard
-          label="Top Categories"
-          value={topCategories.length > 0 ? topCategories.map(([k]) => DOCUMENT_CATEGORY_LABELS[k as DocumentCategory] || DOCUMENT_TYPE_CATEGORIES[k]?.label || k).join(", ") : "\u2014"}
-          sub={topCategories.map(([, count]) => count).join(" / ") + " docs"}
-        />
-      </div>
 
       {/* Filter pills */}
       <div

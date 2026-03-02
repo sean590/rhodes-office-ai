@@ -6,7 +6,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { US_STATES } from "@/lib/constants";
-import type { EntityType } from "@/lib/types/enums";
+import { validateShortName } from "@/lib/utils/document-naming";
+import type { EntityType, LegalStructure } from "@/lib/types/enums";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -20,6 +21,16 @@ const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: "special_purpose", label: "Special Purpose" },
   { value: "management_company", label: "Management Company" },
   { value: "trust", label: "Trust" },
+  { value: "other", label: "Other" },
+];
+
+const LEGAL_STRUCTURES: { value: LegalStructure; label: string }[] = [
+  { value: "llc", label: "LLC" },
+  { value: "corporation", label: "Corporation" },
+  { value: "lp", label: "Limited Partnership" },
+  { value: "trust", label: "Trust" },
+  { value: "gp", label: "General Partnership" },
+  { value: "series_llc", label: "Series LLC" },
   { value: "other", label: "Other" },
 ];
 
@@ -79,7 +90,9 @@ export default function NewEntityPage() {
 
   /* Form state */
   const [name, setName] = useState("");
+  const [shortName, setShortName] = useState("");
   const [type, setType] = useState<EntityType>("holding_company");
+  const [legalStructure, setLegalStructure] = useState<LegalStructure | "">("");
   const [ein, setEin] = useState("");
   const [formationState, setFormationState] = useState("");
   const [formedDate, setFormedDate] = useState("");
@@ -116,6 +129,15 @@ export default function NewEntityPage() {
       setError("Name is required.");
       return;
     }
+    if (!shortName.trim()) {
+      setError("Short Name is required.");
+      return;
+    }
+    const snValidation = validateShortName(shortName.trim());
+    if (!snValidation.valid) {
+      setError(snValidation.error!);
+      return;
+    }
     if (!formationState) {
       setError("Formation State is required.");
       return;
@@ -130,7 +152,9 @@ export default function NewEntityPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
+          short_name: shortName.trim(),
           type,
+          legal_structure: legalStructure || null,
           ein: ein.trim() || null,
           formation_state: formationState,
           formed_date: formedDate || null,
@@ -214,12 +238,37 @@ export default function NewEntityPage() {
           />
         </div>
 
+        {/* Short Name */}
+        <div style={fieldGroupStyle}>
+          <label style={labelStyle}>Short Name *</label>
+          <input
+            type="text"
+            value={shortName}
+            onChange={(e) => setShortName(e.target.value)}
+            placeholder="e.g. 44H"
+            maxLength={30}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+            Letters, numbers, and hyphens only. Used for document filenames.
+          </div>
+          {shortName.trim() && (
+            <div style={{ fontSize: 11, color: "#2d5a3d", marginTop: 4 }}>
+              Preview: {shortName.trim()}_Tax_K1_FY2025.pdf
+            </div>
+          )}
+        </div>
+
         {/* Type */}
         <div style={fieldGroupStyle}>
           <label style={labelStyle}>Type *</label>
           <select
             value={type}
-            onChange={(e) => setType(e.target.value as EntityType)}
+            onChange={(e) => {
+              const newType = e.target.value as EntityType;
+              setType(newType);
+              if (newType === "trust" && !legalStructure) setLegalStructure("trust");
+            }}
             style={selectStyle}
           >
             {ENTITY_TYPES.map((t) => (
@@ -228,6 +277,26 @@ export default function NewEntityPage() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Legal Structure */}
+        <div style={fieldGroupStyle}>
+          <label style={labelStyle}>Legal Structure</label>
+          <select
+            value={legalStructure}
+            onChange={(e) => setLegalStructure(e.target.value as LegalStructure | "")}
+            style={selectStyle}
+          >
+            <option value="">Select structure</option>
+            {LEGAL_STRUCTURES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+            Used to generate state-specific compliance obligations.
+          </div>
         </div>
 
         {/* EIN */}

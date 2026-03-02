@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { StatCard } from "@/components/ui/stat-card";
+import React, { useState, useEffect, useCallback } from "react";
 import { SearchInput } from "@/components/ui/search-input";
 import { FilterPills } from "@/components/ui/filter-pills";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +68,8 @@ export default function DirectoryPage() {
   const [addForm, setAddForm] = useState(EMPTY_FORM);
   const [addSaving, setAddSaving] = useState(false);
 
-  // Inline editing
+  // Expanded + editing
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState(EMPTY_FORM);
   const [editSaving, setEditSaving] = useState(false);
@@ -219,7 +219,20 @@ export default function DirectoryPage() {
     }
   };
 
+  const toggleExpanded = (id: string) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      setEditingId(null);
+      setEditForm(EMPTY_FORM);
+    } else {
+      setExpandedId(id);
+      setEditingId(null);
+      setEditForm(EMPTY_FORM);
+    }
+  };
+
   const startEdit = (entry: DirectoryEntryResponse) => {
+    setExpandedId(entry.id);
     setEditingId(entry.id);
     setEditForm({ name: entry.name, type: entry.type, email: entry.email ?? "", aliases: entry.aliases || [] });
   };
@@ -285,10 +298,20 @@ export default function DirectoryPage() {
   };
 
   const tdStyle: React.CSSProperties = {
-    padding: "12px 12px",
-    borderBottom: "1px solid #e8e6df",
+    padding: "14px 12px",
+    borderBottom: "1px solid #f0eee8",
     fontSize: 13,
     verticalAlign: "middle",
+  };
+
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#6b6b76",
+    marginBottom: 4,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
   };
 
   // -----------------------------------------------------------------------
@@ -297,7 +320,7 @@ export default function DirectoryPage() {
 
   if (loading) {
     return (
-      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
         <div style={{ fontSize: 22, fontWeight: 600, color: "#1a1a1f" }}>Directory</div>
         <div style={{ color: "#9494a0", marginTop: 12 }}>Loading...</div>
       </div>
@@ -305,7 +328,7 @@ export default function DirectoryPage() {
   }
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1200, margin: "0 auto" }}>
       {/* ----------------------------------------------------------------- */}
       {/* Header */}
       {/* ----------------------------------------------------------------- */}
@@ -321,16 +344,6 @@ export default function DirectoryPage() {
             <PlusIcon size={14} /> Add Entry
           </Button>
         )}
-      </div>
-
-      {/* ----------------------------------------------------------------- */}
-      {/* Stats cards */}
-      {/* ----------------------------------------------------------------- */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginBottom: 24 }}>
-        <StatCard label="Individuals" value={counts.individual} />
-        <StatCard label="External Entities" value={counts.external_entity} />
-        <StatCard label="Trusts" value={counts.trust} />
-        <StatCard label="Internal Entities" value={internalCount} color="#3366a8" />
       </div>
 
       {/* ----------------------------------------------------------------- */}
@@ -503,21 +516,25 @@ export default function DirectoryPage() {
       {/* Table */}
       {/* ----------------------------------------------------------------- */}
       <div style={{ background: "#ffffff", border: "1px solid #e8e6df", borderRadius: 12, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "40%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "30%" }} />
+            <col style={{ width: "10%" }} />
+          </colgroup>
           <thead>
             <tr>
               <th style={thStyle}>Name</th>
               <th style={thStyle}>Type</th>
-              <th style={thStyle}>Also Known As</th>
               <th style={thStyle}>Email</th>
-              <th style={thStyle}>Used In</th>
-              <th style={{ ...thStyle, textAlign: "right" }}>Actions</th>
+              <th style={thStyle} />
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ ...tdStyle, textAlign: "center", color: "#9494a0", padding: "32px 12px" }}>
+                <td colSpan={4} style={{ ...tdStyle, textAlign: "center", color: "#9494a0", padding: "32px 12px" }}>
                   {search || filter !== "all"
                     ? "No entries match your filters."
                     : "No directory entries yet. Click \"Add Entry\" to get started."}
@@ -526,189 +543,283 @@ export default function DirectoryPage() {
             )}
 
             {filtered.map((entry) => {
+              const isExpanded = expandedId === entry.id;
               const isEditing = editingId === entry.id;
               const badgeStyle = TYPE_BADGE_STYLES[entry.type];
+              const hasAliases = entry.aliases && entry.aliases.length > 0;
 
-              if (isEditing) {
-                // ---- Editing row ----
-                return (
-                  <tr key={entry.id} style={{ background: "#faf9f6" }}>
-                    {/* Name */}
-                    <td style={tdStyle}>
-                      <input
-                        style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
-                        value={editForm.name}
-                        onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                      />
+              return (
+                <React.Fragment key={entry.id}>
+                  {/* ---- Compact row ---- */}
+                  <tr
+                    onClick={() => toggleExpanded(entry.id)}
+                    style={{
+                      cursor: "pointer",
+                      display: isExpanded ? "none" : undefined,
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <td style={{ ...tdStyle, fontWeight: 500 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {entry.name}
+                        </span>
+                        {hasAliases && (
+                          <span style={{ fontSize: 11, color: "#9494a0", flexShrink: 0 }}>
+                            +{entry.aliases.length} alias{entry.aliases.length > 1 ? "es" : ""}
+                          </span>
+                        )}
+                      </div>
                     </td>
-
-                    {/* Type */}
                     <td style={tdStyle}>
-                      <select
-                        style={{ ...selectStyle, width: "100%", boxSizing: "border-box" }}
-                        value={editForm.type}
-                        onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value as DirectoryEntryType }))}
-                      >
-                        <option value="individual">Individual</option>
-                        <option value="external_entity">External Entity</option>
-                        <option value="trust">Trust</option>
-                      </select>
+                      <Badge label={TYPE_LABELS[entry.type]} bg={badgeStyle.bg} color={badgeStyle.color} />
                     </td>
+                    <td style={{ ...tdStyle, color: "#6b6b76", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.email || <span style={{ color: "#9494a0" }}>&mdash;</span>}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "right", color: "#9494a0", fontSize: 12 }}>
+                      {entry.usage_count > 0 && (
+                        <span style={{
+                          background: "rgba(45,90,61,0.06)",
+                          color: "#2d5a3d",
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                          fontSize: 11,
+                          fontWeight: 500,
+                        }}>
+                          {entry.usage_count}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
 
-                    {/* Also Known As */}
-                    <td style={tdStyle}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                        {editForm.aliases.map((alias, idx) => (
-                          <div key={idx} style={{ display: "flex", gap: 4, alignItems: "center" }}>
-                            <input
-                              style={{ ...inputStyle, flex: 1, boxSizing: "border-box" }}
-                              value={alias}
-                              onChange={(e) => {
-                                const updated = [...editForm.aliases];
-                                updated[idx] = e.target.value;
-                                setEditForm((f) => ({ ...f, aliases: updated }));
-                              }}
-                              placeholder="Alternate name"
-                            />
+                  {/* ---- Expanded panel ---- */}
+                  {isExpanded && (
+                    <tr>
+                      <td colSpan={4} style={{ borderBottom: "1px solid #f0eee8", padding: 0 }}>
+                        <div style={{ background: "#faf9f6", padding: "16px 20px" }}>
+                          {/* Header with name + collapse chevron */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                              <span style={{ fontWeight: 600, fontSize: 15, color: "#1a1a1f" }}>{entry.name}</span>
+                              <Badge label={TYPE_LABELS[entry.type]} bg={badgeStyle.bg} color={badgeStyle.color} />
+                            </div>
                             <button
-                              onClick={() => {
-                                const updated = editForm.aliases.filter((_, i) => i !== idx);
-                                setEditForm((f) => ({ ...f, aliases: updated }));
-                              }}
+                              onClick={() => toggleExpanded(entry.id)}
                               style={{
                                 background: "none",
                                 border: "none",
                                 cursor: "pointer",
-                                color: "#c73e3e",
-                                padding: "2px 4px",
-                                fontSize: 14,
-                                lineHeight: 1,
+                                padding: "4px 6px",
+                                color: "#9494a0",
+                                display: "flex",
+                                alignItems: "center",
                               }}
-                              title="Remove alias"
+                              title="Collapse"
                             >
-                              <XIcon size={10} />
+                              <svg width="12" height="12" viewBox="0 0 12 12">
+                                <path d="M2 8l4-4 4 4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
                             </button>
                           </div>
-                        ))}
-                        <button
-                          onClick={() => setEditForm((f) => ({ ...f, aliases: [...f.aliases, ""] }))}
-                          style={{
-                            background: "none",
-                            border: "1px dashed #ddd9d0",
-                            borderRadius: 4,
-                            padding: "3px 8px",
-                            fontSize: 11,
-                            color: "#6b6b76",
-                            cursor: "pointer",
-                            fontFamily: "inherit",
-                            textAlign: "left",
-                          }}
-                        >
-                          + Add alias
-                        </button>
-                      </div>
-                    </td>
 
-                    {/* Email */}
-                    <td style={tdStyle}>
-                      <input
-                        style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
-                        value={editForm.email}
-                        onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
-                        placeholder="Optional"
-                      />
-                    </td>
+                          {isEditing ? (
+                            /* ---- Edit form ---- */
+                            <div>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                                {/* Name */}
+                                <div>
+                                  <label style={labelStyle}>Name</label>
+                                  <input
+                                    style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                                    value={editForm.name}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                                  />
+                                </div>
+                                {/* Type */}
+                                <div>
+                                  <label style={labelStyle}>Type</label>
+                                  <select
+                                    style={{ ...selectStyle, width: "100%", boxSizing: "border-box" }}
+                                    value={editForm.type}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, type: e.target.value as DirectoryEntryType }))}
+                                  >
+                                    <option value="individual">Individual</option>
+                                    <option value="external_entity">External Entity</option>
+                                    <option value="trust">Trust</option>
+                                  </select>
+                                </div>
+                                {/* Email */}
+                                <div>
+                                  <label style={labelStyle}>Email</label>
+                                  <input
+                                    style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                                    value={editForm.email}
+                                    onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))}
+                                    placeholder="Optional"
+                                  />
+                                </div>
+                              </div>
 
-                    {/* Used In (read-only during edit) */}
-                    <td style={{ ...tdStyle, color: "#6b6b76", fontSize: 12 }}>
-                      {entry.usage_count > 0 ? entry.usage_details : <span style={{ color: "#9494a0" }}>&mdash;</span>}
-                    </td>
+                              {/* Aliases editing */}
+                              <div style={{ marginBottom: 16 }}>
+                                <label style={labelStyle}>Also Known As</label>
+                                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                  {editForm.aliases.map((alias, idx) => (
+                                    <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", maxWidth: 400 }}>
+                                      <input
+                                        style={{ ...inputStyle, flex: 1, boxSizing: "border-box" }}
+                                        value={alias}
+                                        onChange={(e) => {
+                                          const updated = [...editForm.aliases];
+                                          updated[idx] = e.target.value;
+                                          setEditForm((f) => ({ ...f, aliases: updated }));
+                                        }}
+                                        placeholder="Alternate name"
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          const updated = editForm.aliases.filter((_, i) => i !== idx);
+                                          setEditForm((f) => ({ ...f, aliases: updated }));
+                                        }}
+                                        style={{
+                                          background: "none",
+                                          border: "none",
+                                          cursor: "pointer",
+                                          color: "#c73e3e",
+                                          padding: "4px",
+                                          fontSize: 14,
+                                          lineHeight: 1,
+                                        }}
+                                        title="Remove alias"
+                                      >
+                                        <XIcon size={10} />
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    onClick={() => setEditForm((f) => ({ ...f, aliases: [...f.aliases, ""] }))}
+                                    style={{
+                                      background: "none",
+                                      border: "1px dashed #ddd9d0",
+                                      borderRadius: 4,
+                                      padding: "4px 10px",
+                                      fontSize: 11,
+                                      color: "#6b6b76",
+                                      cursor: "pointer",
+                                      fontFamily: "inherit",
+                                      textAlign: "left",
+                                      maxWidth: 120,
+                                    }}
+                                  >
+                                    + Add alias
+                                  </button>
+                                </div>
+                              </div>
 
-                    {/* Actions */}
-                    <td style={{ ...tdStyle, textAlign: "right" }}>
-                      <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          onClick={handleSaveEdit}
-                          disabled={editSaving || !editForm.name.trim()}
-                        >
-                          {editSaving ? "Saving..." : "Save"}
-                        </Button>
-                        <Button size="sm" onClick={cancelEdit}>
-                          Cancel
-                        </Button>
-                        <Button
-                          size="sm"
-                          onClick={() => handleRemove(entry.id)}
-                          style={{ background: "rgba(199,62,62,0.08)", color: "#c73e3e", border: "1px solid rgba(199,62,62,0.2)" }}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              }
+                              {/* Save / Cancel / Remove */}
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <Button
+                                  size="sm"
+                                  variant="primary"
+                                  onClick={handleSaveEdit}
+                                  disabled={editSaving || !editForm.name.trim()}
+                                >
+                                  {editSaving ? "Saving..." : "Save"}
+                                </Button>
+                                <Button size="sm" onClick={cancelEdit}>
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleRemove(entry.id)}
+                                  style={{ background: "rgba(199,62,62,0.08)", color: "#c73e3e", border: "1px solid rgba(199,62,62,0.2)" }}
+                                >
+                                  Remove
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* ---- Detail view ---- */
+                            <div>
+                              {/* Info grid */}
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+                                {/* Email */}
+                                <div>
+                                  <div style={labelStyle}>Email</div>
+                                  <div style={{ fontSize: 13, color: entry.email ? "#1a1a1f" : "#9494a0" }}>
+                                    {entry.email || "Not set"}
+                                  </div>
+                                </div>
 
-              // ---- Normal row ----
-              return (
-                <tr
-                  key={entry.id}
-                  style={{ cursor: "default" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                >
-                  {/* Name */}
-                  <td style={{ ...tdStyle, fontWeight: 500 }}>{entry.name}</td>
+                                {/* Used In */}
+                                <div>
+                                  <div style={labelStyle}>Used In</div>
+                                  {entry.usage_count > 0
+                                    ? (
+                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                        {entry.usage_details.split(", ").map((part, i) => (
+                                          <span
+                                            key={i}
+                                            style={{
+                                              background: "rgba(45,90,61,0.06)",
+                                              color: "#2d5a3d",
+                                              padding: "2px 8px",
+                                              borderRadius: 4,
+                                              fontSize: 12,
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            {part}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )
+                                    : <div style={{ fontSize: 13, color: "#9494a0" }}>Not referenced</div>
+                                  }
+                                </div>
 
-                  {/* Type */}
-                  <td style={tdStyle}>
-                    <Badge label={TYPE_LABELS[entry.type]} bg={badgeStyle.bg} color={badgeStyle.color} />
-                  </td>
+                                {/* AKA */}
+                                <div>
+                                  <div style={labelStyle}>Also Known As</div>
+                                  {hasAliases
+                                    ? (
+                                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                        {entry.aliases.map((alias, i) => (
+                                          <span
+                                            key={i}
+                                            style={{
+                                              background: "rgba(107,107,118,0.08)",
+                                              padding: "2px 8px",
+                                              borderRadius: 4,
+                                              fontSize: 12,
+                                              whiteSpace: "nowrap",
+                                            }}
+                                          >
+                                            {alias}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )
+                                    : <div style={{ fontSize: 13, color: "#9494a0" }}>None</div>
+                                  }
+                                </div>
+                              </div>
 
-                  {/* Also Known As */}
-                  <td style={{ ...tdStyle, color: "#6b6b76", fontSize: 12 }}>
-                    {entry.aliases && entry.aliases.length > 0
-                      ? (
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                          {entry.aliases.map((alias, i) => (
-                            <span
-                              key={i}
-                              style={{
-                                background: "rgba(107,107,118,0.08)",
-                                padding: "1px 7px",
-                                borderRadius: 4,
-                                fontSize: 11,
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {alias}
-                            </span>
-                          ))}
+                              {/* Action buttons */}
+                              <div style={{ display: "flex", gap: 8 }}>
+                                <Button size="sm" onClick={() => startEdit(entry)}>
+                                  Edit
+                                </Button>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      )
-                      : <span style={{ color: "#9494a0" }}>&mdash;</span>
-                    }
-                  </td>
-
-                  {/* Email */}
-                  <td style={{ ...tdStyle, color: "#6b6b76" }}>
-                    {entry.email || <span style={{ color: "#9494a0" }}>&mdash;</span>}
-                  </td>
-
-                  {/* Used In */}
-                  <td style={{ ...tdStyle, color: "#6b6b76", fontSize: 12 }}>
-                    {entry.usage_count > 0 ? entry.usage_details : <span style={{ color: "#9494a0" }}>&mdash;</span>}
-                  </td>
-
-                  {/* Actions */}
-                  <td style={{ ...tdStyle, textAlign: "right" }}>
-                    <Button size="sm" onClick={() => startEdit(entry)}>
-                      Edit
-                    </Button>
-                  </td>
-                </tr>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>

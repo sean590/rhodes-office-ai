@@ -1,0 +1,457 @@
+/**
+ * Shared extraction logic — used by both the pipeline worker and the
+ * existing /api/documents/[id]/process route for one-off reprocessing.
+ */
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getDocumentTypes } from "@/lib/document-types";
+import { analyzePdf, buildPdfContent } from "./pdf-processor";
+
+// Re-export for convenience
+export type { PDFAnalysis } from "./pdf-processor";
+
+/**
+ * Compute a numeric confidence score from action-level string confidences.
+ * Maps: high → 0.95, medium → 0.7, low → 0.3
+ */
+function computeConfidence(actions: unknown[]): number | null {
+  if (actions.length === 0) return null;
+  const confidenceMap: Record<string, number> = { high: 0.95, medium: 0.7, low: 0.3 };
+  let sum = 0;
+  let count = 0;
+  for (const action of actions) {
+    const conf = (action as Record<string, unknown>)?.confidence;
+    if (typeof conf === "string" && conf in confidenceMap) {
+      sum += confidenceMap[conf];
+      count++;
+    }
+  }
+  return count > 0 ? Math.round((sum / count) * 100) / 100 : null;
+}
+
+// --- DB Context Builder ---
+
+export async function getDbContext(supabase: ReturnType<typeof createAdminClient>) {
+  const [
+    entitiesRes,
+    directoryRes,
+    relationshipsRes,
+    registrationsRes,
+    managersRes,
+    membersRes,
+    trustDetailsRes,
+    trustRolesRes,
+    capTableRes,
+    partnershipRepsRes,
+    entityRolesRes,
+    complianceRes,
+  ] = await Promise.all([
+    supabase.from("entities").select("*").order("name"),
+    supabase.from("directory_entries").select("*").order("name"),
+    supabase.from("relationships").select("*"),
+    supabase.from("entity_registrations").select("*"),
+    supabase.from("entity_managers").select("*"),
+    supabase.from("entity_members").select("*"),
+    supabase.from("trust_details").select("*"),
+    supabase.from("trust_roles").select("*"),
+    supabase.from("cap_table_entries").select("*"),
+    supabase.from("entity_partnership_reps").select("*"),
+    supabase.from("entity_roles").select("*"),
+    supabase.from("compliance_obligations").select("*").order("next_due_date", { ascending: true }),
+  ]);
+
+  return {
+    entities: entitiesRes.data || [],
+    directory: directoryRes.data || [],
+    relationships: relationshipsRes.data || [],
+    registrations: registrationsRes.data || [],
+    managers: managersRes.data || [],
+    members: membersRes.data || [],
+    trust_details: trustDetailsRes.data || [],
+    trust_roles: trustRolesRes.data || [],
+    cap_table: capTableRes.data || [],
+    partnership_reps: partnershipRepsRes.data || [],
+    entity_roles: entityRolesRes.data || [],
+    compliance_obligations: complianceRes.data || [],
+  };
+}
+
+// --- System Prompt Builder ---
+
+export async function buildSystemPrompt(
+  dbContext: Record<string, unknown[]>,
+  options?: { entityDiscovery?: boolean; compositeDetection?: boolean }
+): Promise<string> {
+  // Fetch dynamic document types for the prompt
+  const docTypes = await getDocumentTypes();
+  const typesByCategory: Record<string, string[]> = {};
+  for (const dt of docTypes) {
+    if (!typesByCategory[dt.category]) typesByCategory[dt.category] = [];
+    typesByCategory[dt.category].push(dt.slug);
+  }
+
+  const typeListStr = Object.entries(typesByCategory)
+    .map(([cat, slugs]) => `${cat.charAt(0).toUpperCase() + cat.slice(1)}: ${slugs.join(", ")}`)
+    .join("\n");
+
+  let prompt = `You are an AI assistant that analyzes legal and financial documents for a family office entity management platform called Rhodes.
+
+Your job is to read the document and propose specific, actionable changes to the database. You have full knowledge of the current database state.
+
+## Current Database State
+
+### Entities (${(dbContext.entities as Array<{id: string; name: string; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).length} total)
+${(dbContext.entities as Array<{id: string; name: string; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).map((e) => `- ${e.name} (id: ${e.id}, type: ${e.type}, EIN: ${e.ein || 'N/A'}, state: ${e.formation_state}, status: ${e.status}${e.business_purpose ? `, purpose: ${e.business_purpose}` : ''})`).join('\n')}
+
+### Directory Entries (${(dbContext.directory as Array<{id: string; name: string; type: string; email: string | null; aliases: string[] | null}>).length} total)
+${(dbContext.directory as Array<{id: string; name: string; type: string; email: string | null; aliases: string[] | null}>).map((d) => `- ${d.name}${d.aliases && d.aliases.length > 0 ? ` (AKA: ${d.aliases.join(', ')})` : ''} (id: ${d.id}, type: ${d.type}, email: ${d.email || 'N/A'})`).join('\n')}
+
+### Relationships (${(dbContext.relationships as unknown[]).length} total)
+${(dbContext.relationships as Array<{id: string; type: string; from_entity_id: string | null; to_entity_id: string | null; description: string}>).map((r) => `- ${r.type}: ${r.from_entity_id} → ${r.to_entity_id} (${r.description || 'no description'})`).join('\n')}
+
+### Registrations
+${(dbContext.registrations as Array<{id: string; entity_id: string; jurisdiction: string; qualification_date: string | null; last_filing_date: string | null; state_id: string | null}>).map((r) => `- Entity ${r.entity_id}: ${r.jurisdiction} (registration_id: ${r.id}, qualification_date: ${r.qualification_date || 'N/A'}, last_filing_date: ${r.last_filing_date || 'N/A'}, state_id: ${r.state_id || 'N/A'})`).join('\n')}
+
+### Managers
+${(dbContext.managers as Array<{entity_id: string; name: string}>).map((m) => `- Entity ${m.entity_id}: ${m.name}`).join('\n')}
+
+### Members
+${(dbContext.members as Array<{entity_id: string; name: string}>).map((m) => `- Entity ${m.entity_id}: ${m.name}`).join('\n')}
+
+### Trust Details
+${(dbContext.trust_details as Array<{id: string; entity_id: string; trust_type: string; grantor_name: string | null}>).map((t) => `- Entity ${t.entity_id}: ${t.trust_type} trust, grantor: ${t.grantor_name || 'N/A'} (trust_detail_id: ${t.id})`).join('\n')}
+
+### Trust Roles
+${(dbContext.trust_roles as Array<{trust_detail_id: string; role: string; name: string}>).map((r) => `- Trust ${r.trust_detail_id}: ${r.role} = ${r.name}`).join('\n')}
+
+### Cap Table
+${(dbContext.cap_table as Array<{entity_id: string; investor_name: string | null; ownership_pct: number}>).map((c) => `- Entity ${c.entity_id}: ${c.investor_name || 'Unknown'} owns ${c.ownership_pct}%`).join('\n')}
+
+### Partnership Representatives
+${(dbContext.partnership_reps as Array<{entity_id: string; name: string}>).map((p) => `- Entity ${p.entity_id}: ${p.name}`).join('\n') || '(none)'}
+
+### Entity Roles (VP, Controller, etc.)
+${(dbContext.entity_roles as Array<{entity_id: string; role_title: string; name: string}>).map((r) => `- Entity ${r.entity_id}: ${r.role_title} = ${r.name}`).join('\n') || '(none)'}
+
+### Compliance Obligations
+${(dbContext.compliance_obligations as Array<{id: string; entity_id: string; name: string; jurisdiction: string; obligation_type: string; status: string; next_due_date: string | null; completed_at: string | null; rule_id: string}>).map((o) => `- Entity ${o.entity_id}: ${o.name} (${o.jurisdiction}) — status=${o.status}, due=${o.next_due_date || 'N/A'}${o.completed_at ? `, completed=${o.completed_at.split('T')[0]}` : ''}, obligation_id=${o.id}`).join('\n') || '(none)'}
+
+## Response Format
+
+You MUST respond with valid JSON only — no markdown, no explanation. Return an object with:
+
+\`\`\`json
+{
+  "entity_id": "uuid of the primary existing entity this document is about, or null if proposing a new entity",
+  "entity_match_confidence": "high | medium | low | none",
+  "suggested_name": "A short, descriptive display name for this document",
+  "summary": "A 2-3 sentence plain-text summary",
+  "document_type": "the specific document type slug that best matches",
+  "document_category": "formation | tax | investor | contracts | compliance | insurance | governance | other",
+  "direction": "issued | received | null",
+  "year": 2024,
+  "actions": [
+    {
+      "action": "action_type",
+      "data": { ... },
+      "reason": "Why this change is being proposed",
+      "confidence": "high" | "medium" | "low"
+    }
+  ]
+}
+\`\`\`
+
+### Document Type values (pick the most specific match, or propose a new slug if none fit):
+${typeListStr}
+
+If none of the above types fit, you may propose a new type by setting \`"is_new_document_type": true\` and providing \`"new_type_label"\` and \`"new_type_category"\` in the response.
+
+IMPORTANT: Always set "entity_id" to the UUID of the existing entity this document primarily belongs to. Only set it to null if the document is about a brand new entity that needs to be created.
+
+For "entity_match_confidence":
+- "high": The document clearly names or references a specific existing entity (exact name match, EIN match, etc.)
+- "medium": The document likely belongs to an entity but the match is inferred (partial name, address, context)
+- "low": Multiple entities could match, or the match is a guess
+- "none": Cannot determine which entity this document belongs to
+
+### Action Data Schemas:
+
+- **create_entity**: { "name": string, "type": "holding_company"|"investment_fund"|"operating_company"|"real_estate"|"special_purpose"|"management_company"|"trust"|"other", "ein": string|null, "formation_state": "XX", "formed_date": "YYYY-MM-DD"|null, "address": string|null, "registered_agent": string|null, "notes": string|null, "business_purpose": string|null }
+- **update_entity**: { "entity_id": "uuid", "fields": { field: value, ... } }
+- **create_relationship**: { "from_entity_id": "uuid"|null, "from_directory_id": "uuid"|null, "to_entity_id": "uuid"|null, "to_directory_id": "uuid"|null, "type": string, "description": string, "terms": string|null, "frequency": string|null, "annual_estimate": number|null }
+- **add_member**: { "entity_id": "uuid", "name": string }
+- **add_manager**: { "entity_id": "uuid", "name": string }
+- **add_registration**: { "entity_id": "uuid", "jurisdiction": "XX", "qualification_date": "YYYY-MM-DD"|null, "last_filing_date": "YYYY-MM-DD"|null, "state_id": string|null }
+- **update_registration**: { "registration_id": "uuid", "qualification_date": "YYYY-MM-DD"|null, "last_filing_date": "YYYY-MM-DD"|null, "state_id": string|null }
+- **add_trust_role**: { "trust_detail_id": "uuid", "role": string, "name": string }
+- **update_trust_details**: { "entity_id": "uuid", "trust_type": "revocable"|"irrevocable"|null, "trust_date": "YYYY-MM-DD"|null, "grantor_name": string|null, "situs_state": "XX"|null }
+- **update_cap_table**: { "entity_id": "uuid", "investor_name": string, "investor_type": string, "units": number|null, "ownership_pct": number, "capital_contributed": number|null, "replaces_investor_name": string|null }
+- **create_directory_entry**: { "name": string, "type": "individual"|"external_entity"|"trust", "email": string|null }
+- **add_custom_field**: { "entity_id": "uuid", "label": string, "value": string }
+- **add_partnership_rep**: { "entity_id": "uuid", "name": string }
+- **add_role**: { "entity_id": "uuid", "role_title": string, "name": string }
+- **complete_obligation**: { "obligation_id": "uuid", "completed_at": "YYYY-MM-DD", "payment_amount": number|null (in cents), "confirmation": string|null, "notes": string|null }
+
+### Guidelines:
+- Match entity names to existing entities by name when possible. Use the entity's UUID.
+- If proposing a "create_entity" action AND other actions referencing the new entity, use "new_entity" as the entity_id placeholder.
+- Match people/organizations to existing directory entries by name OR aliases.
+- IMPORTANT: When adding members, managers, partnership reps, trust roles, cap table investors, or entity roles, ALWAYS also propose a "create_directory_entry" action for each person/organization that does NOT already exist in the directory. This ensures the directory stays complete. Check the directory entries list above — only create entries for names not already present (accounting for aliases).
+- For dollar amounts in cap table, convert to cents (integer).
+- Set confidence to "high" when clearly stated, "medium" when inferring, "low" when guessing.
+- Don't propose changes that would duplicate existing data.
+- For compliance filings: if entity has registration for that jurisdiction, use "update_registration". If not, use "add_registration".
+- For required franchise tax payments: if a matching compliance obligation exists, use "complete_obligation". Also use "update_registration" to set last_filing_date.
+- Do NOT propose actions for ELECTIVE/OPTIONAL tax payments (PTET, elective entity-level taxes).
+- Do NOT use "add_custom_field" for state entity IDs — use state_id on registrations.`;
+
+  // Entity discovery section
+  if (options?.entityDiscovery) {
+    prompt += `
+
+## Entity Discovery
+
+This document is being processed with entity discovery ENABLED. If this document references entities that do NOT exist in the current database, you should propose creating them. Include a "proposed_entity" object in your response with the entity details:
+
+\`\`\`json
+{
+  "proposed_entity": {
+    "name": "Entity Name",
+    "type": "holding_company",
+    "ein": null,
+    "formation_state": "DE",
+    "confidence": "high"
+  }
+}
+\`\`\`
+
+Set entity_id to null when the document is about a proposed new entity.`;
+  }
+
+  // Composite detection section
+  if (options?.compositeDetection) {
+    prompt += `
+
+## Composite Document Detection
+
+A single PDF may contain multiple logical documents. This is common with tax packages that bundle federal returns, state returns, K-1 schedules, filing instructions, and extensions into one file.
+
+If you detect multiple logical documents within a single PDF, set \`"is_composite": true\` and include a \`"sub_documents"\` array. Each sub-document should have its own type, jurisdiction, page range, and actions:
+
+\`\`\`json
+{
+  "is_composite": true,
+  "sub_documents": [
+    {
+      "document_type": "tax_return_1065",
+      "document_category": "tax",
+      "direction": "issued",
+      "jurisdiction": "federal",
+      "page_range": [7, 23],
+      "suggested_name": "Entity — 2024 Federal Form 1065",
+      "summary": "Federal partnership return...",
+      "entity_id": "uuid",
+      "year": 2024,
+      "k1_recipient": null,
+      "actions": [...]
+    }
+  ]
+}
+\`\`\`
+
+Common composite patterns:
+- Tax packages: filing instructions + federal return + state return(s) + K-1s
+- K-1 bundles: multiple K-1s for different partners in one PDF
+- Annual compliance packages: annual report + certificate of good standing + registered agent docs
+
+For K-1 sub-documents, set "k1_recipient" to the partner/shareholder/beneficiary name.`;
+  }
+
+  return prompt;
+}
+
+// --- Extraction Result ---
+
+export interface ExtractionResult {
+  entity_id: string | null;
+  entity_match_confidence: 'high' | 'medium' | 'low' | 'none';
+  suggested_name: string | null;
+  summary: string | null;
+  document_type: string | null;
+  document_category: string | null;
+  direction: string | null;
+  year: number | null;
+  actions: unknown[];
+  confidence: number | null;
+  is_composite: boolean;
+  sub_documents: SubDocument[];
+  proposed_entity: Record<string, unknown> | null;
+  is_new_document_type: boolean;
+  new_type_label: string | null;
+  new_type_category: string | null;
+  tokens_used: number;
+}
+
+export interface SubDocument {
+  document_type: string;
+  document_category: string;
+  direction: string | null;
+  jurisdiction: string | null;
+  page_range: [number, number] | null;
+  suggested_name: string;
+  summary: string;
+  entity_id: string | null;
+  year: number | null;
+  k1_recipient: string | null;
+  actions: unknown[];
+}
+
+/**
+ * Extract document content using Claude API.
+ * This is the shared extraction function used by both the pipeline worker
+ * and the legacy /api/documents/[id]/process route.
+ */
+export async function extractDocument(
+  fileData: Blob | Buffer,
+  mimeType: string | null,
+  docName: string,
+  docType: string | null,
+  year: number | null,
+  dbContext: Record<string, unknown[]>,
+  options?: {
+    entityDiscovery?: boolean;
+    compositeDetection?: boolean;
+    notes?: string;
+  }
+): Promise<ExtractionResult> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("AI processing not configured — missing ANTHROPIC_API_KEY");
+  }
+
+  const systemPrompt = await buildSystemPrompt(dbContext, {
+    entityDiscovery: options?.entityDiscovery,
+    compositeDetection: options?.compositeDetection,
+  });
+
+  const isPdf = mimeType === "application/pdf";
+  const isImage = mimeType?.startsWith("image/");
+
+  let buffer: Buffer;
+  if (fileData instanceof Buffer) {
+    buffer = fileData;
+  } else {
+    buffer = Buffer.from(await (fileData as Blob).arrayBuffer());
+  }
+
+  let userContent: unknown[];
+  let pdfAnalysis: { page_count: number; tier: string } | null = null;
+
+  if (isPdf) {
+    const analysis = await analyzePdf(buffer, docType);
+    pdfAnalysis = { page_count: analysis.page_count, tier: analysis.tier };
+    userContent = await buildPdfContent(buffer, analysis, docName, docType, year);
+  } else if (isImage) {
+    const base64 = buffer.toString("base64");
+    userContent = [
+      {
+        type: "image",
+        source: { type: "base64", media_type: mimeType, data: base64 },
+      },
+      {
+        type: "text",
+        text: `Analyze this ${(docType || "unknown").replace(/_/g, " ")} document image and propose database changes. The document is named "${docName}"${year ? ` and is from year ${year}` : ""}.${options?.notes ? ` Notes: ${options.notes}` : ""}`,
+      },
+    ];
+  } else {
+    // Text-based file
+    const text = buffer.toString("utf-8");
+    userContent = [
+      {
+        type: "text",
+        text: `Analyze this ${(docType || "unknown").replace(/_/g, " ")} document and propose database changes.\n\nDocument name: "${docName}"${year ? `\nYear: ${year}` : ""}${options?.notes ? `\nNotes: ${options.notes}` : ""}\n\nDocument content:\n---\n${text}\n---`,
+      },
+    ];
+  }
+
+  const maxTokens = options?.compositeDetection ? 8192 : 4096;
+
+  const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: maxTokens,
+      system: systemPrompt,
+      messages: [{ role: "user", content: userContent }],
+    }),
+  });
+
+  if (!claudeResponse.ok) {
+    const errorText = await claudeResponse.text();
+    console.error("Claude API error:", claudeResponse.status, errorText);
+    let detail = "AI processing failed";
+    try {
+      const parsed = JSON.parse(errorText);
+      detail = parsed?.error?.message || detail;
+    } catch {
+      /* use default */
+    }
+    throw new Error(detail);
+  }
+
+  const claudeResult = await claudeResponse.json();
+  const responseText = claudeResult.content?.[0]?.text || "{}";
+  const tokensUsed =
+    (claudeResult.usage?.input_tokens || 0) +
+    (claudeResult.usage?.output_tokens || 0);
+
+  // Parse response
+  const cleanJson = responseText
+    .replace(/^```(?:json)?\s*\n?/i, "")
+    .replace(/\n?```\s*$/i, "")
+    .trim();
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(cleanJson);
+  } catch {
+    console.error("Failed to parse Claude response:", responseText);
+    parsed = {};
+  }
+
+  const VALID_MATCH_CONFIDENCES = ['high', 'medium', 'low', 'none'] as const;
+  const rawMatchConf = parsed.entity_match_confidence as string;
+  const entityMatchConfidence: ExtractionResult['entity_match_confidence'] =
+    VALID_MATCH_CONFIDENCES.includes(rawMatchConf as typeof VALID_MATCH_CONFIDENCES[number])
+      ? (rawMatchConf as ExtractionResult['entity_match_confidence'])
+      : (parsed.entity_id ? 'high' : 'none');
+
+  const result: ExtractionResult = {
+    entity_id: (parsed.entity_id as string) || null,
+    entity_match_confidence: entityMatchConfidence,
+    suggested_name: (parsed.suggested_name as string) || null,
+    summary: (parsed.summary as string) || null,
+    document_type: (parsed.document_type as string) || null,
+    document_category: (parsed.document_category as string) || null,
+    direction: (parsed.direction as string) || null,
+    year: typeof parsed.year === "number" ? parsed.year : null,
+    actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+    confidence: computeConfidence(Array.isArray(parsed.actions) ? parsed.actions : []),
+    is_composite: !!parsed.is_composite,
+    sub_documents: Array.isArray(parsed.sub_documents)
+      ? (parsed.sub_documents as SubDocument[])
+      : [],
+    proposed_entity: (parsed.proposed_entity as Record<string, unknown>) || null,
+    is_new_document_type: !!parsed.is_new_document_type,
+    new_type_label: (parsed.new_type_label as string) || null,
+    new_type_category: (parsed.new_type_category as string) || null,
+    tokens_used: tokensUsed,
+  };
+
+  return result;
+}

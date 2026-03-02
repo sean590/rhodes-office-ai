@@ -8,7 +8,6 @@ import { UserMenu } from "./user-menu";
 const NAV_TABS = [
   { href: "/entities", label: "Entities", Icon: BuildingIcon },
   { href: "/directory", label: "Directory", Icon: PeopleIcon },
-  { href: "/org-chart", label: "Org Chart", Icon: ChartIcon },
   { href: "/relationships", label: "Relationships", Icon: LinkIcon },
   { href: "/documents", label: "Documents", Icon: DocIcon },
   { href: "/chat", label: "AI Chat", Icon: ChatIcon },
@@ -30,8 +29,8 @@ export function Header() {
           background: "linear-gradient(135deg, #2d5a3d, #3d7a53)",
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 14, fontWeight: 700, color: "#fff",
-        }}>P</div>
-        <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.02em" }}>Plinth AI</span>
+        }}>R</div>
+        <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: "-0.02em" }}>Rhodes</span>
         <span style={{
           fontSize: 10, fontWeight: 500, color: "#2d5a3d",
           background: "rgba(45,90,61,0.08)", padding: "2px 8px", borderRadius: 10,

@@ -16,6 +16,7 @@ export async function buildChatContext() {
     partnershipRepsRes,
     entityRolesRes,
     documentsRes,
+    complianceRes,
   ] = await Promise.all([
     supabase.from("entities").select("*").order("name"),
     supabase.from("directory_entries").select("*").order("name"),
@@ -29,6 +30,7 @@ export async function buildChatContext() {
     supabase.from("entity_partnership_reps").select("*"),
     supabase.from("entity_roles").select("*"),
     supabase.from("documents").select("id, name, document_type, document_category, year, entity_id, ai_extracted, ai_extraction, created_at").is("deleted_at", null).order("created_at", { ascending: false }),
+    supabase.from("compliance_obligations").select("*").order("next_due_date", { ascending: true }),
   ]);
 
   const entities = entitiesRes.data || [];
@@ -43,6 +45,7 @@ export async function buildChatContext() {
   const partnershipReps = partnershipRepsRes.data || [];
   const entityRoles = entityRolesRes.data || [];
   const documents = documentsRes.data || [];
+  const complianceObligations = complianceRes.data || [];
 
   // Build entity name lookup
   const entityNames: Record<string, string> = {};
@@ -50,7 +53,7 @@ export async function buildChatContext() {
   const dirNames: Record<string, string> = {};
   for (const d of directory) dirNames[d.id] = d.name;
 
-  let context = `You are an AI assistant for Plinth AI, a family office entity management platform. You have full knowledge of all entities, relationships, directory entries, compliance filings, and financial data in the system.
+  let context = `You are an AI assistant for Rhodes, a family office entity management platform. You have full knowledge of all entities, relationships, directory entries, compliance filings, and financial data in the system.
 
 When referencing entities, always include their exact name so the UI can link to them.
 
@@ -105,6 +108,18 @@ When referencing entities, always include their exact name so the UI can link to
     if (entityCapTable.length > 0) {
       context += `- Cap Table: ${entityCapTable.map(c => `${c.investor_name || 'Unknown'} (${c.ownership_pct}%)`).join(', ')}\n`;
     }
+
+    const entityObligations = complianceObligations.filter(o => o.entity_id === entity.id);
+    if (entityObligations.length > 0) {
+      context += `- Compliance Obligations:\n`;
+      for (const ob of entityObligations) {
+        context += `  - ${ob.name} (${ob.jurisdiction}): status=${ob.status}, due=${ob.next_due_date || 'N/A'}`;
+        if (ob.completed_at) context += `, last_completed=${ob.completed_at.split('T')[0]}`;
+        if (ob.payment_amount) context += `, fee=$${(ob.payment_amount / 100).toFixed(2)}`;
+        context += `\n`;
+      }
+    }
+
     context += '\n';
   }
 

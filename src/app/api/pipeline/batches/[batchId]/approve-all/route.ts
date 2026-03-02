@@ -1,0 +1,64 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { ingestQueueItem } from "@/lib/pipeline/ingest";
+
+export async function POST(
+  _request: Request,
+  { params }: { params: Promise<{ batchId: string }> }
+) {
+  try {
+    const { batchId } = await params;
+    const supabase = await createClient();
+    const admin = createAdminClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: userRow } = await admin
+      .from("users")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+    const userId = userRow ? user.id : null;
+
+    const { data: items, error } = await admin
+      .from("document_queue")
+      .select("*")
+      .eq("batch_id", batchId)
+      .eq("status", "review_ready");
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (!items || items.length === 0) {
+      return NextResponse.json({ approved: 0, skipped: 0, errors: [] });
+    }
+
+    const results = { approved: 0, skipped: 0, errors: [] as string[] };
+
+    for (const item of items) {
+      const result = await ingestQueueItem({
+        item,
+        userId,
+        applyMutations: true,
+        finalStatus: "approved",
+      });
+
+      if (result.success) {
+        results.approved++;
+      } else {
+        results.errors.push(`${item.id}: ${result.error}`);
+      }
+    }
+
+    results.skipped = items.length - results.approved - results.errors.length;
+    return NextResponse.json(results);
+  } catch (err) {
+    console.error("POST /api/pipeline/batches/[batchId]/approve-all error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}

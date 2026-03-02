@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
+import { validateShortName } from "@/lib/utils/document-naming";
 import type { Jurisdiction } from "@/lib/types";
 
 export async function GET() {
@@ -26,7 +27,7 @@ export async function GET() {
     const entityIds = entities.map((e) => e.id);
 
     // Fetch related data in parallel
-    const [registrationsRes, managersRes, membersRes, relationshipsFromRes, relationshipsToRes] =
+    const [registrationsRes, managersRes, membersRes, relationshipsFromRes, relationshipsToRes, complianceRes] =
       await Promise.all([
         supabase
           .from("entity_registrations")
@@ -48,6 +49,11 @@ export async function GET() {
           .from("relationships")
           .select("id, to_entity_id")
           .in("to_entity_id", entityIds),
+        supabase
+          .from("compliance_obligations")
+          .select("entity_id, status, next_due_date")
+          .in("entity_id", entityIds)
+          .in("status", ["pending", "overdue", "completed"]),
       ]);
 
     if (registrationsRes.error) {
@@ -65,12 +71,14 @@ export async function GET() {
     if (relationshipsToRes.error) {
       return NextResponse.json({ error: relationshipsToRes.error.message }, { status: 500 });
     }
+    // complianceRes errors are non-fatal — fall back to old calculation
 
     const registrations = registrationsRes.data || [];
     const managers = managersRes.data || [];
     const members = membersRes.data || [];
     const relationshipsFrom = relationshipsFromRes.data || [];
     const relationshipsTo = relationshipsToRes.data || [];
+    const complianceObligations = complianceRes.data || [];
 
     // Build enriched entity list
     const enriched = entities.map((entity) => {
@@ -83,35 +91,49 @@ export async function GET() {
         relationshipsFrom.filter((r) => r.from_entity_id === entity.id).length +
         relationshipsTo.filter((r) => r.to_entity_id === entity.id).length;
 
-      // Calculate filing status across all jurisdictions
-      // Collect all jurisdictions: formation_state + registration jurisdictions
-      const allJurisdictions: { jurisdiction: Jurisdiction; lastFiled: string | null; filingExempt: boolean }[] = [];
-
-      // Formation state - find the registration record for it, or use null
-      const formationReg = entityRegistrations.find(
-        (r) => r.jurisdiction === entity.formation_state
+      // Derive filing_status from compliance obligations if available, else fall back
+      const entityObligations = complianceObligations.filter(
+        (o) => o.entity_id === entity.id
       );
-      allJurisdictions.push({
-        jurisdiction: entity.formation_state as Jurisdiction,
-        lastFiled: formationReg?.last_filing_date || null,
-        filingExempt: formationReg?.filing_exempt || false,
-      });
 
-      // Other registration jurisdictions
-      for (const reg of entityRegistrations) {
-        if (reg.jurisdiction !== entity.formation_state) {
-          allJurisdictions.push({
-            jurisdiction: reg.jurisdiction as Jurisdiction,
-            lastFiled: reg.last_filing_date || null,
-            filingExempt: reg.filing_exempt || false,
-          });
+      let worstStatus: string;
+      if (entityObligations.length > 0) {
+        // Use compliance obligations for status
+        const now = new Date();
+        const hasOverdue = entityObligations.some(
+          (o) => o.status === "pending" && o.next_due_date && new Date(o.next_due_date) < now
+        );
+        const hasDueSoon = entityObligations.some((o) => {
+          if (o.status !== "pending" || !o.next_due_date) return false;
+          const diffDays = (new Date(o.next_due_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+          return diffDays >= 0 && diffDays <= 60;
+        });
+        worstStatus = hasOverdue ? "overdue" : hasDueSoon ? "due_soon" : "current";
+      } else {
+        // Fall back to old calculation from registrations
+        const allJurisdictions: { jurisdiction: Jurisdiction; lastFiled: string | null; filingExempt: boolean }[] = [];
+        const formationReg = entityRegistrations.find(
+          (r) => r.jurisdiction === entity.formation_state
+        );
+        allJurisdictions.push({
+          jurisdiction: entity.formation_state as Jurisdiction,
+          lastFiled: formationReg?.last_filing_date || null,
+          filingExempt: formationReg?.filing_exempt || false,
+        });
+        for (const reg of entityRegistrations) {
+          if (reg.jurisdiction !== entity.formation_state) {
+            allJurisdictions.push({
+              jurisdiction: reg.jurisdiction as Jurisdiction,
+              lastFiled: reg.last_filing_date || null,
+              filingExempt: reg.filing_exempt || false,
+            });
+          }
         }
+        const filingStatuses = allJurisdictions.map((j) =>
+          calculateFilingStatus(j.lastFiled, j.jurisdiction, j.filingExempt)
+        );
+        worstStatus = getWorstFilingStatus(filingStatuses);
       }
-
-      const filingStatuses = allJurisdictions.map((j) =>
-        calculateFilingStatus(j.lastFiled, j.jurisdiction, j.filingExempt)
-      );
-      const worstStatus = getWorstFilingStatus(filingStatuses);
 
       return {
         ...entity,
@@ -139,19 +161,27 @@ export async function POST(request: Request) {
       name,
       type,
       formation_state,
+      short_name,
       ein,
       formed_date,
       registered_agent,
       address,
       parent_entity_id,
       notes,
+      legal_structure,
     } = body;
 
-    if (!name || !type || !formation_state) {
+    if (!name || !type || !formation_state || !short_name) {
       return NextResponse.json(
-        { error: "name, type, and formation_state are required" },
+        { error: "name, type, formation_state, and short_name are required" },
         { status: 400 }
       );
+    }
+
+    // Validate short_name format
+    const snValidation = validateShortName(short_name);
+    if (!snValidation.valid) {
+      return NextResponse.json({ error: snValidation.error }, { status: 400 });
     }
 
     // Create the entity
@@ -161,17 +191,26 @@ export async function POST(request: Request) {
         name,
         type,
         formation_state,
+        short_name,
         ein: ein || null,
         formed_date: formed_date || null,
         registered_agent: registered_agent || null,
         address: address || null,
         parent_entity_id: parent_entity_id || null,
         notes: notes || null,
+        legal_structure: legal_structure || (type === "trust" ? "trust" : null),
       })
       .select()
       .single();
 
     if (entityError) {
+      // Unique constraint violation on short_name
+      if (entityError.code === "23505") {
+        return NextResponse.json(
+          { error: "An entity with this short name already exists." },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ error: entityError.message }, { status: 500 });
     }
 

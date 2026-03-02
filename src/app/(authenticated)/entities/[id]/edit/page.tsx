@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SectionHeader } from "@/components/ui/section-header";
 import { US_STATES } from "@/lib/constants";
+import { validateShortName } from "@/lib/utils/document-naming";
 import type { EntityType } from "@/lib/types/enums";
 
 /* ------------------------------------------------------------------ */
@@ -81,6 +82,7 @@ export default function EditEntityPage() {
 
   /* Form state */
   const [name, setName] = useState("");
+  const [shortName, setShortName] = useState("");
   const [type, setType] = useState<EntityType>("holding_company");
   const [ein, setEin] = useState("");
   const [formationState, setFormationState] = useState("");
@@ -113,6 +115,7 @@ export default function EditEntityPage() {
         const entity = await entityRes.json();
 
         setName(entity.name || "");
+        setShortName(entity.short_name || "");
         setType(entity.type || "holding_company");
         setEin(entity.ein || "");
         setFormationState(entity.formation_state || "");
@@ -147,6 +150,13 @@ export default function EditEntityPage() {
       setError("Name is required.");
       return;
     }
+    if (shortName.trim()) {
+      const snValidation = validateShortName(shortName.trim());
+      if (!snValidation.valid) {
+        setError(snValidation.error!);
+        return;
+      }
+    }
     if (!formationState) {
       setError("Formation State is required.");
       return;
@@ -161,6 +171,7 @@ export default function EditEntityPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
+          short_name: shortName.trim() || null,
           type,
           ein: ein.trim() || null,
           formation_state: formationState,
@@ -252,6 +263,22 @@ export default function EditEntityPage() {
             placeholder="Entity name"
             style={inputStyle}
           />
+        </div>
+
+        {/* Short Name */}
+        <div style={fieldGroupStyle}>
+          <label style={labelStyle}>Short Name</label>
+          <input
+            type="text"
+            value={shortName}
+            onChange={(e) => setShortName(e.target.value)}
+            placeholder="e.g. 44H"
+            maxLength={30}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+            Letters, numbers, and hyphens only. Used for document filenames. Changes only affect future uploads.
+          </div>
         </div>
 
         {/* Type */}

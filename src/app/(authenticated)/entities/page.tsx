@@ -202,18 +202,6 @@ export default function EntitiesPage() {
         </div>
       )}
 
-      {/* ---- Stat cards ---- */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, marginTop: 20 }}>
-        <StatCard label="Total Entities" value={entities.length} />
-        <StatCard label="Jurisdictions" value={uniqueJurisdictions} />
-        <StatCard
-          label="Filing Alerts"
-          value={filingAlerts.length}
-          color={filingAlerts.length > 0 ? "#c73e3e" : undefined}
-        />
-        <StatCard label="Relationships" value={totalRelationships} />
-      </div>
-
       {/* ---- Search bar ---- */}
       <div style={{ marginTop: 20, marginBottom: 14 }}>
         <SearchInput

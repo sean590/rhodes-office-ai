@@ -15,7 +15,7 @@ const dmMono = DM_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Plinth AI — Entity Management",
+  title: "Rhodes — AI Family Office",
   description: "Internal entity management platform for family offices",
 };
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { validateShortName } from "@/lib/utils/document-naming";
 
 export async function GET(
   request: Request,
@@ -37,6 +38,7 @@ export async function GET(
       capTableRes,
       partnershipRepsRes,
       entityRolesRes,
+      complianceRes,
     ] = await Promise.all([
       supabase
         .from("entity_registrations")
@@ -91,6 +93,12 @@ export async function GET(
         .from("entity_roles")
         .select("*")
         .eq("entity_id", id),
+      // Compliance obligations
+      supabase
+        .from("compliance_obligations")
+        .select("*")
+        .eq("entity_id", id)
+        .order("next_due_date", { ascending: true, nullsFirst: false }),
     ]);
 
     // Check for errors
@@ -126,6 +134,9 @@ export async function GET(
     }
     if (entityRolesRes.error) {
       return NextResponse.json({ error: entityRolesRes.error.message }, { status: 500 });
+    }
+    if (complianceRes.error) {
+      return NextResponse.json({ error: complianceRes.error.message }, { status: 500 });
     }
 
     // Merge custom field definitions with their values
@@ -301,6 +312,7 @@ export async function GET(
       cap_table: enrichedCapTable,
       partnership_reps: partnershipRepsRes.data || [],
       roles: entityRolesRes.data || [],
+      compliance_obligations: complianceRes.data || [],
     };
 
     return NextResponse.json(result);
@@ -332,6 +344,8 @@ export async function PUT(
       "parent_entity_id",
       "notes",
       "business_purpose",
+      "short_name",
+      "legal_structure",
     ];
 
     const updates: Record<string, unknown> = {};
@@ -343,6 +357,14 @@ export async function PUT(
 
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    // Validate short_name format if being updated
+    if ("short_name" in updates && updates.short_name) {
+      const snValidation = validateShortName(updates.short_name as string);
+      if (!snValidation.valid) {
+        return NextResponse.json({ error: snValidation.error }, { status: 400 });
+      }
     }
 
     updates.updated_at = new Date().toISOString();
@@ -357,6 +379,13 @@ export async function PUT(
     if (error) {
       if (error.code === "PGRST116") {
         return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+      }
+      // Unique constraint violation on short_name
+      if (error.code === "23505") {
+        return NextResponse.json(
+          { error: "An entity with this short name already exists." },
+          { status: 409 }
+        );
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }

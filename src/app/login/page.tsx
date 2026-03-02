@@ -25,10 +25,10 @@ export default function LoginPage() {
             className="w-9 h-9 rounded-lg flex items-center justify-center text-lg font-bold text-white"
             style={{ background: "linear-gradient(135deg, #2d5a3d, #3d7a53)" }}
           >
-            P
+            R
           </div>
           <span className="text-xl font-semibold" style={{ letterSpacing: "-0.02em", color: "#1a1a1f" }}>
-            Plinth AI
+            Rhodes
           </span>
         </div>
 

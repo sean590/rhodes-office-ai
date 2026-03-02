@@ -9,12 +9,14 @@ import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
 import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, SearchIcon, ChartIcon } from "@/components/ui/icons";
+import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
+import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
 import { calculateFilingStatus, getFilingInfo } from "@/lib/utils/filing-status";
-import type { EntityType, TrustRoleType, Jurisdiction, CustomFieldType, InvestorType, DocumentType } from "@/lib/types/enums";
+import type { EntityType, TrustRoleType, Jurisdiction, CustomFieldType, InvestorType, DocumentType, LegalStructure } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 import type {
   EntityDetail,
@@ -29,7 +31,10 @@ import type {
   EntityRole,
   Document as DocRecord,
   ProposedAction,
+  ComplianceObligation,
 } from "@/lib/types/entities";
+import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
+import type { ObligationDisplayStatus } from "@/lib/utils/compliance-engine";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -74,6 +79,28 @@ const FILING_STATUS_COLORS: Record<string, { color: string; bg: string; dot: str
   overdue: { color: "#c73e3e", bg: "rgba(199,62,62,0.10)", dot: "#c73e3e" },
   not_required: { color: "#6b6b76", bg: "rgba(107,107,118,0.10)", dot: "#9494a0" },
   exempt: { color: "#6b6b76", bg: "rgba(107,107,118,0.10)", dot: "#9494a0" },
+  completed: { color: "#2d5a3d", bg: "rgba(45,138,78,0.10)", dot: "#2d8a4e" },
+  not_applicable: { color: "#6b6b76", bg: "rgba(107,107,118,0.10)", dot: "#9494a0" },
+};
+
+const OBLIGATION_STATUS_LABELS: Record<string, string> = {
+  current: "Current",
+  due_soon: "Due Soon",
+  overdue: "Overdue",
+  completed: "Completed",
+  exempt: "Exempt",
+  not_applicable: "N/A",
+};
+
+const LEGAL_STRUCTURE_LABELS: Record<string, string> = {
+  llc: "LLC",
+  corporation: "Corporation",
+  lp: "Limited Partnership",
+  trust: "Trust",
+  gp: "General Partnership",
+  sole_prop: "Sole Proprietorship",
+  series_llc: "Series LLC",
+  other: "Other",
 };
 
 /* ------------------------------------------------------------------ */
@@ -115,6 +142,147 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
     >
       <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>{label}</span>
       <span style={{ color: "#1a1a1f", textAlign: "right" }}>{children}</span>
+    </div>
+  );
+}
+
+/* ---- Legal Structure Row (inline editable) ---- */
+function LegalStructureRow({
+  entityId,
+  currentValue,
+  onUpdate,
+}: {
+  entityId: string;
+  currentValue: LegalStructure | null;
+  onUpdate: (val: LegalStructure | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState<LegalStructure | "">(currentValue || "");
+  const [saving, setSaving] = useState(false);
+
+  const structures: { value: LegalStructure; label: string }[] = [
+    { value: "llc", label: "LLC" },
+    { value: "corporation", label: "Corporation" },
+    { value: "lp", label: "Limited Partnership" },
+    { value: "trust", label: "Trust" },
+    { value: "gp", label: "General Partnership" },
+    { value: "series_llc", label: "Series LLC" },
+    { value: "other", label: "Other" },
+  ];
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ legal_structure: value || null }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      onUpdate(value || null);
+      setEditing(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayLabel = currentValue
+    ? (LEGAL_STRUCTURE_LABELS[currentValue] || currentValue)
+    : "\u2014";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px 0",
+        borderBottom: "1px solid #f0eee8",
+        fontSize: 13,
+      }}
+    >
+      <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>Legal Structure</span>
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <select
+            value={value}
+            onChange={(e) => setValue(e.target.value as LegalStructure | "")}
+            style={{
+              fontSize: 13,
+              padding: "4px 8px",
+              border: "1px solid #ddd9d0",
+              borderRadius: 6,
+              background: "#fff",
+              color: "#1a1a1f",
+              fontFamily: "inherit",
+            }}
+          >
+            <option value="">None</option>
+            {structures.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              background: "#2d5a3d",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {saving ? "..." : "Save"}
+          </button>
+          <button
+            onClick={() => { setEditing(false); setValue(currentValue || ""); }}
+            style={{
+              background: "none",
+              border: "1px solid #e8e6df",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 500,
+              color: "#6b6b76",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={() => { setValue(currentValue || ""); setEditing(true); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: currentValue ? "none" : "1px dashed #ddd9d0",
+            borderRadius: currentValue ? 0 : 6,
+            padding: currentValue ? 0 : "3px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontFamily: "inherit",
+            color: currentValue ? "#1a1a1f" : "#9494a0",
+            textAlign: "right",
+          }}
+          title="Click to edit"
+        >
+          {currentValue ? displayLabel : "Set structure"}
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: "#9494a0", flexShrink: 0 }}>
+            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }
@@ -2088,14 +2256,25 @@ function ComplianceTab({
   formationState,
   registrations,
   formedDate,
+  legalStructure,
+  obligations,
+  documents,
   onRegistrationsChange,
+  onRefresh,
 }: {
   entityId: string;
   formationState: string;
   registrations: EntityRegistration[];
   formedDate: string | null;
+  legalStructure: LegalStructure | null;
+  obligations: ComplianceObligation[];
+  documents: { id: string; name: string }[];
   onRegistrationsChange: (regs: EntityRegistration[]) => void;
+  onRefresh: () => void;
 }) {
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
   // Build jurisdictions: formation state + all registrations
   const jurisdictions: {
     code: string;
@@ -2134,6 +2313,50 @@ function ComplianceTab({
     }
   }
 
+  async function handleSync() {
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const res = await fetch(`/api/entities/${entityId}/compliance/sync`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        console.error("Sync error:", err.error);
+        return;
+      }
+      const data = await res.json();
+      onRefresh();
+      if (data.generated_count === 0) {
+        setSyncMessage("No compliance rules apply to this entity type in the registered jurisdictions.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  if (!legalStructure) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <Card>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0" }}>
+            <div style={{ fontSize: 20 }}>&#9432;</div>
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 2 }}>
+                Set legal structure to generate compliance obligations
+              </div>
+              <div style={{ fontSize: 13, color: "#6b6b76" }}>
+                Edit this entity&apos;s Overview tab and set the Legal Structure field (LLC, Corporation, LP, etc.) to automatically generate state-specific compliance obligations.
+              </div>
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   if (jurisdictions.length === 0) {
     return (
       <div style={{ fontSize: 13, color: "#9494a0", textAlign: "center", padding: "40px 0" }}>
@@ -2142,27 +2365,51 @@ function ComplianceTab({
     );
   }
 
+  // Group obligations by jurisdiction
+  const obligationsByJurisdiction = new Map<string, ComplianceObligation[]>();
+  for (const obl of obligations) {
+    const existing = obligationsByJurisdiction.get(obl.jurisdiction) || [];
+    existing.push(obl);
+    obligationsByJurisdiction.set(obl.jurisdiction, existing);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Sync button + message */}
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12 }}>
+        {syncMessage && (
+          <span style={{ fontSize: 12, color: "#9494a0" }}>{syncMessage}</span>
+        )}
+        <Button size="sm" onClick={handleSync} disabled={syncing}>
+          {syncing ? "Syncing..." : "Sync from Rules"}
+        </Button>
+      </div>
+
       {jurisdictions.map((jur) => (
         <ComplianceCard
           key={jur.code}
           entityId={entityId}
           jur={jur}
           registrations={registrations}
+          obligations={obligationsByJurisdiction.get(jur.code) || []}
+          documents={documents}
           onRegistrationsChange={onRegistrationsChange}
+          onRefresh={onRefresh}
         />
       ))}
     </div>
   );
 }
 
-/* ---- Single Compliance Card (with inline edit) ---- */
+/* ---- Single Compliance Card (with inline edit + obligation rows) ---- */
 function ComplianceCard({
   entityId,
   jur,
   registrations,
+  obligations,
+  documents,
   onRegistrationsChange,
+  onRefresh,
 }: {
   entityId: string;
   jur: {
@@ -2175,7 +2422,10 @@ function ComplianceCard({
     filingExempt: boolean;
   };
   registrations: EntityRegistration[];
+  obligations: ComplianceObligation[];
+  documents: { id: string; name: string }[];
   onRegistrationsChange: (regs: EntityRegistration[]) => void;
+  onRefresh: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [lastFiled, setLastFiled] = useState(jur.lastFilingDate ?? "");
@@ -2184,16 +2434,34 @@ function ComplianceCard({
   const [exempt, setExempt] = useState(jur.filingExempt);
   const [saving, setSaving] = useState(false);
 
-  const filingInfo = getFilingInfo(jur.code as Jurisdiction);
-  const filingResult = calculateFilingStatus(jur.lastFilingDate, jur.code as Jurisdiction, jur.filingExempt);
-  const statusColors = FILING_STATUS_COLORS[filingResult.status] || FILING_STATUS_COLORS.current;
   const stateName = getStateLabel(jur.code as Jurisdiction);
 
-  let freqLabel = "Annual";
-  if (filingInfo.months === 0) freqLabel = "N/A";
-  else if (filingInfo.months === 24) freqLabel = "Biennial";
-  else if (filingInfo.months === 120) freqLabel = "Decennial";
-  else if (filingInfo.months === 12) freqLabel = "Annual";
+  // Calculate worst status across all obligations for the card badge
+  const displayStatuses = obligations.map((o) =>
+    getObligationDisplayStatus(o.next_due_date, o.status)
+  );
+  const worstStatus = obligations.length > 0
+    ? getWorstObligationStatus(displayStatuses)
+    : "current";
+  const statusColors = FILING_STATUS_COLORS[worstStatus] || FILING_STATUS_COLORS.current;
+
+  // Find soonest upcoming due date for badge label
+  const pendingObligations = obligations.filter(
+    (o) => o.status === "pending" && o.next_due_date
+  );
+  pendingObligations.sort(
+    (a, b) => new Date(a.next_due_date!).getTime() - new Date(b.next_due_date!).getTime()
+  );
+  const soonestDue = pendingObligations[0]?.next_due_date;
+  let badgeLabel = "Current";
+  if (worstStatus === "overdue") badgeLabel = "Overdue";
+  else if (worstStatus === "due_soon" && soonestDue) {
+    badgeLabel = `Due ${new Date(soonestDue + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  } else if (worstStatus === "current" && soonestDue) {
+    badgeLabel = `Next: ${new Date(soonestDue + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  } else if (worstStatus === "completed") badgeLabel = "All Complete";
+  else if (worstStatus === "exempt") badgeLabel = "Exempt";
+  else if (worstStatus === "not_applicable") badgeLabel = "N/A";
 
   function handleStartEdit() {
     setLastFiled(jur.lastFilingDate ?? "");
@@ -2207,8 +2475,6 @@ function ComplianceCard({
     setSaving(true);
     try {
       let regId = jur.registrationId;
-
-      // Auto-create registration if one doesn't exist yet
       if (!regId) {
         const createRes = await fetch(`/api/entities/${entityId}/registrations`, {
           method: "POST",
@@ -2234,7 +2500,6 @@ function ComplianceCard({
       if (!res.ok) throw new Error("Failed to update registration");
       const updated = await res.json();
 
-      // If we created a new registration, add it; otherwise update in place
       if (!jur.registrationId) {
         onRegistrationsChange([...registrations, updated]);
       } else {
@@ -2262,136 +2527,36 @@ function ComplianceCard({
 
   return (
     <Card>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-        <div style={{ flex: 1 }}>
-          {/* Header row */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: "#1a1a1f" }}>{stateName}</span>
-            <Badge
-              label={jur.isFormation ? "Formation" : "Qualification"}
-              color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
-              bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
-            />
-            {!editing && (
-              <button
-                onClick={handleStartEdit}
-                style={{
-                  background: "none",
-                  border: "1px solid #e8e6df",
-                  borderRadius: 6,
-                  padding: "3px 10px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "#6b6b76",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Edit
-              </button>
-            )}
-          </div>
-
-          {/* Filing details */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 16, fontSize: 13 }}>
-            <div>
-              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                Filing Type
-              </div>
-              <div style={{ color: "#1a1a1f", fontWeight: 500 }}>{filingInfo.name}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                State ID #
-              </div>
-              {editing ? (
-                <input
-                  type="text"
-                  value={stateIdVal}
-                  onChange={(e) => setStateIdVal(e.target.value)}
-                  placeholder="e.g. 202412345678"
-                  style={{ ...dateInputStyle, width: "100%", boxSizing: "border-box" as const }}
-                />
-              ) : (
-                <div style={{ color: "#1a1a1f", fontFamily: "'DM Mono', monospace", fontSize: 12 }}>
-                  {jur.stateId || "\u2014"}
-                </div>
-              )}
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                {jur.isFormation ? "Formed" : "Qualified"}
-              </div>
-              {editing && !jur.isFormation ? (
-                <input
-                  type="date"
-                  value={qualDate}
-                  onChange={(e) => setQualDate(e.target.value)}
-                  style={dateInputStyle}
-                />
-              ) : (
-                <div style={{ color: "#1a1a1f" }}>{formatDate(jur.qualificationDate)}</div>
-              )}
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                Last Filed
-              </div>
-              {editing ? (
-                <input
-                  type="date"
-                  value={lastFiled}
-                  onChange={(e) => setLastFiled(e.target.value)}
-                  style={dateInputStyle}
-                />
-              ) : (
-                <div style={{ color: "#1a1a1f" }}>{formatDate(jur.lastFilingDate)}</div>
-              )}
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
-                Frequency
-              </div>
-              <div style={{ color: "#1a1a1f" }}>{freqLabel}</div>
-            </div>
-          </div>
-
-          {/* Exempt checkbox + Save/Cancel row */}
-          {editing && (
-            <div style={{ marginTop: 12 }}>
-              <label
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 13,
-                  color: "#1a1a1f",
-                  cursor: "pointer",
-                  marginBottom: 10,
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={exempt}
-                  onChange={(e) => setExempt(e.target.checked)}
-                  style={{ accentColor: "#2d5a3d" }}
-                />
-                No filing required for this jurisdiction
-              </label>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button size="sm" variant="primary" onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving..." : "Save"}
-                </Button>
-                <Button size="sm" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-              </div>
-            </div>
+      {/* Header row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 16, fontWeight: 600, color: "#1a1a1f" }}>{stateName}</span>
+          <Badge
+            label={jur.isFormation ? "Formation" : "Qualification"}
+            color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
+            bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
+          />
+          {!editing && (
+            <button
+              onClick={handleStartEdit}
+              style={{
+                background: "none",
+                border: "1px solid #e8e6df",
+                borderRadius: 6,
+                padding: "3px 10px",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "#6b6b76",
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Edit
+            </button>
           )}
         </div>
-
-        {/* Status badge on right */}
-        <div style={{ textAlign: "right", marginLeft: 24 }}>
+        {/* Status badge */}
+        <div style={{ flexShrink: 0 }}>
           <div
             style={{
               display: "inline-flex",
@@ -2406,11 +2571,384 @@ function ComplianceCard({
             }}
           >
             <Dot color={statusColors.dot} size={6} />
-            {filingResult.label}
+            {badgeLabel}
           </div>
         </div>
       </div>
+
+          {/* Sub-header: State ID + Formed/Qualified date */}
+          <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+            {jur.stateId && (
+              <>STATE ID #: <span style={{ fontFamily: "'DM Mono', monospace", color: "#1a1a1f" }}>{jur.stateId}</span> &middot; </>
+            )}
+            {jur.isFormation ? "FORMED" : "QUALIFIED"}: <span style={{ color: "#1a1a1f" }}>{formatDate(jur.isFormation ? jur.qualificationDate : jur.qualificationDate)}</span>
+          </div>
+
+          {/* Edit mode for registration fields */}
+          {editing && (
+            <div style={{ marginBottom: 16, padding: 12, background: "#faf9f6", borderRadius: 8, border: "1px solid #e8e6df" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, fontSize: 13, marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                    State ID #
+                  </div>
+                  <input
+                    type="text"
+                    value={stateIdVal}
+                    onChange={(e) => setStateIdVal(e.target.value)}
+                    placeholder="e.g. 202412345678"
+                    style={{ ...dateInputStyle, width: "100%", boxSizing: "border-box" as const }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                    {jur.isFormation ? "Formed" : "Qualified"}
+                  </div>
+                  {!jur.isFormation ? (
+                    <input
+                      type="date"
+                      value={qualDate}
+                      onChange={(e) => setQualDate(e.target.value)}
+                      style={dateInputStyle}
+                    />
+                  ) : (
+                    <div style={{ color: "#1a1a1f", padding: "4px 0" }}>{formatDate(jur.qualificationDate)}</div>
+                  )}
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>
+                    Last Filed (legacy)
+                  </div>
+                  <input
+                    type="date"
+                    value={lastFiled}
+                    onChange={(e) => setLastFiled(e.target.value)}
+                    style={dateInputStyle}
+                  />
+                </div>
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1a1a1f", cursor: "pointer", marginBottom: 10 }}>
+                <input type="checkbox" checked={exempt} onChange={(e) => setExempt(e.target.checked)} style={{ accentColor: "#2d5a3d" }} />
+                No filing required for this jurisdiction
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button size="sm" variant="primary" onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving..." : "Save"}
+                </Button>
+                <Button size="sm" onClick={() => setEditing(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {/* Obligation rows */}
+          {obligations.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {obligations.map((obl, idx) => (
+                <ObligationRow
+                  key={obl.id}
+                  entityId={entityId}
+                  obligation={obl}
+                  documents={documents}
+                  isLast={idx === obligations.length - 1}
+                  onRefresh={onRefresh}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: "#9494a0", padding: "8px 0" }}>
+              No compliance obligations for this entity type in this jurisdiction.
+            </div>
+          )}
     </Card>
+  );
+}
+
+/* ---- Single Obligation Row within a ComplianceCard ---- */
+function ObligationRow({
+  entityId,
+  obligation,
+  documents,
+  isLast,
+  onRefresh,
+}: {
+  entityId: string;
+  obligation: ComplianceObligation;
+  documents: { id: string; name: string }[];
+  isLast: boolean;
+  onRefresh: () => void;
+}) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [markOpen, setMarkOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [completedAt, setCompletedAt] = useState(new Date().toISOString().split("T")[0]);
+  const [amountPaid, setAmountPaid] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [notes, setNotes] = useState("");
+  const [markAs, setMarkAs] = useState<"completed" | "exempt" | "not_applicable">("completed");
+
+  const displayStatus = getObligationDisplayStatus(obligation.next_due_date, obligation.status);
+  const colors = FILING_STATUS_COLORS[displayStatus] || FILING_STATUS_COLORS.current;
+  const statusLabel = OBLIGATION_STATUS_LABELS[displayStatus] || displayStatus;
+
+  const dueLabel = obligation.next_due_date
+    ? new Date(obligation.next_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : "N/A";
+
+  const completedLabel = obligation.completed_at
+    ? new Date(obligation.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+
+  // Has any detail worth expanding?
+  const hasDetail = obligation.completed_at || obligation.confirmation || obligation.payment_amount || obligation.document_id || obligation.penalty_description || obligation.description;
+
+  const linkedDoc = obligation.document_id ? documents.find(d => d.id === obligation.document_id) : null;
+
+  function handleOpenComplete() {
+    setCompletedAt(new Date().toISOString().split("T")[0]);
+    setAmountPaid("");
+    setConfirmation("");
+    setNotes("");
+    setMarkAs("completed");
+    setDetailOpen(false);
+    setMarkOpen(true);
+  }
+
+  async function handleSaveComplete() {
+    setSaving(true);
+    try {
+      const body: Record<string, unknown> = { status: markAs };
+      if (markAs === "completed") {
+        body.completed_at = completedAt;
+        if (amountPaid) body.payment_amount = Math.round(parseFloat(amountPaid) * 100);
+        if (confirmation) body.confirmation = confirmation;
+        if (notes) body.notes = notes;
+      }
+      if (markAs === "exempt" || markAs === "not_applicable") {
+        if (notes) body.notes = notes;
+      }
+
+      const res = await fetch(`/api/entities/${entityId}/compliance/${obligation.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to update obligation");
+      setMarkOpen(false);
+      onRefresh();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputStyle: React.CSSProperties = {
+    fontSize: 13,
+    padding: "6px 10px",
+    border: "1px solid #ddd9d0",
+    borderRadius: 6,
+    background: "#fff",
+    color: "#1a1a1f",
+    fontFamily: "inherit",
+    width: "100%",
+    boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{ borderTop: "1px solid #f0ede6", paddingTop: 10, paddingBottom: isLast ? 0 : 10 }}>
+      {/* Main row — clickable to expand detail */}
+      <div
+        onClick={() => { if (!markOpen && hasDetail) setDetailOpen(p => !p); }}
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 140px 130px 110px 110px",
+          gap: 8,
+          alignItems: "start",
+          fontSize: 13,
+          cursor: hasDetail ? "pointer" : "default",
+        }}
+      >
+        {/* Obligation name */}
+        <div>
+          <div style={{ fontWeight: 500, color: "#1a1a1f", display: "flex", alignItems: "center", gap: 6 }}>
+            {hasDetail && (
+              <span style={{ display: "inline-block", fontSize: 8, color: "#9494a0", transition: "transform 0.15s", transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>&#9654;</span>
+            )}
+            <span>{obligation.name}</span>
+            {obligation.form_number && (
+              <>
+                {" "}
+                {obligation.portal_url ? (
+                  <a
+                    href={obligation.portal_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ fontSize: 11, color: "#3366a8", textDecoration: "none" }}
+                  >
+                    ({obligation.form_number})
+                  </a>
+                ) : (
+                  <span style={{ fontSize: 11, color: "#9494a0" }}>({obligation.form_number})</span>
+                )}
+              </>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2, paddingLeft: hasDetail ? 14 : 0 }}>
+            Filed with: {obligation.filed_with || "\u2014"}
+            {completedLabel && <> &middot; Last completed: {completedLabel}</>}
+          </div>
+        </div>
+
+        {/* Fee */}
+        <div style={{ color: "#1a1a1f" }}>{obligation.fee_description || "\u2014"}</div>
+
+        {/* Due date */}
+        <div style={{ color: "#1a1a1f" }}>{dueLabel}</div>
+
+        {/* Status badge */}
+        <div>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "3px 8px",
+              borderRadius: 6,
+              background: colors.bg,
+              fontSize: 11,
+              fontWeight: 600,
+              color: colors.color,
+            }}
+          >
+            <Dot color={colors.dot} size={5} />
+            {statusLabel}
+          </div>
+        </div>
+
+        {/* Action */}
+        <div>
+          {obligation.status === "pending" && (
+            <button
+              onClick={(e) => { e.stopPropagation(); handleOpenComplete(); }}
+              style={{
+                background: "none",
+                border: "1px solid #e8e6df",
+                borderRadius: 6,
+                padding: "3px 10px",
+                fontSize: 11,
+                fontWeight: 500,
+                color: "#2d5a3d",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Mark Complete
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Expanded detail panel */}
+      {detailOpen && !markOpen && (
+        <div style={{ marginTop: 8, marginLeft: 16, padding: "10px 14px", background: "#faf9f6", borderRadius: 8, border: "1px solid #f0ede6", fontSize: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+            {obligation.completed_at && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Completed</div>
+                <div style={{ color: "#1a1a1f" }}>{completedLabel}</div>
+              </div>
+            )}
+            {obligation.payment_amount != null && obligation.payment_amount > 0 && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Amount Paid</div>
+                <div style={{ color: "#1a1a1f" }}>${(obligation.payment_amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</div>
+              </div>
+            )}
+            {obligation.confirmation && (
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Confirmation #</div>
+                <div style={{ color: "#1a1a1f" }}>{obligation.confirmation}</div>
+              </div>
+            )}
+          </div>
+          {obligation.notes && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Notes</div>
+              <div style={{ color: "#6b6b76", fontStyle: "italic" }}>{obligation.notes}</div>
+            </div>
+          )}
+          {obligation.description && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Description</div>
+              <div style={{ color: "#6b6b76" }}>{obligation.description}</div>
+            </div>
+          )}
+          {obligation.penalty_description && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Penalty</div>
+              <div style={{ color: "#6b6b76" }}>{obligation.penalty_description}</div>
+            </div>
+          )}
+          {linkedDoc && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 2 }}>Document</div>
+              <a
+                href={`/entities/${entityId}?tab=documents`}
+                style={{ color: "#3366a8", textDecoration: "none", fontSize: 12 }}
+              >
+                {linkedDoc.name}
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Expanded mark complete panel */}
+      {markOpen && (
+        <div style={{ marginTop: 10, padding: 14, background: "#faf9f6", borderRadius: 8, border: "1px solid #e8e6df" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 10 }}>
+            <div>
+              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Date Completed</div>
+              <input type="date" value={completedAt} onChange={(e) => setCompletedAt(e.target.value)} style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Amount Paid ($)</div>
+              <input type="number" step="0.01" value={amountPaid} onChange={(e) => setAmountPaid(e.target.value)} placeholder="0.00" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Confirmation #</div>
+              <input type="text" value={confirmation} onChange={(e) => setConfirmation(e.target.value)} placeholder="e.g. DEL-2026-001" style={inputStyle} />
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Notes</div>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input type="radio" name={`mark-${obligation.id}`} checked={markAs === "completed"} onChange={() => setMarkAs("completed")} style={{ accentColor: "#2d5a3d" }} />
+              Mark as Completed
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input type="radio" name={`mark-${obligation.id}`} checked={markAs === "not_applicable"} onChange={() => setMarkAs("not_applicable")} style={{ accentColor: "#2d5a3d" }} />
+              Mark as N/A
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
+              <input type="radio" name={`mark-${obligation.id}`} checked={markAs === "exempt"} onChange={() => setMarkAs("exempt")} style={{ accentColor: "#2d5a3d" }} />
+              Mark as Exempt
+            </label>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button size="sm" variant="primary" onClick={handleSaveComplete} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+            <Button size="sm" onClick={() => setMarkOpen(false)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2451,6 +2989,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   add_custom_field: { label: "Add Custom Field", color: "#6b6b76" },
   add_partnership_rep: { label: "Add Partnership Rep", color: "#2d8a4e" },
   add_role: { label: "Add Role", color: "#7b4db5" },
+  complete_obligation: { label: "Complete Obligation", color: "#2d5a3d" },
+  update_obligation: { label: "Update Obligation", color: "#c47520" },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -2487,6 +3027,10 @@ const FIELD_LABELS: Record<string, string> = {
   status: "Status",
   business_purpose: "Business Purpose",
   role_title: "Role Title",
+  completed_at: "Completed At",
+  payment_amount: "Payment Amount",
+  confirmation: "Confirmation #",
+  obligation_id: "Obligation",
 };
 
 const HIDDEN_ID_FIELDS = new Set([
@@ -2500,6 +3044,7 @@ const HIDDEN_ID_FIELDS = new Set([
   "investor_entity_id",
   "investor_directory_id",
   "field_def_id",
+  "obligation_id",
 ]);
 
 function getFieldLabel(key: string): string {
@@ -2507,7 +3052,7 @@ function getFieldLabel(key: string): string {
 }
 
 // Fields stored as BIGINT cents that should display as dollars in the review panel
-const CENTS_FIELDS = new Set(["capital_contributed", "annual_estimate"]);
+const CENTS_FIELDS = new Set(["capital_contributed", "annual_estimate", "payment_amount"]);
 
 function centsToDisplay(val: unknown): string {
   const num = Number(val);
@@ -2537,6 +3082,7 @@ function DocumentsTab({
   documents,
   docsLoading,
   onRefresh,
+  onRefreshQuiet,
   onEntityRefresh,
   entityName,
   entityData,
@@ -2545,21 +3091,17 @@ function DocumentsTab({
   documents: DocRecord[];
   docsLoading: boolean;
   onRefresh: () => Promise<void> | void;
+  onRefreshQuiet: () => Promise<void> | void;
   onEntityRefresh: () => Promise<void> | void;
   entityName: string;
   entityData: Record<string, unknown> | null;
 }) {
+  const router = useRouter();
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
-  const [uploadCategory, setUploadCategory] = useState<DocumentCategory | "">("");
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Bulk processing state
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState({ current: 0, total: 0 });
+  // Pipeline state
+  const [pipelineBatchId, setPipelineBatchId] = useState<string | null>(null);
+  const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
 
   // AI processing state
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -2662,103 +3204,6 @@ function DocumentsTab({
     letterSpacing: "0.06em",
   };
 
-  /* ---- Upload ---- */
-  const handleFilesSelect = (files: FileList | File[]) => {
-    const fileArray = Array.from(files);
-    setUploadFiles((prev) => {
-      const combined = [...prev, ...fileArray];
-      if (combined.length > 10) {
-        setUploadError("Maximum 10 files per upload. Remove some files and try again.");
-        return prev;
-      }
-      setUploadError(null);
-      return combined;
-    });
-  };
-
-  const removeFile = (index: number) => {
-    setUploadFiles((prev) => prev.filter((_, i) => i !== index));
-    setUploadError(null);
-  };
-
-  const handleUpload = async () => {
-    if (uploadFiles.length === 0 || !uploadCategory) return;
-    setUploading(true);
-    setUploadError(null);
-    const uploadedDocIds: string[] = [];
-    try {
-      // Upload all files sequentially
-      for (const file of uploadFiles) {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("document_category", uploadCategory);
-        formData.append("name", file.name.replace(/\.[^/.]+$/, ""));
-
-        const res = await fetch(`/api/entities/${entityId}/documents`, {
-          method: "POST",
-          body: formData,
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          throw new Error(data.error || `Upload failed for ${file.name} (${res.status})`);
-        }
-        const doc = await res.json();
-        uploadedDocIds.push(doc.id);
-      }
-
-      // Reset form
-      setUploadFiles([]);
-      setUploadCategory("");
-      setUploadError(null);
-      setShowUpload(false);
-
-      // Process all uploaded docs with AI sequentially
-      setBulkProcessing(true);
-      setBulkProgress({ current: 0, total: uploadedDocIds.length });
-
-      for (let i = 0; i < uploadedDocIds.length; i++) {
-        setBulkProgress({ current: i + 1, total: uploadedDocIds.length });
-        try {
-          const processRes = await fetch(`/api/documents/${uploadedDocIds[i]}/process`, { method: "POST" });
-          if (processRes.ok) {
-            const data = await processRes.json();
-            if (data.actions && data.actions.length > 0) {
-              setAiActions((prev) => ({ ...prev, [uploadedDocIds[i]]: data.actions }));
-              // Auto-open review for the first doc with actions (if not already reviewing)
-              if (i === 0) {
-                setAiReviewDocId(uploadedDocIds[i]);
-                const defaults: Record<number, boolean> = {};
-                const edits: Record<number, ProposedAction> = {};
-                const indices: number[] = [];
-                data.actions.forEach((action: ProposedAction, idx: number) => {
-                  defaults[idx] = action.confidence === "high" || action.confidence === "medium";
-                  edits[idx] = { ...action };
-                  indices.push(idx);
-                });
-                setSelectedActions(defaults);
-                setEditedActions(edits);
-                setOriginalIndicesMap((prev) => ({ ...prev, [uploadedDocIds[i]]: indices }));
-              }
-            }
-          }
-        } catch {
-          // AI processing failure is non-fatal
-        }
-      }
-
-      setBulkProcessing(false);
-      onRefresh();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setUploadError(msg);
-      setUploading(false);
-      setBulkProcessing(false);
-      if (uploadedDocIds.length > 0) onRefresh();
-      return;
-    }
-    setUploading(false);
-  };
-
   /* ---- Download ---- */
   const handleDownload = async (docId: string) => {
     try {
@@ -2787,6 +3232,7 @@ function DocumentsTab({
   const handleProcess = async (docId: string) => {
     setProcessingId(docId);
     setProcessError(null);
+    setApplyResult(null);
     try {
       const res = await fetch(`/api/documents/${docId}/process`, { method: "POST" });
       if (!res.ok) {
@@ -2991,137 +3437,69 @@ function DocumentsTab({
       {/* Upload toggle */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
         {!showUpload && (
-          <Button variant="primary" onClick={() => setShowUpload(true)}>
-            <UploadIcon size={14} /> Upload Document
+          <Button variant="primary" onClick={async () => {
+            setShowUpload(true);
+            // Create a pipeline batch for this entity
+            if (!pipelineBatchId) {
+              try {
+                const res = await fetch("/api/pipeline/batches", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ context: "entity", entity_id: entityId }),
+                });
+                if (res.ok) {
+                  const batch = await res.json();
+                  setPipelineBatchId(batch.id);
+                }
+              } catch { /* ignore */ }
+            }
+          }}>
+            <UploadIcon size={14} /> Upload Documents
           </Button>
         )}
       </div>
 
-      {/* Upload form */}
-      {showUpload && (
-        <Card style={{ marginBottom: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 16 }}>
-            Upload Documents
-          </div>
-
-          {/* Category selector */}
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Category *</label>
-            <select
-              style={{ ...inputStyle, cursor: "pointer" }}
-              value={uploadCategory}
-              onChange={(e) => setUploadCategory(e.target.value as DocumentCategory)}
-            >
-              <option value="">Select category...</option>
-              {DOCUMENT_CATEGORY_OPTIONS.map((cat) => (
-                <option key={cat.value} value={cat.value}>{cat.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Drop zone */}
-          <div
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => {
-              e.preventDefault();
-              setDragOver(false);
-              if (e.dataTransfer.files.length > 0) handleFilesSelect(e.dataTransfer.files);
+      {/* Pipeline Upload */}
+      {showUpload && pipelineBatchId && pipelinePhase === "upload" && (
+        <div style={{ marginBottom: 20 }}>
+          <UploadDropZone
+            batchId={pipelineBatchId}
+            defaultEntityId={entityId}
+            onFilesUploaded={async () => {
+              await fetch(`/api/pipeline/batches/${pipelineBatchId}/process`, { method: "POST" });
+              setPipelinePhase("processing");
             }}
-            onClick={() => fileInputRef.current?.click()}
-            style={{
-              border: `2px dashed ${dragOver ? "#2d5a3d" : "#ddd9d0"}`,
-              borderRadius: 10,
-              padding: uploadFiles.length > 0 ? "12px 16px" : "24px 16px",
-              textAlign: "center",
-              cursor: "pointer",
-              background: dragOver ? "rgba(45,90,61,0.04)" : "#fafaf7",
-              marginBottom: 16,
-              transition: "all 0.15s",
-            }}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              style={{ display: "none" }}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) handleFilesSelect(e.target.files);
-                e.target.value = "";
-              }}
-            />
-            {uploadFiles.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {uploadFiles.map((file, idx) => (
-                  <div key={idx} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                    <DocIcon size={14} />
-                    <span style={{ fontSize: 13, color: "#1a1a1f", fontWeight: 500 }}>{file.name}</span>
-                    <span style={{ fontSize: 11, color: "#9494a0" }}>({formatFileSize(file.size)})</span>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#c73e3e", padding: 2 }}
-                    >
-                      <XIcon size={12} />
-                    </button>
-                  </div>
-                ))}
-                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
-                  Click or drop to add more (max 10)
-                </div>
-              </div>
-            ) : (
-              <div>
-                <UploadIcon size={24} />
-                <div style={{ fontSize: 13, color: "#6b6b76", marginTop: 8 }}>
-                  Drop files here or click to browse
-                </div>
-                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
-                  PDF, images, or text documents — up to 10 files
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Upload actions */}
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button
-              onClick={() => {
-                setShowUpload(false);
-                setUploadFiles([]);
-                setUploadCategory("");
-                setUploadError(null);
-              }}
-            >
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+            <Button onClick={() => {
+              setShowUpload(false);
+              setPipelineBatchId(null);
+              setPipelinePhase("upload");
+            }}>
               <XIcon size={12} /> Cancel
             </Button>
-            <Button
-              variant="primary"
-              onClick={handleUpload}
-              disabled={uploading || uploadFiles.length === 0 || !uploadCategory}
-            >
-              {uploading
-                ? "Uploading..."
-                : `Upload ${uploadFiles.length || ""} File${uploadFiles.length !== 1 ? "s" : ""} & Process with AI`}
-            </Button>
           </div>
-          {uploadError && (
-            <div style={{
-              marginTop: 8,
-              padding: "8px 12px",
-              background: "rgba(220,38,38,0.06)",
-              border: "1px solid rgba(220,38,38,0.15)",
-              borderRadius: 6,
-              fontSize: 12,
-              color: "#dc2626",
-            }}>
-              {uploadError}
-            </div>
-          )}
-        </Card>
+        </div>
+      )}
+
+      {/* Pipeline Processing + Results */}
+      {showUpload && pipelineBatchId && (pipelinePhase === "processing" || pipelinePhase === "results") && (
+        <div style={{ marginBottom: 20 }}>
+          <ProcessingView
+            batchId={pipelineBatchId}
+            entities={[]}
+            onDocumentsChanged={onRefreshQuiet}
+            onComplete={() => {
+              setShowUpload(false);
+              setPipelineBatchId(null);
+              setPipelinePhase("upload");
+            }}
+          />
+        </div>
       )}
 
       {/* AI Processing Banner */}
-      {(processingId || bulkProcessing) && (
+      {processingId && (
         <Card style={{ marginBottom: 20, border: "1px solid rgba(45,90,61,0.3)", background: "rgba(45,90,61,0.03)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "4px 0" }}>
             <div
@@ -3137,9 +3515,7 @@ function DocumentsTab({
             />
             <div>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>
-                {bulkProcessing
-                  ? `Processing with AI... (${bulkProgress.current}/${bulkProgress.total})`
-                  : "Analyzing document with AI..."}
+                Analyzing document with AI...
               </div>
               <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2 }}>
                 Extracting entities, relationships, and key data. This may take 30-60 seconds.
@@ -3192,6 +3568,17 @@ function DocumentsTab({
               const currentActionType = edited.action;
               const actionInfo = ACTION_LABELS[currentActionType] || { label: currentActionType, color: "#6b6b76" };
               const isUpdateEntity = currentActionType === "update_entity";
+              const isCompleteObligation = currentActionType === "complete_obligation";
+
+              // Resolve obligation name for complete_obligation actions
+              let obligationLabel: string | null = null;
+              if (isCompleteObligation && edited.data.obligation_id && entityData) {
+                const obligations = entityData.compliance_obligations as { id: string; name: string; jurisdiction: string }[] | undefined;
+                const matched = obligations?.find(o => o.id === edited.data.obligation_id);
+                if (matched) {
+                  obligationLabel = `${matched.name} (${matched.jurisdiction})`;
+                }
+              }
 
               // Determine which fields to show based on action type
               const visibleEntries = Object.entries(edited.data).filter(([key]) => {
@@ -3418,6 +3805,13 @@ function DocumentsTab({
                     </div>
                   )}
 
+                  {/* Complete Obligation: show which obligation is being updated */}
+                  {isCompleteObligation && obligationLabel && (
+                    <div style={{ fontSize: 12, fontWeight: 500, color: "#1a1a1f", marginBottom: 8 }}>
+                      Completing: {obligationLabel}
+                    </div>
+                  )}
+
                   {/* Non-update actions: standard editable data fields (filtered) */}
                   {!isUpdateEntity && (
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
@@ -3602,15 +3996,15 @@ function DocumentsTab({
 
                       return (
                         <div key={doc.id}>
-                          {/* Compact row */}
+                          {/* Compact row — hidden when expanded */}
                           <div
                             onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
                             style={{
-                              display: "flex",
+                              display: isExpanded ? "none" : "flex",
                               alignItems: "center",
                               gap: 12,
                               padding: "10px 18px",
-                              borderBottom: isExpanded ? "none" : "1px solid #f8f7f4",
+                              borderBottom: "1px solid #f8f7f4",
                               fontSize: 13,
                               cursor: "pointer",
                               transition: "background 0.1s",
@@ -3664,7 +4058,17 @@ function DocumentsTab({
 
                           {/* Expanded detail */}
                           {isExpanded && (
-                            <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid #e8e6df", background: "#fafaf7" }}>
+                            <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid #e8e6df", background: "#fafaf7", position: "relative" }}>
+                              {/* Collapse button */}
+                              <button
+                                onClick={() => setExpandedDocId(null)}
+                                style={{ position: "absolute", top: 12, right: 18, background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 4, display: "flex", alignItems: "center", transition: "color 0.1s" }}
+                                onMouseEnter={(e) => (e.currentTarget.style.color = "#1a1a1f")}
+                                onMouseLeave={(e) => (e.currentTarget.style.color = "#9494a0")}
+                                title="Collapse"
+                              >
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                              </button>
                               {/* Document name — inline rename */}
                               <div style={{ marginBottom: 10 }}>
                                 {editingDocId === doc.id ? (
@@ -3851,8 +4255,8 @@ export default function EntityDetailPage() {
   }, [picklistLoaded]);
 
   /* Fetch documents for this entity */
-  const fetchDocuments = useCallback(async () => {
-    setDocsLoading(true);
+  const fetchDocuments = useCallback(async (quiet = false) => {
+    if (!quiet) setDocsLoading(true);
     try {
       const res = await fetch(`/api/entities/${entityId}/documents`);
       if (res.ok) {
@@ -3862,7 +4266,7 @@ export default function EntityDetailPage() {
     } catch (err) {
       console.error("Failed to load documents:", err);
     } finally {
-      setDocsLoading(false);
+      if (!quiet) setDocsLoading(false);
     }
   }, [entityId]);
 
@@ -4058,6 +4462,12 @@ export default function EntityDetailPage() {
               flexWrap: "wrap",
             }}
           >
+            {entity.short_name && (
+              <>
+                <span style={{ color: "#2d5a3d", fontWeight: 500 }}>{entity.short_name}</span>
+                <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
+              </>
+            )}
             <span>{typeLabel}</span>
             <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
             <span>{formationStateName}</span>
@@ -4129,6 +4539,12 @@ export default function EntityDetailPage() {
               <InfoRow label="Formed">{formatDate(entity.formed_date)}</InfoRow>
 
               <InfoRow label="Formation State">{formationStateName}</InfoRow>
+
+              <LegalStructureRow
+                entityId={entityId}
+                currentValue={entity.legal_structure}
+                onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, legal_structure: val } : prev))}
+              />
 
               <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
 
@@ -4244,7 +4660,11 @@ export default function EntityDetailPage() {
           formationState={entity.formation_state}
           registrations={entity.registrations}
           formedDate={entity.formed_date}
+          legalStructure={entity.legal_structure}
+          obligations={entity.compliance_obligations || []}
+          documents={documents}
           onRegistrationsChange={handleRegistrationsChange}
+          onRefresh={fetchEntity}
         />
       )}
 
@@ -4268,6 +4688,7 @@ export default function EntityDetailPage() {
           documents={documents}
           docsLoading={docsLoading}
           onRefresh={fetchDocuments}
+          onRefreshQuiet={() => fetchDocuments(true)}
           onEntityRefresh={fetchEntity}
           entityName={entity?.name || ""}
           entityData={entity as unknown as Record<string, unknown>}
