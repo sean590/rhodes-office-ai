@@ -4382,6 +4382,19 @@ export default function EntityDetailPage() {
   const [picklistLoading, setPicklistLoading] = useState(false);
   const [picklistLoaded, setPicklistLoaded] = useState(false);
 
+  // Activity state
+  const [activityLog, setActivityLog] = useState<Array<{
+    id: string;
+    action: string;
+    resource_type: string;
+    resource_id: string | null;
+    metadata: Record<string, unknown>;
+    user_id: string | null;
+    created_at: string;
+    ip_address: string | null;
+  }>>([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+
   /* Fetch entity detail */
   const fetchEntity = useCallback(async () => {
     try {
@@ -4422,6 +4435,22 @@ export default function EntityDetailPage() {
     }
   }, [picklistLoaded]);
 
+  /* Fetch activity log for this entity */
+  const fetchActivity = useCallback(async () => {
+    setActivityLoading(true);
+    try {
+      const res = await fetch(`/api/audit?resource_id=${entityId}&limit=50`);
+      if (res.ok) {
+        const data = await res.json();
+        setActivityLog(data);
+      }
+    } catch {
+      // Non-critical
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [entityId]);
+
   /* Fetch documents for this entity */
   const fetchDocuments = useCallback(async (quiet = false) => {
     if (!quiet) setDocsLoading(true);
@@ -4450,6 +4479,13 @@ export default function EntityDetailPage() {
   useEffect(() => {
     fetchPicklist();
   }, [fetchPicklist]);
+
+  // Fetch activity when tab becomes active
+  useEffect(() => {
+    if (activeTab === "activity") {
+      fetchActivity();
+    }
+  }, [activeTab, fetchActivity]);
 
   // Register page context for chat drawer
   const setPageContext = useSetPageContext();
@@ -4517,6 +4553,7 @@ export default function EntityDetailPage() {
   tabs.push({ id: "cap_table", label: `Cap Table${hasCapTable ? ` (${entity.cap_table.length})` : ""}` });
   tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
+  tabs.push({ id: "activity", label: "Activity" });
 
   /* ---- Handlers for sub-components ---- */
   function handleRegistrationsChange(regs: EntityRegistration[]) {
@@ -4898,6 +4935,73 @@ export default function EntityDetailPage() {
           entityName={entity?.name || ""}
           entityData={entity as unknown as Record<string, unknown>}
         />
+      )}
+
+      {/* Activity Tab */}
+      {activeTab === "activity" && (
+        <div>
+          {activityLoading ? (
+            <div style={{ padding: 40, textAlign: "center", color: "#9494a0" }}>Loading activity...</div>
+          ) : activityLog.length === 0 ? (
+            <div style={{ padding: 40, textAlign: "center", color: "#9494a0" }}>No activity recorded yet</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {activityLog.map((entry) => {
+                const actionLabels: Record<string, string> = {
+                  create: "Created",
+                  edit: "Edited",
+                  delete: "Deleted",
+                  upload: "Uploaded document",
+                  download: "Downloaded document",
+                  process: "Processed document",
+                  apply_extraction: "Applied AI extraction",
+                  update_obligation: "Updated obligation",
+                };
+                const label = actionLabels[entry.action] || entry.action;
+                const resourceLabel = entry.resource_type === "document" ? "document" : "entity";
+                const time = new Date(entry.created_at);
+                const timeStr = time.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
+                  " at " + time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+                // Extract useful metadata
+                const meta = entry.metadata || {};
+                const details: string[] = [];
+                if (meta.name) details.push(String(meta.name));
+                if (meta.fields) details.push(`fields: ${(meta.fields as string[]).join(", ")}`);
+                if (meta.action_count) details.push(`${meta.action_count} actions`);
+
+                return (
+                  <div
+                    key={entry.id}
+                    style={{
+                      padding: "12px 0",
+                      borderBottom: "1px solid #e8e6df",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "flex-start",
+                      gap: 12,
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, color: "#1a1a1f" }}>
+                        <span style={{ fontWeight: 500 }}>{label}</span>
+                        <span style={{ color: "#6b6b76" }}> {resourceLabel}</span>
+                      </div>
+                      {details.length > 0 && (
+                        <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>
+                          {details.join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {timeStr}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
