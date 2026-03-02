@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function POST(
   request: Request,
@@ -66,6 +69,24 @@ export async function POST(
         },
       })
       .eq("id", id);
+
+    // Audit log
+    const authSupabase = await createClient();
+    const { data: { user } } = await authSupabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "apply_extraction",
+      resourceType: "document",
+      resourceId: id,
+      metadata: {
+        applied: results.filter(r => r.success).length,
+        failed: results.filter(r => !r.success).length,
+        action_indices: newIndices,
+      },
+      ...ctx,
+    });
 
     return NextResponse.json({
       applied: results.filter(r => r.success).length,

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { createBatchSchema } from "@/lib/validations";
+import { headers } from "next/headers";
 
 export async function POST(request: Request) {
   try {
@@ -13,7 +16,15 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json();
-    const { name, context = 'global', entity_id, entity_discovery = false } = body;
+    const parsed = createBatchSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0];
+      return NextResponse.json(
+        { error: firstError?.message || "Invalid input" },
+        { status: 400 }
+      );
+    }
+    const { name, context, entity_id, entity_discovery } = parsed.data;
 
     // Check if user exists in public users table (auth user may not be synced yet)
     const { data: userRow } = await admin
@@ -38,6 +49,17 @@ export async function POST(request: Request) {
       console.error("Create batch error:", error);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "create_batch",
+      resourceType: "pipeline",
+      resourceId: data.id,
+      metadata: { context, entity_id: entity_id || null },
+      ...ctx,
+    });
 
     return NextResponse.json(data);
   } catch (err) {

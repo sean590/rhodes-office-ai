@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, generateDisplayName, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { getDbContext, extractDocument } from "@/lib/pipeline/extract";
+import { rateLimit } from "@/lib/utils/rate-limit";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function POST(
@@ -13,6 +16,15 @@ export async function POST(
     const { id } = await params;
     const supabase = await createClient();
     const admin = createAdminClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!rateLimit(`process:${user.id}`, 10, 60000)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
+    }
 
     // Get document record
     const { data: doc, error: docError } = await supabase
@@ -165,6 +177,18 @@ export async function POST(
     if (updateError) {
       console.error("Failed to save AI extraction:", updateError);
     }
+
+    // Audit log
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "process",
+      resourceType: "document",
+      resourceId: id,
+      metadata: { action_count: result.actions?.length ?? 0 },
+      ...ctx,
+    });
 
     return NextResponse.json({
       status: "processed",

@@ -3,6 +3,8 @@ import { createHash } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 import type { DocumentType } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 
@@ -199,6 +201,18 @@ export async function POST(request: Request) {
       await admin.storage.from("documents").remove([filePath]);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
+
+    // Audit log
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "upload",
+      resourceType: "document",
+      resourceId: doc.id,
+      metadata: { name, entity_id: entityId },
+      ...ctx,
+    });
 
     return NextResponse.json(doc, { status: 201 });
   } catch (err) {

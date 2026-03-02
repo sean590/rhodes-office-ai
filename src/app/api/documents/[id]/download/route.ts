@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function GET(
   request: Request,
@@ -31,6 +33,19 @@ export async function GET(
     if (signError || !signedUrl) {
       return NextResponse.json({ error: "Failed to generate download URL" }, { status: 500 });
     }
+
+    // Audit log (downloads are audited even though this is a GET)
+    const { data: { user } } = await supabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "download",
+      resourceType: "document",
+      resourceId: id,
+      metadata: { name: doc.name },
+      ...ctx,
+    });
 
     return NextResponse.json({ url: signedUrl.signedUrl, name: doc.name, mime_type: doc.mime_type });
   } catch (err) {

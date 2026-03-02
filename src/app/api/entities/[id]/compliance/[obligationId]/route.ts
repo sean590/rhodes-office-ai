@@ -5,6 +5,8 @@ import {
   getRuleById,
   calculateNextDueDateAfterCompletion,
 } from "@/lib/utils/compliance-engine";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function PUT(
   request: Request,
@@ -109,6 +111,18 @@ export async function PUT(
     if (updateError) {
       return NextResponse.json({ error: updateError.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    const { data: { user } } = await supabase.auth.getUser();
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "update_obligation",
+      resourceType: "compliance",
+      resourceId: obligationId,
+      metadata: { entity_id: id, status: body.status },
+      ...ctx,
+    });
 
     return NextResponse.json(updated);
   } catch (err) {

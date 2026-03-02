@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function DELETE(
   request: Request,
@@ -44,6 +46,17 @@ export async function DELETE(
       console.error("Failed to delete auth user:", authError);
       // Don't fail the request — profile is already cleaned up
     }
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "user",
+      resourceId: id,
+      metadata: {},
+      ...ctx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

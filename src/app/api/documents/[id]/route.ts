@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function GET(
   request: Request,
@@ -91,6 +93,20 @@ export async function DELETE(
       }
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // Audit log
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "delete",
+      resourceType: "document",
+      resourceId: id,
+      metadata: {},
+      ...ctx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

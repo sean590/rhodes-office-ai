@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validateShortName } from "@/lib/utils/document-naming";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { updateEntitySchema } from "@/lib/validations";
+import { headers } from "next/headers";
 
 export async function GET(
   request: Request,
@@ -331,27 +334,20 @@ export async function PUT(
     const supabase = createAdminClient();
     const body = await request.json();
 
-    // Only allow updating known entity fields
-    const allowedFields = [
-      "name",
-      "type",
-      "status",
-      "ein",
-      "formation_state",
-      "formed_date",
-      "address",
-      "registered_agent",
-      "parent_entity_id",
-      "notes",
-      "business_purpose",
-      "short_name",
-      "legal_structure",
-    ];
+    const parsed = updateEntitySchema.safeParse(body);
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0];
+      return NextResponse.json(
+        { error: firstError?.message || "Invalid input" },
+        { status: 400 }
+      );
+    }
 
+    // Only include fields that were actually provided
     const updates: Record<string, unknown> = {};
-    for (const field of allowedFields) {
-      if (field in body) {
-        updates[field] = body[field];
+    for (const [key, value] of Object.entries(parsed.data)) {
+      if (value !== undefined) {
+        updates[key] = value;
       }
     }
 
@@ -390,6 +386,20 @@ export async function PUT(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Audit log
+    const authSupabase = await createClient();
+    const { data: { user } } = await authSupabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "edit",
+      resourceType: "entity",
+      resourceId: id,
+      metadata: { fields: Object.keys(updates) },
+      ...ctx,
+    });
+
     return NextResponse.json(entity);
   } catch (err) {
     console.error("PUT /api/entities/[id] error:", err);
@@ -425,6 +435,20 @@ export async function DELETE(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    // Audit log
+    const authSupabase = await createClient();
+    const { data: { user } } = await authSupabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "delete",
+      resourceType: "entity",
+      resourceId: id,
+      metadata: { name: entity.name },
+      ...ctx,
+    });
 
     return NextResponse.json({ success: true, deleted: entity.name });
   } catch (err) {

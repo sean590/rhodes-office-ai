@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { userRoleSchema } from "@/lib/validations";
+import { headers } from "next/headers";
 
 export async function PUT(
   request: Request,
@@ -28,11 +31,11 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { role } = body;
-
-    if (!["admin", "editor", "viewer"].includes(role)) {
+    const parsed = userRoleSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 });
     }
+    const { role } = parsed.data;
 
     // Don't allow removing your own admin role
     if (id === user.id && role !== "admin") {
@@ -49,6 +52,17 @@ export async function PUT(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "role_change",
+      resourceType: "user",
+      resourceId: id,
+      metadata: { new_role: role },
+      ...ctx,
+    });
 
     return NextResponse.json(data);
   } catch (err) {

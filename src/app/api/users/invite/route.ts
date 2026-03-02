@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function POST(request: Request) {
   try {
@@ -71,6 +73,17 @@ export async function POST(request: Request) {
         avatar_url: null,
       });
     }
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "invite",
+      resourceType: "user",
+      resourceId: inviteData.user?.id ?? null,
+      metadata: { email: normalizedEmail, role: validRole },
+      ...ctx,
+    });
 
     return NextResponse.json({
       success: true,

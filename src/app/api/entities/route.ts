@@ -3,6 +3,9 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
 import { validateShortName } from "@/lib/utils/document-naming";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { createEntitySchema } from "@/lib/validations";
+import { headers } from "next/headers";
 import type { Jurisdiction } from "@/lib/types";
 
 export async function GET() {
@@ -157,6 +160,15 @@ export async function POST(request: Request) {
     const supabase = createAdminClient();
     const body = await request.json();
 
+    const parsed = createEntitySchema.safeParse(body);
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0];
+      return NextResponse.json(
+        { error: firstError?.message || "Invalid input" },
+        { status: 400 }
+      );
+    }
+
     const {
       name,
       type,
@@ -169,14 +181,7 @@ export async function POST(request: Request) {
       parent_entity_id,
       notes,
       legal_structure,
-    } = body;
-
-    if (!name || !type || !formation_state || !short_name) {
-      return NextResponse.json(
-        { error: "name, type, formation_state, and short_name are required" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Validate short_name format
     const snValidation = validateShortName(short_name);
@@ -236,6 +241,20 @@ export async function POST(request: Request) {
         console.error("Failed to create trust details:", trustError.message);
       }
     }
+
+    // Audit log
+    const authSupabase = await createClient();
+    const { data: { user } } = await authSupabase.auth.getUser();
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user?.id ?? null,
+      action: "create",
+      resourceType: "entity",
+      resourceId: entity.id,
+      metadata: { name, type },
+      ...ctx,
+    });
 
     return NextResponse.json(entity, { status: 201 });
   } catch (err) {

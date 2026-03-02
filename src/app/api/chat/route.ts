@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildChatContext } from "@/lib/utils/chat-context";
+import { rateLimit } from "@/lib/utils/rate-limit";
+import { chatMessageSchema } from "@/lib/validations";
 
 export async function POST(request: Request) {
   try {
@@ -13,12 +15,20 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { session_id, message, page_context } = body;
-
-    if (!session_id || !message) {
-      return NextResponse.json({ error: "session_id and message are required" }, { status: 400 });
+    if (!rateLimit(`chat:${user.id}`, 20, 60000)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
+
+    const body = await request.json();
+    const parsed = chatMessageSchema.safeParse(body);
+    if (!parsed.success) {
+      const firstError = parsed.error.issues[0];
+      return NextResponse.json(
+        { error: firstError?.message || "session_id and message are required" },
+        { status: 400 }
+      );
+    }
+    const { session_id, message, page_context } = parsed.data;
 
     // Save user message
     const { error: saveError } = await admin

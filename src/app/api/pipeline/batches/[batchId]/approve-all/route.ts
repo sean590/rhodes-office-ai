@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ingestQueueItem } from "@/lib/pipeline/ingest";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function POST(
   _request: Request,
@@ -56,6 +58,18 @@ export async function POST(
     }
 
     results.skipped = items.length - results.approved - results.errors.length;
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "approve_batch",
+      resourceType: "pipeline",
+      resourceId: batchId,
+      metadata: { approved: results.approved, skipped: results.skipped, error_count: results.errors.length },
+      ...ctx,
+    });
+
     return NextResponse.json(results);
   } catch (err) {
     console.error("POST /api/pipeline/batches/[batchId]/approve-all error:", err);

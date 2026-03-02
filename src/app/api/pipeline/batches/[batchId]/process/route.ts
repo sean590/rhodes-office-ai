@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processBatch } from "@/lib/pipeline/worker";
+import { rateLimit } from "@/lib/utils/rate-limit";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { headers } from "next/headers";
 
 export async function POST(
   _request: Request,
@@ -15,6 +18,10 @@ export async function POST(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    if (!rateLimit(`pipeline-process:${user.id}`, 5, 60000)) {
+      return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 
     // Move all staged items to queued
@@ -47,6 +54,17 @@ export async function POST(
     // Start processing in the background (fire-and-forget)
     processBatch(batchId, 3).catch((err) => {
       console.error(`Background batch processing failed for ${batchId}:`, err);
+    });
+
+    const reqHeaders = await headers();
+    const ctx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "process_batch",
+      resourceType: "pipeline",
+      resourceId: batchId,
+      metadata: { queued_count: queuedCount },
+      ...ctx,
     });
 
     return NextResponse.json({ queued: queuedCount });
