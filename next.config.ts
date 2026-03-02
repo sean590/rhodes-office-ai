@@ -34,8 +34,8 @@ const nextConfig: NextConfig = {
 };
 
 export default withSentryConfig(nextConfig, {
-  org: "sean-doherty",
-  project: "javascript-nextjs",
+  org: "rhodes-office",
+  project: "rhodesoffice",
   silent: !process.env.CI,
   widenClientFileUpload: true,
   disableLogger: true,
