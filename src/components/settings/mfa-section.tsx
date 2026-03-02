@@ -4,11 +4,14 @@ import { useState, useEffect, useCallback } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
 type MfaStep = "idle" | "enrolling" | "verifying" | "enabled";
+type PhoneStep = "idle" | "entering_phone" | "verifying_code" | "enabled";
 
 interface MfaFactor {
   id: string;
   factor_type: string;
   status: string;
+  friendly_name?: string;
+  phone?: string;
 }
 
 function getSupabase() {
@@ -19,14 +22,24 @@ function getSupabase() {
 }
 
 export function MfaSection({ isMobile }: { isMobile: boolean }) {
+  // TOTP state
   const [step, setStep] = useState<MfaStep>("idle");
-  const [factors, setFactors] = useState<MfaFactor[]>([]);
+  const [totpFactors, setTotpFactors] = useState<MfaFactor[]>([]);
   const [loading, setLoading] = useState(true);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [factorId, setFactorId] = useState<string | null>(null);
   const [verifyCode, setVerifyCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [disabling, setDisabling] = useState(false);
+
+  // Phone state
+  const [phoneStep, setPhoneStep] = useState<PhoneStep>("idle");
+  const [phoneFactors, setPhoneFactors] = useState<MfaFactor[]>([]);
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [phoneFactorId, setPhoneFactorId] = useState<string | null>(null);
+  const [phoneCode, setPhoneCode] = useState("");
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+  const [phoneSending, setPhoneSending] = useState(false);
 
   const fetchFactors = useCallback(async () => {
     try {
@@ -37,10 +50,11 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
         return;
       }
       const totp = (data?.totp || []).filter((f) => f.status === "verified");
-      setFactors(totp);
-      if (totp.length > 0) {
-        setStep("enabled");
-      }
+      const phone = (data?.phone || []).filter((f) => f.status === "verified");
+      setTotpFactors(totp);
+      setPhoneFactors(phone);
+      if (totp.length > 0) setStep("enabled");
+      if (phone.length > 0) setPhoneStep("enabled");
     } catch {
       // Non-critical
     } finally {
@@ -51,6 +65,8 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
   useEffect(() => {
     fetchFactors();
   }, [fetchFactors]);
+
+  // --- TOTP Methods ---
 
   const startEnrollment = async () => {
     setError(null);
@@ -80,9 +96,8 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
     setError(null);
     try {
       const supabase = getSupabase();
-      const { data: challenge, error: challengeErr } = await supabase.auth.mfa.challenge({
-        factorId,
-      });
+      const { data: challenge, error: challengeErr } =
+        await supabase.auth.mfa.challenge({ factorId });
       if (challengeErr || !challenge) {
         setError(challengeErr?.message || "Challenge failed");
         return;
@@ -105,22 +120,98 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
     }
   };
 
-  const disableMfa = async (fId: string) => {
+  // --- Phone Methods ---
+
+  const startPhoneEnrollment = async () => {
+    if (!phoneNumber || phoneNumber.length < 10) {
+      setPhoneError("Enter a valid phone number with country code (e.g. +1...)");
+      return;
+    }
+    setPhoneError(null);
+    setPhoneSending(true);
+    try {
+      const supabase = getSupabase();
+      const { data, error: enrollErr } = await supabase.auth.mfa.enroll({
+        factorType: "phone",
+        phone: phoneNumber,
+        friendlyName: "Rhodes Phone",
+      });
+      if (enrollErr || !data) {
+        setPhoneError(enrollErr?.message || "Failed to enroll phone");
+        return;
+      }
+      setPhoneFactorId(data.id);
+      // Send the challenge (SMS code)
+      const { error: challengeErr } = await supabase.auth.mfa.challenge({
+        factorId: data.id,
+        channel: "sms",
+      });
+      if (challengeErr) {
+        setPhoneError(challengeErr.message);
+        return;
+      }
+      setPhoneStep("verifying_code");
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : "Phone enrollment failed");
+    } finally {
+      setPhoneSending(false);
+    }
+  };
+
+  const verifyPhoneEnrollment = async () => {
+    if (!phoneFactorId || phoneCode.length !== 6) return;
+    setPhoneError(null);
+    try {
+      const supabase = getSupabase();
+      // Get the latest challenge
+      const { data: challenge, error: challengeErr } =
+        await supabase.auth.mfa.challenge({ factorId: phoneFactorId, channel: "sms" });
+      if (challengeErr || !challenge) {
+        setPhoneError(challengeErr?.message || "Challenge failed");
+        return;
+      }
+      const { error: verifyErr } = await supabase.auth.mfa.verify({
+        factorId: phoneFactorId,
+        challengeId: challenge.id,
+        code: phoneCode,
+      });
+      if (verifyErr) {
+        setPhoneError(verifyErr.message);
+        return;
+      }
+      setPhoneStep("enabled");
+      setPhoneNumber("");
+      setPhoneCode("");
+      fetchFactors();
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : "Verification failed");
+    }
+  };
+
+  // --- Shared disable ---
+
+  const disableFactor = async (fId: string, type: "totp" | "phone") => {
     setDisabling(true);
-    setError(null);
+    const setErr = type === "totp" ? setError : setPhoneError;
+    setErr(null);
     try {
       const supabase = getSupabase();
       const { error: unenrollErr } = await supabase.auth.mfa.unenroll({
         factorId: fId,
       });
       if (unenrollErr) {
-        setError(unenrollErr.message);
+        setErr(unenrollErr.message);
         return;
       }
-      setStep("idle");
-      setFactors([]);
+      if (type === "totp") {
+        setStep("idle");
+        setTotpFactors([]);
+      } else {
+        setPhoneStep("idle");
+        setPhoneFactors([]);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to disable MFA");
+      setErr(err instanceof Error ? err.message : "Failed to disable");
     } finally {
       setDisabling(false);
     }
@@ -135,250 +226,504 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
   }
 
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            marginBottom: 4,
-          }}
-        >
-          <div
-            style={{
-              width: 8,
-              height: 8,
-              borderRadius: "50%",
-              background: step === "enabled" ? "#2d5a3d" : "#ddd9d0",
-            }}
-          />
-          <span style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f" }}>
-            Two-Factor Authentication (TOTP)
-          </span>
-        </div>
-        <p style={{ fontSize: 12, color: "#9494a0", margin: "0 0 0 16px" }}>
-          {step === "enabled"
-            ? "MFA is enabled. Your account is protected with an authenticator app."
-            : "Add an extra layer of security by requiring a code from an authenticator app."}
-        </p>
-      </div>
-
-      {error && (
-        <div
-          style={{
-            padding: "8px 12px",
-            borderRadius: 6,
-            background: "rgba(220,38,38,0.08)",
-            color: "#dc2626",
-            fontSize: 12,
-            marginBottom: 12,
-          }}
-        >
-          {error}
-        </div>
-      )}
-
-      {/* Idle — show enable button */}
-      {step === "idle" && (
-        <button
-          onClick={startEnrollment}
-          style={{
-            background: "#2d5a3d",
-            color: "#fff",
-            border: "none",
-            borderRadius: 6,
-            padding: "8px 16px",
-            fontSize: 13,
-            fontWeight: 500,
-            cursor: "pointer",
-          }}
-        >
-          Enable Two-Factor Authentication
-        </button>
-      )}
-
-      {/* Enrolling — loading state */}
-      {step === "enrolling" && (
-        <div style={{ padding: 16, color: "#9494a0", fontSize: 13 }}>
-          Setting up authenticator...
-        </div>
-      )}
-
-      {/* Verifying — show QR code and verify input */}
-      {step === "verifying" && qrCode && (
-        <div
-          style={{
-            border: "1px solid #e8e6df",
-            borderRadius: 8,
-            padding: isMobile ? 16 : 20,
-          }}
-        >
-          <p
-            style={{
-              fontSize: 13,
-              color: "#1a1a1f",
-              margin: "0 0 16px 0",
-              lineHeight: 1.5,
-            }}
-          >
-            Scan this QR code with your authenticator app (Google Authenticator,
-            Authy, 1Password, etc.), then enter the 6-digit code below.
-          </p>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: isMobile ? "column" : "row",
-              gap: 20,
-              alignItems: isMobile ? "center" : "flex-start",
-            }}
-          >
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      {/* ---- TOTP Section ---- */}
+      <div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <div
-              dangerouslySetInnerHTML={{ __html: qrCode }}
               style={{
-                width: 200,
-                height: 200,
-                background: "#fff",
-                borderRadius: 8,
-                padding: 8,
-                border: "1px solid #e8e6df",
-                flexShrink: 0,
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: step === "enabled" ? "#2d5a3d" : "#ddd9d0",
               }}
             />
-            <div style={{ flex: 1, width: isMobile ? "100%" : "auto" }}>
-              <label
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f" }}>
+              Authenticator App (TOTP)
+            </span>
+          </div>
+          <p style={{ fontSize: 12, color: "#9494a0", margin: "0 0 0 16px" }}>
+            {step === "enabled"
+              ? "Enabled — your account is protected with an authenticator app."
+              : "Use an app like Google Authenticator, Authy, or 1Password to generate codes."}
+          </p>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              background: "rgba(220,38,38,0.08)",
+              color: "#dc2626",
+              fontSize: 12,
+              marginBottom: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {step === "idle" && (
+          <button
+            onClick={startEnrollment}
+            style={{
+              background: "#2d5a3d",
+              color: "#fff",
+              border: "none",
+              borderRadius: 6,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Enable Authenticator
+          </button>
+        )}
+
+        {step === "enrolling" && (
+          <div style={{ padding: 16, color: "#9494a0", fontSize: 13 }}>
+            Setting up authenticator...
+          </div>
+        )}
+
+        {step === "verifying" && qrCode && (
+          <div
+            style={{
+              border: "1px solid #e8e6df",
+              borderRadius: 8,
+              padding: isMobile ? 16 : 20,
+            }}
+          >
+            <p
+              style={{
+                fontSize: 13,
+                color: "#1a1a1f",
+                margin: "0 0 16px 0",
+                lineHeight: 1.5,
+              }}
+            >
+              Scan this QR code with your authenticator app, then enter the
+              6-digit code below.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: isMobile ? "column" : "row",
+                gap: 20,
+                alignItems: isMobile ? "center" : "flex-start",
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={qrCode}
+                alt="MFA QR Code"
                 style={{
-                  display: "block",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "#6b6b76",
-                  marginBottom: 6,
-                }}
-              >
-                Verification Code
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={verifyCode}
-                onChange={(e) =>
-                  setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                placeholder="000000"
-                style={{
-                  width: "100%",
-                  maxWidth: 180,
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  border: "1px solid #ddd9d0",
-                  fontSize: 18,
-                  fontFamily: "monospace",
-                  letterSpacing: 4,
-                  textAlign: "center",
-                  outline: "none",
+                  width: 200,
+                  height: 200,
+                  borderRadius: 8,
+                  border: "1px solid #e8e6df",
+                  flexShrink: 0,
                 }}
               />
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  marginTop: 12,
-                }}
-              >
-                <button
-                  onClick={verifyEnrollment}
-                  disabled={verifyCode.length !== 6}
+              <div style={{ flex: 1, width: isMobile ? "100%" : "auto" }}>
+                <label
                   style={{
-                    background:
-                      verifyCode.length === 6 ? "#2d5a3d" : "#ddd9d0",
-                    color: verifyCode.length === 6 ? "#fff" : "#9494a0",
-                    border: "none",
-                    borderRadius: 6,
-                    padding: "8px 16px",
-                    fontSize: 13,
+                    display: "block",
+                    fontSize: 12,
                     fontWeight: 500,
-                    cursor:
-                      verifyCode.length === 6 ? "pointer" : "not-allowed",
-                  }}
-                >
-                  Verify & Enable
-                </button>
-                <button
-                  onClick={() => {
-                    setStep("idle");
-                    setQrCode(null);
-                    setVerifyCode("");
-                    setError(null);
-                  }}
-                  style={{
-                    background: "none",
                     color: "#6b6b76",
-                    border: "1px solid #ddd9d0",
-                    borderRadius: 6,
-                    padding: "8px 16px",
-                    fontSize: 13,
-                    cursor: "pointer",
+                    marginBottom: 6,
                   }}
                 >
-                  Cancel
-                </button>
+                  Verification Code
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={verifyCode}
+                  onChange={(e) =>
+                    setVerifyCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  placeholder="000000"
+                  style={{
+                    width: "100%",
+                    maxWidth: 180,
+                    padding: "8px 12px",
+                    borderRadius: 6,
+                    border: "1px solid #ddd9d0",
+                    fontSize: 18,
+                    fontFamily: "monospace",
+                    letterSpacing: 4,
+                    textAlign: "center",
+                    outline: "none",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button
+                    onClick={verifyEnrollment}
+                    disabled={verifyCode.length !== 6}
+                    style={{
+                      background: verifyCode.length === 6 ? "#2d5a3d" : "#ddd9d0",
+                      color: verifyCode.length === 6 ? "#fff" : "#9494a0",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      cursor: verifyCode.length === 6 ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Verify & Enable
+                  </button>
+                  <button
+                    onClick={() => {
+                      setStep("idle");
+                      setQrCode(null);
+                      setVerifyCode("");
+                      setError(null);
+                    }}
+                    style={{
+                      background: "none",
+                      color: "#6b6b76",
+                      border: "1px solid #ddd9d0",
+                      borderRadius: 6,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Enabled — show status and disable button */}
-      {step === "enabled" && factors.length > 0 && (
-        <div>
-          {factors.map((f) => (
-            <div
-              key={f.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "10px 0",
-                borderBottom: "1px solid #f0eeea",
-              }}
-            >
-              <div style={{ fontSize: 13, color: "#1a1a1f" }}>
-                Authenticator App
-                <span
-                  style={{
-                    marginLeft: 8,
-                    fontSize: 11,
-                    color: "#2d5a3d",
-                    fontWeight: 500,
-                    background: "rgba(45,90,61,0.08)",
-                    padding: "2px 8px",
-                    borderRadius: 4,
-                  }}
-                >
-                  Active
-                </span>
-              </div>
-              <button
-                onClick={() => disableMfa(f.id)}
-                disabled={disabling}
+        {step === "enabled" && totpFactors.length > 0 && (
+          <div>
+            {totpFactors.map((f) => (
+              <div
+                key={f.id}
                 style={{
-                  background: "none",
-                  color: "#dc2626",
-                  border: "1px solid rgba(220,38,38,0.2)",
-                  borderRadius: 6,
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  cursor: disabling ? "not-allowed" : "pointer",
-                  opacity: disabling ? 0.5 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 0",
                 }}
               >
-                {disabling ? "Disabling..." : "Disable"}
+                <div style={{ fontSize: 13, color: "#1a1a1f" }}>
+                  Authenticator App
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 11,
+                      color: "#2d5a3d",
+                      fontWeight: 500,
+                      background: "rgba(45,90,61,0.08)",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    Active
+                  </span>
+                </div>
+                <button
+                  onClick={() => disableFactor(f.id, "totp")}
+                  disabled={disabling}
+                  style={{
+                    background: "none",
+                    color: "#dc2626",
+                    border: "1px solid rgba(220,38,38,0.2)",
+                    borderRadius: 6,
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    cursor: disabling ? "not-allowed" : "pointer",
+                    opacity: disabling ? 0.5 : 1,
+                  }}
+                >
+                  {disabling ? "Disabling..." : "Disable"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Divider */}
+      <div style={{ borderTop: "1px solid #e8e6df" }} />
+
+      {/* ---- Phone Section ---- */}
+      <div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                background: phoneStep === "enabled" ? "#2d5a3d" : "#ddd9d0",
+              }}
+            />
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f" }}>
+              Phone (SMS)
+            </span>
+          </div>
+          <p style={{ fontSize: 12, color: "#9494a0", margin: "0 0 0 16px" }}>
+            {phoneStep === "enabled"
+              ? "Enabled — verification codes will be sent via SMS."
+              : "Receive a verification code via text message as a backup method."}
+          </p>
+        </div>
+
+        {phoneError && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              background: "rgba(220,38,38,0.08)",
+              color: "#dc2626",
+              fontSize: 12,
+              marginBottom: 12,
+            }}
+          >
+            {phoneError}
+          </div>
+        )}
+
+        {phoneStep === "idle" && (
+          <button
+            onClick={() => setPhoneStep("entering_phone")}
+            style={{
+              background: "#fff",
+              color: "#1a1a1f",
+              border: "1px solid #ddd9d0",
+              borderRadius: 6,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 500,
+              cursor: "pointer",
+            }}
+          >
+            Enable Phone Verification
+          </button>
+        )}
+
+        {phoneStep === "entering_phone" && (
+          <div
+            style={{
+              border: "1px solid #e8e6df",
+              borderRadius: 8,
+              padding: isMobile ? 16 : 20,
+            }}
+          >
+            <label
+              style={{
+                display: "block",
+                fontSize: 12,
+                fontWeight: 500,
+                color: "#6b6b76",
+                marginBottom: 6,
+              }}
+            >
+              Phone Number (with country code)
+            </label>
+            <input
+              type="tel"
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              placeholder="+1 555 123 4567"
+              style={{
+                width: "100%",
+                maxWidth: 240,
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid #ddd9d0",
+                fontSize: 14,
+                outline: "none",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button
+                onClick={startPhoneEnrollment}
+                disabled={phoneSending || phoneNumber.length < 10}
+                style={{
+                  background:
+                    phoneNumber.length >= 10 && !phoneSending
+                      ? "#2d5a3d"
+                      : "#ddd9d0",
+                  color:
+                    phoneNumber.length >= 10 && !phoneSending
+                      ? "#fff"
+                      : "#9494a0",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor:
+                    phoneNumber.length >= 10 && !phoneSending
+                      ? "pointer"
+                      : "not-allowed",
+                }}
+              >
+                {phoneSending ? "Sending..." : "Send Code"}
+              </button>
+              <button
+                onClick={() => {
+                  setPhoneStep("idle");
+                  setPhoneNumber("");
+                  setPhoneError(null);
+                }}
+                style={{
+                  background: "none",
+                  color: "#6b6b76",
+                  border: "1px solid #ddd9d0",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
               </button>
             </div>
-          ))}
-        </div>
-      )}
+          </div>
+        )}
+
+        {phoneStep === "verifying_code" && (
+          <div
+            style={{
+              border: "1px solid #e8e6df",
+              borderRadius: 8,
+              padding: isMobile ? 16 : 20,
+            }}
+          >
+            <p
+              style={{
+                fontSize: 13,
+                color: "#1a1a1f",
+                margin: "0 0 12px 0",
+              }}
+            >
+              Enter the 6-digit code sent to{" "}
+              <strong>{phoneNumber}</strong>.
+            </p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={phoneCode}
+              onChange={(e) =>
+                setPhoneCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+              }
+              placeholder="000000"
+              style={{
+                width: "100%",
+                maxWidth: 180,
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid #ddd9d0",
+                fontSize: 18,
+                fontFamily: "monospace",
+                letterSpacing: 4,
+                textAlign: "center",
+                outline: "none",
+              }}
+            />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button
+                onClick={verifyPhoneEnrollment}
+                disabled={phoneCode.length !== 6}
+                style={{
+                  background: phoneCode.length === 6 ? "#2d5a3d" : "#ddd9d0",
+                  color: phoneCode.length === 6 ? "#fff" : "#9494a0",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  cursor: phoneCode.length === 6 ? "pointer" : "not-allowed",
+                }}
+              >
+                Verify & Enable
+              </button>
+              <button
+                onClick={() => {
+                  setPhoneStep("idle");
+                  setPhoneCode("");
+                  setPhoneNumber("");
+                  setPhoneError(null);
+                }}
+                style={{
+                  background: "none",
+                  color: "#6b6b76",
+                  border: "1px solid #ddd9d0",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {phoneStep === "enabled" && phoneFactors.length > 0 && (
+          <div>
+            {phoneFactors.map((f) => (
+              <div
+                key={f.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "10px 0",
+                }}
+              >
+                <div style={{ fontSize: 13, color: "#1a1a1f" }}>
+                  Phone (SMS)
+                  <span
+                    style={{
+                      marginLeft: 8,
+                      fontSize: 11,
+                      color: "#2d5a3d",
+                      fontWeight: 500,
+                      background: "rgba(45,90,61,0.08)",
+                      padding: "2px 8px",
+                      borderRadius: 4,
+                    }}
+                  >
+                    Active
+                  </span>
+                </div>
+                <button
+                  onClick={() => disableFactor(f.id, "phone")}
+                  disabled={disabling}
+                  style={{
+                    background: "none",
+                    color: "#dc2626",
+                    border: "1px solid rgba(220,38,38,0.2)",
+                    borderRadius: 6,
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    cursor: disabling ? "not-allowed" : "pointer",
+                    opacity: disabling ? 0.5 : 1,
+                  }}
+                >
+                  {disabling ? "Disabling..." : "Disable"}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
