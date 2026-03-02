@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Card } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Badge } from "@/components/ui/badge";
@@ -2677,6 +2678,7 @@ function ObligationRow({
   isLast: boolean;
   onRefresh: () => void;
 }) {
+  const isMobile = useIsMobile();
   const [detailOpen, setDetailOpen] = useState(false);
   const [markOpen, setMarkOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -2757,98 +2759,178 @@ function ObligationRow({
   return (
     <div style={{ borderTop: "1px solid #f0ede6", paddingTop: 10, paddingBottom: isLast ? 0 : 10 }}>
       {/* Main row — clickable to expand detail */}
-      <div
-        onClick={() => { if (!markOpen && hasDetail) setDetailOpen(p => !p); }}
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 140px 130px 110px 110px",
-          gap: 8,
-          alignItems: "start",
-          fontSize: 13,
-          cursor: hasDetail ? "pointer" : "default",
-        }}
-      >
-        {/* Obligation name */}
-        <div>
-          <div style={{ fontWeight: 500, color: "#1a1a1f", display: "flex", alignItems: "center", gap: 6 }}>
-            {hasDetail && (
-              <span style={{ display: "inline-block", fontSize: 8, color: "#9494a0", transition: "transform 0.15s", transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>&#9654;</span>
-            )}
-            <span>{obligation.name}</span>
-            {obligation.form_number && (
-              <>
-                {" "}
-                {obligation.portal_url ? (
-                  <a
-                    href={obligation.portal_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    style={{ fontSize: 11, color: "#3366a8", textDecoration: "none" }}
-                  >
-                    ({obligation.form_number})
-                  </a>
-                ) : (
-                  <span style={{ fontSize: 11, color: "#9494a0" }}>({obligation.form_number})</span>
-                )}
-              </>
-            )}
+      {isMobile ? (
+        /* Mobile: card layout */
+        <div
+          onClick={() => { if (!markOpen && hasDetail) setDetailOpen(p => !p); }}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            fontSize: 13,
+            cursor: hasDetail ? "pointer" : "default",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ fontWeight: 500, color: "#1a1a1f", display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+              {hasDetail && (
+                <span style={{ display: "inline-block", fontSize: 8, color: "#9494a0", transition: "transform 0.15s", transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>&#9654;</span>
+              )}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{obligation.name}</span>
+              {obligation.form_number && (
+                <>
+                  {" "}
+                  {obligation.portal_url ? (
+                    <a href={obligation.portal_url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} style={{ fontSize: 11, color: "#3366a8", textDecoration: "none", flexShrink: 0 }}>({obligation.form_number})</a>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#9494a0", flexShrink: 0 }}>({obligation.form_number})</span>
+                  )}
+                </>
+              )}
+            </div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 8px",
+                borderRadius: 6,
+                background: colors.bg,
+                fontSize: 11,
+                fontWeight: 600,
+                color: colors.color,
+                flexShrink: 0,
+              }}
+            >
+              <Dot color={colors.dot} size={5} />
+              {statusLabel}
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2, paddingLeft: hasDetail ? 14 : 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 12, color: "#6b6b76" }}>
+            <span>Due: {dueLabel}</span>
+            <span>Fee: {obligation.fee_description || "\u2014"}</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#9494a0" }}>
             Filed with: {obligation.filed_with || "\u2014"}
             {completedLabel && <> &middot; Last completed: {completedLabel}</>}
           </div>
-        </div>
-
-        {/* Fee */}
-        <div style={{ color: "#1a1a1f" }}>{obligation.fee_description || "\u2014"}</div>
-
-        {/* Due date */}
-        <div style={{ color: "#1a1a1f" }}>{dueLabel}</div>
-
-        {/* Status badge */}
-        <div>
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 4,
-              padding: "3px 8px",
-              borderRadius: 6,
-              background: colors.bg,
-              fontSize: 11,
-              fontWeight: 600,
-              color: colors.color,
-            }}
-          >
-            <Dot color={colors.dot} size={5} />
-            {statusLabel}
-          </div>
-        </div>
-
-        {/* Action */}
-        <div>
           {obligation.status === "pending" && (
-            <button
-              onClick={(e) => { e.stopPropagation(); handleOpenComplete(); }}
-              style={{
-                background: "none",
-                border: "1px solid #e8e6df",
-                borderRadius: 6,
-                padding: "3px 10px",
-                fontSize: 11,
-                fontWeight: 500,
-                color: "#2d5a3d",
-                cursor: "pointer",
-                fontFamily: "inherit",
-                whiteSpace: "nowrap",
-              }}
-            >
-              Mark Complete
-            </button>
+            <div style={{ marginTop: 2 }}>
+              <button
+                onClick={(e) => { e.stopPropagation(); handleOpenComplete(); }}
+                style={{
+                  background: "none",
+                  border: "1px solid #e8e6df",
+                  borderRadius: 6,
+                  padding: "3px 10px",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: "#2d5a3d",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Mark Complete
+              </button>
+            </div>
           )}
         </div>
-      </div>
+      ) : (
+        /* Desktop: grid layout */
+        <div
+          onClick={() => { if (!markOpen && hasDetail) setDetailOpen(p => !p); }}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 140px 130px 110px 110px",
+            gap: 8,
+            alignItems: "start",
+            fontSize: 13,
+            cursor: hasDetail ? "pointer" : "default",
+          }}
+        >
+          {/* Obligation name */}
+          <div>
+            <div style={{ fontWeight: 500, color: "#1a1a1f", display: "flex", alignItems: "center", gap: 6 }}>
+              {hasDetail && (
+                <span style={{ display: "inline-block", fontSize: 8, color: "#9494a0", transition: "transform 0.15s", transform: detailOpen ? "rotate(90deg)" : "rotate(0deg)", flexShrink: 0 }}>&#9654;</span>
+              )}
+              <span>{obligation.name}</span>
+              {obligation.form_number && (
+                <>
+                  {" "}
+                  {obligation.portal_url ? (
+                    <a
+                      href={obligation.portal_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ fontSize: 11, color: "#3366a8", textDecoration: "none" }}
+                    >
+                      ({obligation.form_number})
+                    </a>
+                  ) : (
+                    <span style={{ fontSize: 11, color: "#9494a0" }}>({obligation.form_number})</span>
+                  )}
+                </>
+              )}
+            </div>
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2, paddingLeft: hasDetail ? 14 : 0 }}>
+              Filed with: {obligation.filed_with || "\u2014"}
+              {completedLabel && <> &middot; Last completed: {completedLabel}</>}
+            </div>
+          </div>
+
+          {/* Fee */}
+          <div style={{ color: "#1a1a1f" }}>{obligation.fee_description || "\u2014"}</div>
+
+          {/* Due date */}
+          <div style={{ color: "#1a1a1f" }}>{dueLabel}</div>
+
+          {/* Status badge */}
+          <div>
+            <div
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "3px 8px",
+                borderRadius: 6,
+                background: colors.bg,
+                fontSize: 11,
+                fontWeight: 600,
+                color: colors.color,
+              }}
+            >
+              <Dot color={colors.dot} size={5} />
+              {statusLabel}
+            </div>
+          </div>
+
+          {/* Action */}
+          <div>
+            {obligation.status === "pending" && (
+              <button
+                onClick={(e) => { e.stopPropagation(); handleOpenComplete(); }}
+                style={{
+                  background: "none",
+                  border: "1px solid #e8e6df",
+                  borderRadius: 6,
+                  padding: "3px 10px",
+                  fontSize: 11,
+                  fontWeight: 500,
+                  color: "#2d5a3d",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Mark Complete
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Expanded detail panel */}
       {detailOpen && !markOpen && (
@@ -4200,6 +4282,8 @@ export default function EntityDetailPage() {
   const searchParams = useSearchParams();
   const entityId = params.id as string;
 
+  const isMobile = useIsMobile();
+
   const [entity, setEntity] = useState<EntityDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -4392,7 +4476,7 @@ export default function EntityDetailPage() {
       </div>
 
       {/* ---- Header ---- */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 12 : 16, marginBottom: 24 }}>
         {/* Entity icon glow box */}
         <div
           style={{
@@ -4412,42 +4496,45 @@ export default function EntityDetailPage() {
 
         <div style={{ flex: 1 }}>
           {/* Entity name row with Edit/Delete buttons */}
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a1f", margin: 0, lineHeight: 1.2 }}>
+          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 8 : 12 }}>
+            <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#1a1a1f", margin: 0, lineHeight: 1.2 }}>
               {entity.name}
             </h1>
-            <Button size="sm" onClick={() => router.push(`/entities/${entityId}/edit`)}>
-              Edit
-            </Button>
-            <button
-              onClick={async () => {
-                if (!confirm(`Delete "${entity.name}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
-                try {
-                  const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
-                  if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
-                    alert(data.error || "Failed to delete entity");
-                    return;
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button size="sm" onClick={() => router.push(`/entities/${entityId}/edit`)} style={isMobile ? { flex: 1 } : undefined}>
+                Edit
+              </Button>
+              <button
+                onClick={async () => {
+                  if (!confirm(`Delete "${entity.name}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
+                  try {
+                    const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
+                    if (!res.ok) {
+                      const data = await res.json().catch(() => ({}));
+                      alert(data.error || "Failed to delete entity");
+                      return;
+                    }
+                    router.push("/entities");
+                  } catch {
+                    alert("Failed to delete entity");
                   }
-                  router.push("/entities");
-                } catch {
-                  alert("Failed to delete entity");
-                }
-              }}
-              style={{
-                background: "none",
-                border: "1px solid rgba(199,62,62,0.3)",
-                borderRadius: 6,
-                padding: "4px 10px",
-                fontSize: 12,
-                fontWeight: 500,
-                color: "#c73e3e",
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              Delete
-            </button>
+                }}
+                style={{
+                  background: "none",
+                  border: "1px solid rgba(199,62,62,0.3)",
+                  borderRadius: 6,
+                  padding: "4px 10px",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "#c73e3e",
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  ...(isMobile ? { flex: 1 } : {}),
+                }}
+              >
+                Delete
+              </button>
+            </div>
           </div>
 
           {/* Subtitle row */}
@@ -4486,46 +4573,93 @@ export default function EntityDetailPage() {
         </div>
       </div>
 
-      {/* ---- Tab Bar ---- */}
-      <div
-        style={{
-          borderBottom: "1px solid #e8e6df",
-          marginBottom: 24,
-          display: "flex",
-          gap: 0,
-          overflow: "visible",
-        }}
-      >
-        {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: "10px 20px",
-              fontSize: 13,
-              fontWeight: 500,
-              cursor: "pointer",
-              border: "none",
-              borderBottom: activeTab === tab.id ? "2px solid #2d5a3d" : "2px solid transparent",
-              background: "transparent",
-              color: activeTab === tab.id ? "#2d5a3d" : "#6b6b76",
-              marginBottom: -1,
-              whiteSpace: "nowrap",
-              fontFamily: "inherit",
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      {/* ---- Mobile Section Nav (pill bar) ---- */}
+      {isMobile && (
+        <div
+          style={{
+            position: "sticky",
+            top: 0,
+            zIndex: 10,
+            background: "#f5f4f0",
+            overflowX: "auto",
+            display: "flex",
+            gap: 6,
+            borderBottom: "1px solid #e8e6df",
+            margin: "0 -16px",
+            paddingLeft: 16,
+            paddingRight: 16,
+            paddingTop: 8,
+            paddingBottom: 8,
+            WebkitOverflowScrolling: "touch",
+          }}
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 20,
+                border: activeTab === tab.id ? "1px solid #2d5a3d" : "1px solid #ddd9d0",
+                background: activeTab === tab.id ? "#2d5a3d" : "#fff",
+                color: activeTab === tab.id ? "#fff" : "#1a1a1f",
+                fontSize: 12,
+                fontWeight: 500,
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ---- Tab Bar (desktop only) ---- */}
+      {!isMobile && (
+        <div
+          style={{
+            borderBottom: "1px solid #e8e6df",
+            marginBottom: 24,
+            display: "flex",
+            gap: 0,
+            overflow: "visible",
+          }}
+        >
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: "10px 20px",
+                fontSize: 13,
+                fontWeight: 500,
+                cursor: "pointer",
+                border: "none",
+                borderBottom: activeTab === tab.id ? "2px solid #2d5a3d" : "2px solid transparent",
+                background: "transparent",
+                color: activeTab === tab.id ? "#2d5a3d" : "#6b6b76",
+                marginBottom: -1,
+                whiteSpace: "nowrap",
+                fontFamily: "inherit",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ---- Tab Content ---- */}
+      {isMobile && <div style={{ height: 16 }} />}
 
       {/* Overview Tab */}
       {activeTab === "overview" && (
         <>
           {/* First row: Entity Information + Custom Fields */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+          <div id="overview" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
             {/* Left: Entity Information */}
             <Card>
               <SectionHeader>Entity Information</SectionHeader>
@@ -4624,7 +4758,7 @@ export default function EntityDetailPage() {
           </div>
 
           {/* Second row: Relationships Summary + Cap Table Summary */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
             <RelationshipsSummaryCard
               relationships={entity.relationships}
               entityId={entityId}

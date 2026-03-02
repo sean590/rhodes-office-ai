@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ChatIcon, SparkleIcon, PlusIcon, SearchIcon } from "@/components/ui/icons";
 import type { ChatSession, ChatMessage } from "@/lib/types/chat";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -111,6 +112,9 @@ export default function ChatPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [entities, setEntities] = useState<EntityRef[]>([]);
   const [sessionSearch, setSessionSearch] = useState("");
+  const [mobileShowChat, setMobileShowChat] = useState(false);
+
+  const isMobile = useIsMobile();
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -163,6 +167,7 @@ export default function ChatPage() {
 
   const loadSession = useCallback(async (sessionId: string) => {
     setActiveSessionId(sessionId);
+    setMobileShowChat(true);
     setMessages([]);
     setStreamingText("");
     setLoadingMessages(true);
@@ -193,6 +198,7 @@ export default function ChatPage() {
       const session: ChatSession = await res.json();
       setSessions((prev) => [session, ...prev]);
       setActiveSessionId(session.id);
+      setMobileShowChat(true);
       setMessages([]);
       setStreamingText("");
       setInput("");
@@ -225,6 +231,7 @@ export default function ChatPage() {
           setSessions((prev) => [session, ...prev]);
           sessionId = session.id;
           setActiveSessionId(sessionId);
+          setMobileShowChat(true);
         } catch (err) {
           console.error(err);
           return;
@@ -348,25 +355,44 @@ export default function ChatPage() {
   // Styles
   // -------------------------------------------------------------------
 
-  const sidebarStyle: React.CSSProperties = {
-    width: 280,
-    flexShrink: 0,
-    background: "#ffffff",
-    borderRight: "1px solid #e8e6df",
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
-  };
+  const sidebarStyle: React.CSSProperties = isMobile
+    ? {
+        width: "100%",
+        flexShrink: 0,
+        background: "#ffffff",
+        display: mobileShowChat ? "none" : "flex",
+        flexDirection: "column",
+        height: "100%",
+        overflow: "hidden",
+      }
+    : {
+        width: 280,
+        flexShrink: 0,
+        background: "#ffffff",
+        borderRight: "1px solid #e8e6df",
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        overflow: "hidden",
+      };
 
-  const chatAreaStyle: React.CSSProperties = {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    height: "100%",
-    background: "#f5f4f0",
-    overflow: "hidden",
-  };
+  const chatAreaStyle: React.CSSProperties = isMobile
+    ? {
+        flex: 1,
+        display: mobileShowChat ? "flex" : "none",
+        flexDirection: "column",
+        height: "100%",
+        background: "#f5f4f0",
+        overflow: "hidden",
+      }
+    : {
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        background: "#f5f4f0",
+        overflow: "hidden",
+      };
 
   // -------------------------------------------------------------------
   // Render
@@ -502,7 +528,7 @@ export default function ChatPage() {
                   display: "block",
                   width: "100%",
                   textAlign: "left",
-                  padding: "10px 12px",
+                  padding: isMobile ? "14px 16px" : "10px 12px",
                   borderRadius: 6,
                   border: "none",
                   background: isActive ? "rgba(45,90,61,0.08)" : "transparent",
@@ -554,13 +580,66 @@ export default function ChatPage() {
       {/* ============================================================= */}
       <div style={chatAreaStyle}>
         {/* ----------------------------------------------------------- */}
+        {/* Mobile back header                                           */}
+        {/* ----------------------------------------------------------- */}
+        {isMobile && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "12px 16px",
+              borderBottom: "1px solid #e8e6df",
+              background: "#ffffff",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              onClick={() => setMobileShowChat(false)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                color: "#2d5a3d",
+                fontSize: 18,
+                fontFamily: "inherit",
+                flexShrink: 0,
+              }}
+            >
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6" />
+              </svg>
+            </button>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "#1a1a1f",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flex: 1,
+              }}
+            >
+              {sessions.find((s) => s.id === activeSessionId)?.title || "New Chat"}
+            </div>
+          </div>
+        )}
+
+        {/* ----------------------------------------------------------- */}
         {/* Messages area                                                */}
         {/* ----------------------------------------------------------- */}
         <div
           style={{
             flex: 1,
             overflowY: "auto",
-            padding: "24px 24px 16px",
+            padding: isMobile ? "16px 12px 12px" : "24px 24px 16px",
           }}
         >
           {/* Empty state */}
@@ -617,7 +696,15 @@ export default function ChatPage() {
 
               {/* Suggested prompts */}
               <div
-                style={{
+                style={isMobile ? {
+                  display: "flex",
+                  overflowX: "auto",
+                  flexWrap: "nowrap",
+                  WebkitOverflowScrolling: "touch",
+                  gap: 10,
+                  width: "100%",
+                  paddingBottom: 4,
+                } : {
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr",
                   gap: 10,
@@ -644,6 +731,7 @@ export default function ChatPage() {
                       fontFamily: "inherit",
                       textAlign: "left",
                       transition: "all 0.15s",
+                      ...(isMobile ? { flexShrink: 0, minWidth: 200 } : {}),
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLElement).style.borderColor =
@@ -717,7 +805,16 @@ export default function ChatPage() {
 
                 {/* Suggested prompts (compact) */}
                 <div
-                  style={{
+                  style={isMobile ? {
+                    display: "flex",
+                    overflowX: "auto",
+                    flexWrap: "nowrap",
+                    WebkitOverflowScrolling: "touch",
+                    gap: 8,
+                    marginTop: 24,
+                    width: "100%",
+                    paddingBottom: 4,
+                  } : {
                     display: "flex",
                     flexWrap: "wrap",
                     gap: 8,
@@ -743,6 +840,7 @@ export default function ChatPage() {
                         cursor: "pointer",
                         fontFamily: "inherit",
                         transition: "all 0.15s",
+                        ...(isMobile ? { flexShrink: 0, minWidth: 200 } : {}),
                       }}
                       onMouseEnter={(e) => {
                         (e.currentTarget as HTMLElement).style.borderColor =
@@ -894,9 +992,10 @@ export default function ChatPage() {
         {/* ----------------------------------------------------------- */}
         <div
           style={{
-            padding: "12px 24px 20px",
+            padding: isMobile ? "10px 12px 16px" : "12px 24px 20px",
             borderTop: "1px solid #e8e6df",
             background: "#ffffff",
+            ...(isMobile ? { position: "sticky" as const, bottom: 0, flexShrink: 0 } : {}),
           }}
         >
           <div

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -17,6 +17,12 @@ const dmMono = DM_Mono({
 export const metadata: Metadata = {
   title: "Rhodes — AI Family Office",
   description: "Internal entity management platform for family offices",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

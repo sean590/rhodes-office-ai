@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BuildingIcon, PeopleIcon, ChartIcon, LinkIcon, DocIcon, ChatIcon, GearIcon } from "../ui/icons";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { BuildingIcon, PeopleIcon, LinkIcon, DocIcon, ChatIcon, GearIcon } from "../ui/icons";
 import { UserMenu } from "./user-menu";
 
 const NAV_TABS = [
@@ -16,6 +17,30 @@ const NAV_TABS = [
 
 export function Header() {
   const pathname = usePathname();
+  const isMobile = useIsMobile();
+
+  if (isMobile) {
+    return (
+      <header style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "0 16px", height: 48,
+        borderBottom: "1px solid #ddd9d0", background: "#ffffff", flexShrink: 0,
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{
+            width: 24, height: 24, borderRadius: 5,
+            background: "linear-gradient(135deg, #2d5a3d, #3d7a53)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 12, fontWeight: 700, color: "#fff",
+          }}>R</div>
+          <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: "-0.02em" }}>
+            Rhodes
+          </span>
+        </div>
+        <UserMenu compact />
+      </header>
+    );
+  }
 
   return (
     <header style={{

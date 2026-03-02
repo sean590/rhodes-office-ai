@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -52,10 +53,158 @@ const PERMISSIONS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Accordion Section (mobile collapsible)
+// ---------------------------------------------------------------------------
+
+function AccordionSection({
+  title,
+  subtitle,
+  isMobile,
+  defaultOpen = true,
+  headerRight,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  isMobile: boolean;
+  defaultOpen?: boolean;
+  headerRight?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+
+  if (!isMobile) {
+    // On desktop, render as a normal card section (no collapse behavior)
+    return (
+      <div
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e8e6df",
+          borderRadius: 10,
+          padding: 24,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginBottom: subtitle ? 4 : 16,
+          }}
+        >
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "#1a1a1f",
+              margin: 0,
+            }}
+          >
+            {title}
+          </h2>
+          {headerRight}
+        </div>
+        {subtitle && (
+          <p
+            style={{
+              fontSize: 12,
+              color: "#9494a0",
+              margin: "0 0 16px 0",
+            }}
+          >
+            {subtitle}
+          </p>
+        )}
+        {children}
+      </div>
+    );
+  }
+
+  // Mobile: collapsible accordion
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #e8e6df",
+        borderRadius: 10,
+        overflow: "hidden",
+      }}
+    >
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+          padding: "16px 16px",
+          background: "none",
+          border: "none",
+          cursor: "pointer",
+          minHeight: 48,
+          textAlign: "left",
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <h2
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "#1a1a1f",
+              margin: 0,
+            }}
+          >
+            {title}
+          </h2>
+          {subtitle && (
+            <p
+              style={{
+                fontSize: 12,
+                color: "#9494a0",
+                margin: "2px 0 0 0",
+              }}
+            >
+              {subtitle}
+            </p>
+          )}
+        </div>
+        <svg
+          width={16}
+          height={16}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="#9494a0"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s ease",
+            flexShrink: 0,
+            marginLeft: 12,
+          }}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div style={{ padding: "0 16px 16px 16px" }}>
+          {headerRight && (
+            <div style={{ marginBottom: 12 }}>{headerRight}</div>
+          )}
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export default function SettingsPage() {
+  const isMobile = useIsMobile();
   const [currentUser, setCurrentUser] = useState<CurrentUserInfo | null>(null);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -185,7 +334,7 @@ export default function SettingsPage() {
 
   if (loading) {
     return (
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: isMobile ? 16 : 24 }}>
         <div
           style={{
             display: "flex",
@@ -203,12 +352,12 @@ export default function SettingsPage() {
   }
 
   return (
-    <div style={{ padding: 24, maxWidth: 960, margin: "0 auto" }}>
+    <div style={{ padding: isMobile ? 16 : 24, maxWidth: 960, margin: "0 auto" }}>
       {/* Title bar */}
-      <div style={{ marginBottom: 24 }}>
+      <div style={{ marginBottom: isMobile ? 16 : 24 }}>
         <h1
           style={{
-            fontSize: 22,
+            fontSize: isMobile ? 20 : 22,
             fontWeight: 600,
             color: "#1a1a1f",
             letterSpacing: "-0.02em",
@@ -242,9 +391,10 @@ export default function SettingsPage() {
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            gap: 12,
           }}
         >
-          <span>{error}</span>
+          <span style={{ flex: 1 }}>{error}</span>
           <button
             onClick={() => setError(null)}
             style={{
@@ -253,7 +403,13 @@ export default function SettingsPage() {
               color: "#dc2626",
               cursor: "pointer",
               fontSize: 16,
-              padding: "0 4px",
+              padding: "4px 8px",
+              minWidth: 44,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
             }}
           >
             x
@@ -261,33 +417,15 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 12 : 20 }}>
         {/* Card 1 — Your Profile */}
-        <div
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e8e6df",
-            borderRadius: 10,
-            padding: 24,
-          }}
-        >
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#1a1a1f",
-              margin: "0 0 16px 0",
-            }}
-          >
-            Your Profile
-          </h2>
-
+        <AccordionSection title="Your Profile" isMobile={isMobile}>
           {currentUser ? (
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr 1fr 1fr",
-                gap: 20,
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr",
+                gap: isMobile ? 16 : 20,
               }}
             >
               {/* Email */}
@@ -304,7 +442,7 @@ export default function SettingsPage() {
                 >
                   Email
                 </div>
-                <div style={{ fontSize: 13, color: "#1a1a1f" }}>
+                <div style={{ fontSize: 13, color: "#1a1a1f", wordBreak: "break-all" }}>
                   {currentUser.email}
                 </div>
               </div>
@@ -366,34 +504,22 @@ export default function SettingsPage() {
               Unable to load profile information.
             </div>
           )}
-        </div>
+        </AccordionSection>
 
         {/* Card 2 — User Management (admin only) */}
         {isAdmin && (
-          <div
-            style={{
-              background: "#ffffff",
-              border: "1px solid #e8e6df",
-              borderRadius: 10,
-              padding: 24,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-              <h2
-                style={{
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: "#1a1a1f",
-                  margin: 0,
-                }}
-              >
-                User Management
-              </h2>
-              {!showInvite && (
+          <AccordionSection
+            title="User Management"
+            isMobile={isMobile}
+            headerRight={
+              !showInvite ? (
                 <button
-                  onClick={() => setShowInvite(true)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowInvite(true);
+                  }}
                   style={{
-                    padding: "6px 14px",
+                    padding: isMobile ? "10px 16px" : "6px 14px",
                     fontSize: 12,
                     fontWeight: 600,
                     color: "#fff",
@@ -401,13 +527,14 @@ export default function SettingsPage() {
                     border: "none",
                     borderRadius: 6,
                     cursor: "pointer",
+                    minHeight: isMobile ? 44 : undefined,
                   }}
                 >
                   + Invite User
                 </button>
-              )}
-            </div>
-
+              ) : undefined
+            }
+          >
             {/* Invite success banner */}
             {inviteSuccess && (
               <div
@@ -422,12 +549,26 @@ export default function SettingsPage() {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
+                  gap: 12,
                 }}
               >
-                <span>{inviteSuccess}</span>
+                <span style={{ flex: 1 }}>{inviteSuccess}</span>
                 <button
                   onClick={() => setInviteSuccess(null)}
-                  style={{ background: "none", border: "none", color: "#2d5a3d", cursor: "pointer", fontSize: 16, padding: "0 4px" }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#2d5a3d",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    padding: "4px 8px",
+                    minWidth: 44,
+                    minHeight: 44,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                  }}
                 >
                   x
                 </button>
@@ -448,7 +589,14 @@ export default function SettingsPage() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", marginBottom: 12 }}>
                   Invite a new user
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: isMobile ? "column" : "row",
+                    gap: isMobile ? 12 : 8,
+                    alignItems: isMobile ? "stretch" : "flex-end",
+                  }}
+                >
                   <div style={{ flex: 1 }}>
                     <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
                       Email
@@ -461,8 +609,8 @@ export default function SettingsPage() {
                       onKeyDown={(e) => { if (e.key === "Enter") handleInvite(); }}
                       style={{
                         width: "100%",
-                        padding: "8px 10px",
-                        fontSize: 13,
+                        padding: isMobile ? "12px 12px" : "8px 10px",
+                        fontSize: isMobile ? 16 : 13,
                         border: "1px solid #ddd9d0",
                         borderRadius: 6,
                         background: "#fff",
@@ -470,10 +618,11 @@ export default function SettingsPage() {
                         fontFamily: "inherit",
                         outline: "none",
                         boxSizing: "border-box",
+                        minHeight: isMobile ? 44 : undefined,
                       }}
                     />
                   </div>
-                  <div>
+                  <div style={isMobile ? {} : undefined}>
                     <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
                       Role
                     </label>
@@ -481,8 +630,8 @@ export default function SettingsPage() {
                       value={inviteRole}
                       onChange={(e) => setInviteRole(e.target.value as UserRole)}
                       style={{
-                        padding: "8px 28px 8px 10px",
-                        fontSize: 13,
+                        padding: isMobile ? "12px 28px 12px 12px" : "8px 28px 8px 10px",
+                        fontSize: isMobile ? 16 : 13,
                         border: "1px solid #ddd9d0",
                         borderRadius: 6,
                         background: "#fff",
@@ -493,6 +642,9 @@ export default function SettingsPage() {
                         backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'10\' height=\'6\' viewBox=\'0 0 10 6\' fill=\'none\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M1 1l4 4 4-4\' stroke=\'%239494a0\' stroke-width=\'1.5\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E")',
                         backgroundRepeat: "no-repeat",
                         backgroundPosition: "right 10px center",
+                        width: isMobile ? "100%" : undefined,
+                        minHeight: isMobile ? 44 : undefined,
+                        boxSizing: "border-box",
                       }}
                     >
                       <option value="viewer">Viewer</option>
@@ -500,37 +652,48 @@ export default function SettingsPage() {
                       <option value="admin">Admin</option>
                     </select>
                   </div>
-                  <button
-                    onClick={handleInvite}
-                    disabled={inviting || !inviteEmail.trim()}
+                  <div
                     style={{
-                      padding: "8px 16px",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      color: "#fff",
-                      background: inviting || !inviteEmail.trim() ? "#9494a0" : "#2d5a3d",
-                      border: "none",
-                      borderRadius: 6,
-                      cursor: inviting || !inviteEmail.trim() ? "not-allowed" : "pointer",
-                      whiteSpace: "nowrap",
+                      display: "flex",
+                      gap: 8,
+                      ...(isMobile ? { marginTop: 4 } : {}),
                     }}
                   >
-                    {inviting ? "Sending..." : "Send Invite"}
-                  </button>
-                  <button
-                    onClick={() => { setShowInvite(false); setInviteEmail(""); setInviteRole("viewer"); }}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: 13,
-                      color: "#6b6b76",
-                      background: "transparent",
-                      border: "1px solid #ddd9d0",
-                      borderRadius: 6,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
+                    <button
+                      onClick={handleInvite}
+                      disabled={inviting || !inviteEmail.trim()}
+                      style={{
+                        padding: isMobile ? "12px 16px" : "8px 16px",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        color: "#fff",
+                        background: inviting || !inviteEmail.trim() ? "#9494a0" : "#2d5a3d",
+                        border: "none",
+                        borderRadius: 6,
+                        cursor: inviting || !inviteEmail.trim() ? "not-allowed" : "pointer",
+                        whiteSpace: "nowrap",
+                        flex: isMobile ? 1 : undefined,
+                        minHeight: isMobile ? 44 : undefined,
+                      }}
+                    >
+                      {inviting ? "Sending..." : "Send Invite"}
+                    </button>
+                    <button
+                      onClick={() => { setShowInvite(false); setInviteEmail(""); setInviteRole("viewer"); }}
+                      style={{
+                        padding: isMobile ? "12px 16px" : "8px 12px",
+                        fontSize: 13,
+                        color: "#6b6b76",
+                        background: "transparent",
+                        border: "1px solid #ddd9d0",
+                        borderRadius: 6,
+                        cursor: "pointer",
+                        minHeight: isMobile ? 44 : undefined,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -543,7 +706,135 @@ export default function SettingsPage() {
               <div style={{ fontSize: 13, color: "#9494a0", padding: "16px 0" }}>
                 No users found.
               </div>
+            ) : isMobile ? (
+              /* Mobile: stacked user cards */
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {users.map((u) => {
+                  const isSelf = u.id === currentUser?.id;
+                  return (
+                    <div
+                      key={u.id}
+                      style={{
+                        background: "#fafaf7",
+                        border: "1px solid #e8e6df",
+                        borderRadius: 8,
+                        padding: 14,
+                      }}
+                    >
+                      {/* Name and email */}
+                      <div style={{ marginBottom: 10 }}>
+                        <div style={{ fontWeight: 500, fontSize: 13, color: "#1a1a1f" }}>
+                          {u.display_name || (
+                            <span style={{ color: "#9494a0", fontStyle: "italic" }}>
+                              No name
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2, wordBreak: "break-all" }}>
+                          {u.email || u.id.slice(0, 8) + "..."}
+                        </div>
+                      </div>
+
+                      {/* Role + joined row */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 8,
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          {isSelf ? (
+                            <>
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  padding: "3px 10px",
+                                  borderRadius: 10,
+                                  fontSize: 12,
+                                  fontWeight: 500,
+                                  background: ROLE_BADGE_STYLES[u.role]?.bg || "#f0f0f0",
+                                  color: ROLE_BADGE_STYLES[u.role]?.color || "#6b6b76",
+                                }}
+                              >
+                                {ROLE_LABELS[u.role]}
+                              </span>
+                              <span style={{ fontSize: 11, color: "#9494a0", fontStyle: "italic" }}>
+                                (you)
+                              </span>
+                            </>
+                          ) : (
+                            <select
+                              value={u.role}
+                              disabled={updatingRole === u.id}
+                              onChange={(e) =>
+                                handleRoleChange(u.id, e.target.value as UserRole)
+                              }
+                              style={{
+                                padding: "8px 28px 8px 10px",
+                                borderRadius: 6,
+                                border: "1px solid #ddd9d0",
+                                fontSize: 13,
+                                color: "#1a1a1f",
+                                background: "#ffffff",
+                                cursor: updatingRole === u.id ? "not-allowed" : "pointer",
+                                opacity: updatingRole === u.id ? 0.6 : 1,
+                                minHeight: 44,
+                                appearance: "none" as const,
+                                backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'10\' height=\'6\' viewBox=\'0 0 10 6\' fill=\'none\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M1 1l4 4 4-4\' stroke=\'%239494a0\' stroke-width=\'1.5\' stroke-linecap=\'round\' stroke-linejoin=\'round\'/%3E%3C/svg%3E")',
+                                backgroundRepeat: "no-repeat",
+                                backgroundPosition: "right 10px center",
+                              }}
+                            >
+                              <option value="admin">Admin</option>
+                              <option value="editor">Editor</option>
+                              <option value="viewer">Viewer</option>
+                            </select>
+                          )}
+                        </div>
+
+                        <div style={{ fontSize: 12, color: "#6b6b76" }}>
+                          {u.created_at
+                            ? new Date(u.created_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "---"}
+                        </div>
+                      </div>
+
+                      {/* Remove button */}
+                      {!isSelf && (
+                        <div style={{ marginTop: 10, borderTop: "1px solid #e8e6df", paddingTop: 10 }}>
+                          <button
+                            onClick={() => handleDeleteUser(u.id, u.email)}
+                            disabled={deletingUser === u.id}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: deletingUser === u.id ? "#bbbbc4" : "#dc2626",
+                              cursor: deletingUser === u.id ? "not-allowed" : "pointer",
+                              fontSize: 12,
+                              fontWeight: 500,
+                              opacity: deletingUser === u.id ? 0.6 : 1,
+                              padding: "10px 8px",
+                              minHeight: 44,
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            {deletingUser === u.id ? "Removing..." : "Remove user"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
+              /* Desktop: original table layout */
               <div style={{ overflowX: "auto" }}>
                 <table
                   style={{
@@ -716,7 +1007,7 @@ export default function SettingsPage() {
                                     year: "numeric",
                                   }
                                 )
-                              : "—"}
+                              : "---"}
                           </td>
                           <td
                             style={{
@@ -751,156 +1042,182 @@ export default function SettingsPage() {
                 </table>
               </div>
             )}
-          </div>
+          </AccordionSection>
         )}
 
         {/* Card 3 — Permissions Reference */}
-        <div
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e8e6df",
-            borderRadius: 10,
-            padding: 24,
-          }}
+        <AccordionSection
+          title="Permissions"
+          subtitle="Reference for what each role can do"
+          isMobile={isMobile}
+          defaultOpen={!isMobile}
         >
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "#1a1a1f",
-              margin: "0 0 4px 0",
-            }}
-          >
-            Permissions
-          </h2>
-          <p
-            style={{
-              fontSize: 12,
-              color: "#9494a0",
-              margin: "0 0 16px 0",
-            }}
-          >
-            Reference for what each role can do
-          </p>
-
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                fontSize: 13,
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
+          {isMobile ? (
+            /* Mobile: stacked permission cards */
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {PERMISSIONS.map((perm) => (
+                <div
+                  key={perm.label}
+                  style={{
+                    background: "#fafaf7",
+                    border: "1px solid #e8e6df",
+                    borderRadius: 8,
+                    padding: 14,
+                  }}
+                >
+                  <div
                     style={{
-                      textAlign: "left",
-                      padding: "8px 12px",
-                      fontSize: 11,
+                      fontSize: 13,
                       fontWeight: 500,
-                      color: "#9494a0",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      borderBottom: "1px solid #e8e6df",
-                      width: "40%",
+                      color: "#1a1a1f",
+                      marginBottom: 10,
                     }}
                   >
-                    Permission
-                  </th>
-                  <th
+                    {perm.label}
+                  </div>
+                  <div
                     style={{
-                      textAlign: "center",
-                      padding: "8px 12px",
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "#9494a0",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      borderBottom: "1px solid #e8e6df",
-                      width: "20%",
+                      display: "flex",
+                      gap: 16,
                     }}
                   >
-                    Admin
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "8px 12px",
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "#9494a0",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      borderBottom: "1px solid #e8e6df",
-                      width: "20%",
-                    }}
-                  >
-                    Editor
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "8px 12px",
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: "#9494a0",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.05em",
-                      borderBottom: "1px solid #e8e6df",
-                      width: "20%",
-                    }}
-                  >
-                    Viewer
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {PERMISSIONS.map((perm) => (
-                  <tr key={perm.label}>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        borderBottom: "1px solid #f0eeea",
-                        color: "#1a1a1f",
-                        fontWeight: 500,
-                      }}
-                    >
-                      {perm.label}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        borderBottom: "1px solid #f0eeea",
-                        textAlign: "center",
-                      }}
-                    >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <PermissionIndicator allowed={perm.admin} />
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        borderBottom: "1px solid #f0eeea",
-                        textAlign: "center",
-                      }}
-                    >
+                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Admin</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <PermissionIndicator allowed={perm.editor} />
-                    </td>
-                    <td
+                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Editor</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <PermissionIndicator allowed={perm.viewer} />
+                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Viewer</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Desktop: original table layout */
+            <div style={{ overflowX: "auto" }}>
+              <table
+                style={{
+                  width: "100%",
+                  borderCollapse: "collapse",
+                  fontSize: 13,
+                }}
+              >
+                <thead>
+                  <tr>
+                    <th
                       style={{
-                        padding: "10px 12px",
-                        borderBottom: "1px solid #f0eeea",
-                        textAlign: "center",
+                        textAlign: "left",
+                        padding: "8px 12px",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: "#9494a0",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        borderBottom: "1px solid #e8e6df",
+                        width: "40%",
                       }}
                     >
-                      <PermissionIndicator allowed={perm.viewer} />
-                    </td>
+                      Permission
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "center",
+                        padding: "8px 12px",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: "#9494a0",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        borderBottom: "1px solid #e8e6df",
+                        width: "20%",
+                      }}
+                    >
+                      Admin
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "center",
+                        padding: "8px 12px",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: "#9494a0",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        borderBottom: "1px solid #e8e6df",
+                        width: "20%",
+                      }}
+                    >
+                      Editor
+                    </th>
+                    <th
+                      style={{
+                        textAlign: "center",
+                        padding: "8px 12px",
+                        fontSize: 11,
+                        fontWeight: 500,
+                        color: "#9494a0",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        borderBottom: "1px solid #e8e6df",
+                        width: "20%",
+                      }}
+                    >
+                      Viewer
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                </thead>
+                <tbody>
+                  {PERMISSIONS.map((perm) => (
+                    <tr key={perm.label}>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #f0eeea",
+                          color: "#1a1a1f",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {perm.label}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #f0eeea",
+                          textAlign: "center",
+                        }}
+                      >
+                        <PermissionIndicator allowed={perm.admin} />
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #f0eeea",
+                          textAlign: "center",
+                        }}
+                      >
+                        <PermissionIndicator allowed={perm.editor} />
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          borderBottom: "1px solid #f0eeea",
+                          textAlign: "center",
+                        }}
+                      >
+                        <PermissionIndicator allowed={perm.viewer} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </AccordionSection>
       </div>
     </div>
   );

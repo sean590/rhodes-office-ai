@@ -10,6 +10,7 @@ import { formatMoney, formatDateShort } from "@/lib/utils/format";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES } from "@/lib/constants";
 import type { DocumentType } from "@/lib/types/enums";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -126,6 +127,8 @@ function picklistValueFromRel(
 /* ------------------------------------------------------------------ */
 
 export default function RelationshipsPage() {
+  const isMobile = useIsMobile();
+
   // Data
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [picklist, setPicklist] = useState<PicklistItem[]>([]);
@@ -511,8 +514,10 @@ export default function RelationshipsPage() {
       <div
         style={{
           display: "flex",
+          flexDirection: isMobile ? "column" : "row",
           justifyContent: "space-between",
-          alignItems: "flex-start",
+          alignItems: isMobile ? "stretch" : "flex-start",
+          gap: isMobile ? 12 : 0,
           marginBottom: 24,
         }}
       >
@@ -556,7 +561,7 @@ export default function RelationshipsPage() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "1fr 1fr",
+              gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
               gap: 14,
             }}
           >
@@ -853,13 +858,15 @@ export default function RelationshipsPage() {
       <div
         style={{
           display: "flex",
+          flexDirection: isMobile ? "column" : "row",
           justifyContent: "space-between",
-          alignItems: "center",
+          alignItems: isMobile ? "stretch" : "center",
+          gap: isMobile ? 10 : 0,
           marginBottom: 16,
         }}
       >
         {/* Type filter pills */}
-        <div style={{ display: "flex", gap: 4 }}>
+        <div style={{ display: "flex", gap: 4, overflowX: isMobile ? "auto" : undefined, flexWrap: isMobile ? "nowrap" : undefined, WebkitOverflowScrolling: isMobile ? "touch" : undefined } as React.CSSProperties}>
           {FILTER_TYPES.map((ft) => {
             const isActive = typeFilter === ft.value;
             const count =
@@ -883,6 +890,7 @@ export default function RelationshipsPage() {
                   fontWeight: 500,
                   cursor: "pointer",
                   fontFamily: "inherit",
+                  flexShrink: 0,
                 }}
               >
                 {ft.label}
@@ -909,7 +917,7 @@ export default function RelationshipsPage() {
         <select
           style={{
             ...selectStyle,
-            width: 200,
+            width: isMobile ? "100%" : 200,
             fontSize: 12,
           }}
           value={partyFilter}
@@ -952,7 +960,7 @@ export default function RelationshipsPage() {
             <Card
               key={rel.id}
               style={{
-                padding: "16px 22px",
+                padding: isMobile ? "14px 16px" : "16px 22px",
                 cursor: "pointer",
                 transition: "border-color 0.15s",
               }}
@@ -973,119 +981,171 @@ export default function RelationshipsPage() {
                     setEditForm(EMPTY_FORM);
                   }
                 }}
-                style={{
+                style={isMobile ? {} : {
                   display: "flex",
                   justifyContent: "space-between",
                   alignItems: "flex-start",
                 }}
               >
-                {/* Left side */}
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  {/* Top row: badge + status + frequency + date */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Badge
-                      label={typeInfo.label}
-                      color={typeInfo.color}
-                      bg={typeInfo.bg}
-                    />
-                    <StatusDot status={rel.status} />
-                    {rel.frequency && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#9494a0",
-                          fontWeight: 500,
-                        }}
-                      >
-                        {rel.frequency.replace("_", "-")}
+                {isMobile ? (
+                  /* ---- Mobile: stacked card layout ---- */
+                  <div>
+                    {/* Entity A name */}
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1f" }}>
+                      {rel.from_name}
+                    </div>
+
+                    {/* Relationship type label with arrow */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0" }}>
+                      <Badge
+                        label={typeInfo.label}
+                        color={typeInfo.color}
+                        bg={typeInfo.bg}
+                      />
+                      <span style={{ fontSize: 12, color: "#9494a0" }}>
+                        <ArrowIcon size={12} />
                       </span>
+                      <StatusDot status={rel.status} />
+                    </div>
+
+                    {/* Entity B name */}
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1f", marginBottom: 4 }}>
+                      {rel.to_name}
+                    </div>
+
+                    {/* Description */}
+                    {rel.description && (
+                      <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 4 }}>
+                        {rel.description}
+                      </div>
                     )}
-                    {rel.effective_date && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#9494a0",
-                        }}
-                      >
-                        {formatDateShort(rel.effective_date)}
-                      </span>
+
+                    {/* Amount + frequency row */}
+                    {(rel.annual_estimate !== null && rel.annual_estimate !== 0) && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <span style={{ fontSize: 16, fontWeight: 700, fontFamily: "'DM Mono', monospace", color: typeInfo.color }}>
+                          {formatMoney(rel.annual_estimate)}
+                        </span>
+                        {rel.frequency && (
+                          <span style={{ fontSize: 11, color: "#9494a0", fontWeight: 500 }}>
+                            {rel.frequency.replace("_", "-")}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
+                ) : (
+                  /* ---- Desktop: horizontal layout ---- */
+                  <>
+                    {/* Left side */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Top row: badge + status + frequency + date */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          marginBottom: 8,
+                        }}
+                      >
+                        <Badge
+                          label={typeInfo.label}
+                          color={typeInfo.color}
+                          bg={typeInfo.bg}
+                        />
+                        <StatusDot status={rel.status} />
+                        {rel.frequency && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "#9494a0",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {rel.frequency.replace("_", "-")}
+                          </span>
+                        )}
+                        {rel.effective_date && (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              color: "#9494a0",
+                            }}
+                          >
+                            {formatDateShort(rel.effective_date)}
+                          </span>
+                        )}
+                      </div>
 
-                  {/* From -> To */}
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: "#1a1a1f",
-                      marginBottom: 4,
-                    }}
-                  >
-                    <span>{rel.from_name}</span>
-                    <ArrowIcon size={14} />
-                    <span>{rel.to_name}</span>
-                  </div>
+                      {/* From -> To */}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                          fontSize: 14,
+                          fontWeight: 600,
+                          color: "#1a1a1f",
+                          marginBottom: 4,
+                        }}
+                      >
+                        <span>{rel.from_name}</span>
+                        <ArrowIcon size={14} />
+                        <span>{rel.to_name}</span>
+                      </div>
 
-                  {/* Description */}
-                  {rel.description && (
+                      {/* Description */}
+                      {rel.description && (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "#6b6b76",
+                            marginBottom: 2,
+                          }}
+                        >
+                          {rel.description}
+                        </div>
+                      )}
+
+                      {/* Terms */}
+                      {rel.terms && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "#9494a0",
+                          }}
+                        >
+                          {rel.terms}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right side: amount */}
                     <div
                       style={{
-                        fontSize: 13,
-                        color: "#6b6b76",
-                        marginBottom: 2,
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-end",
+                        gap: 8,
+                        marginLeft: 20,
+                        flexShrink: 0,
                       }}
                     >
-                      {rel.description}
+                      {rel.annual_estimate !== null && rel.annual_estimate !== 0 && (
+                        <div
+                          style={{
+                            fontSize: 20,
+                            fontWeight: 700,
+                            fontFamily: "'DM Mono', monospace",
+                            color: typeInfo.color,
+                          }}
+                        >
+                          {formatMoney(rel.annual_estimate)}
+                        </div>
+                      )}
                     </div>
-                  )}
-
-                  {/* Terms */}
-                  {rel.terms && (
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "#9494a0",
-                      }}
-                    >
-                      {rel.terms}
-                    </div>
-                  )}
-                </div>
-
-                {/* Right side: amount */}
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "flex-end",
-                    gap: 8,
-                    marginLeft: 20,
-                    flexShrink: 0,
-                  }}
-                >
-                  {rel.annual_estimate !== null && rel.annual_estimate !== 0 && (
-                    <div
-                      style={{
-                        fontSize: 20,
-                        fontWeight: 700,
-                        fontFamily: "'DM Mono', monospace",
-                        color: typeInfo.color,
-                      }}
-                    >
-                      {formatMoney(rel.annual_estimate)}
-                    </div>
-                  )}
-                </div>
+                  </>
+                )}
               </div>
 
               {/* ---- Expanded detail view ---- */}
@@ -1094,8 +1154,8 @@ export default function RelationshipsPage() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "14px 24px",
+                      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                      gap: isMobile ? 12 : "14px 24px",
                     }}
                   >
                     <DetailRow
@@ -1163,7 +1223,7 @@ export default function RelationshipsPage() {
                   <div
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
+                      gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
                       gap: 14,
                     }}
                   >
@@ -1378,10 +1438,11 @@ export default function RelationshipsPage() {
                   <div
                     style={{
                       display: "flex",
+                      flexDirection: isMobile ? "column" : "row",
                       gap: 8,
                       marginTop: 16,
                       justifyContent: "space-between",
-                      alignItems: "center",
+                      alignItems: isMobile ? "stretch" : "center",
                     }}
                   >
                     {/* Left: destructive actions */}
@@ -1424,7 +1485,7 @@ export default function RelationshipsPage() {
                     </div>
 
                     {/* Right: save / cancel */}
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: isMobile ? "flex-start" : undefined }}>
                       <Button onClick={cancelEditing}>
                         <XIcon size={12} /> Cancel
                       </Button>

@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Dot } from "@/components/ui/dot";
 import { LinkIcon } from "@/components/ui/icons";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 // --- Types ---
 
@@ -40,7 +41,7 @@ const FILING_STATUS_CONFIG: Record<string, { color: string; symbol: string; labe
 
 // --- Node Component ---
 
-function Node({ node }: { node: TreeNode }) {
+function Node({ node, isMobile }: { node: TreeNode; isMobile: boolean }) {
   const router = useRouter();
   const [hovered, setHovered] = useState(false);
 
@@ -52,6 +53,14 @@ function Node({ node }: { node: TreeNode }) {
     router.push(`/entities/${node.id}`);
   }, [router, node.id]);
 
+  const nodeMinWidth = isMobile ? 140 : 210;
+  const nodePadding = isMobile ? "10px 12px" : "14px 20px";
+  const nameFontSize = isMobile ? 11 : 13;
+  const typeFontSize = isMobile ? 10 : 11;
+  const detailFontSize = isMobile ? 10 : 11;
+  const connectorHeight = isMobile ? 16 : 24;
+  const childGap = isMobile ? 10 : 20;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
       {/* The node card */}
@@ -62,9 +71,10 @@ function Node({ node }: { node: TreeNode }) {
         style={{
           background: hovered ? colors.bg : "#ffffff",
           border: `1.5px solid ${colors.border}`,
-          borderRadius: 12,
-          padding: "14px 20px",
-          minWidth: 210,
+          borderRadius: isMobile ? 8 : 12,
+          padding: nodePadding,
+          minWidth: nodeMinWidth,
+          minHeight: isMobile ? 44 : undefined,
           cursor: "pointer",
           textAlign: "center",
           transition: "all 0.15s",
@@ -73,17 +83,17 @@ function Node({ node }: { node: TreeNode }) {
         }}
       >
         {/* Entity name */}
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
+        <div style={{ fontSize: nameFontSize, fontWeight: 600, color: "#1a1a1a", marginBottom: isMobile ? 2 : 4 }}>
           {node.name}
         </div>
 
         {/* Entity type */}
-        <div style={{ fontSize: 11, fontWeight: 500, color: colors.text, marginBottom: 6 }}>
+        <div style={{ fontSize: typeFontSize, fontWeight: 500, color: colors.text, marginBottom: isMobile ? 3 : 6 }}>
           {typeLabel}
         </div>
 
         {/* Formation state + additional registrations */}
-        <div style={{ fontSize: 11, color: "#8c8c96", marginBottom: 6 }}>
+        <div style={{ fontSize: detailFontSize, color: "#8c8c96", marginBottom: isMobile ? 3 : 6 }}>
           {node.formation_state}
           {node.additional_reg_count > 0 && (
             <span style={{ marginLeft: 4, color: "#a0a0a8" }}>
@@ -93,11 +103,11 @@ function Node({ node }: { node: TreeNode }) {
         </div>
 
         {/* Filing status + relationships row */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: isMobile ? 6 : 10 }}>
           {/* Filing status */}
-          <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span style={{ display: "flex", alignItems: "center", gap: isMobile ? 3 : 4 }}>
             <Dot color={filingConfig.color} size={6} />
-            <span style={{ fontSize: 11, fontWeight: 500, color: filingConfig.color }}>
+            <span style={{ fontSize: detailFontSize, fontWeight: 500, color: filingConfig.color }}>
               {filingConfig.symbol}
             </span>
           </span>
@@ -105,8 +115,8 @@ function Node({ node }: { node: TreeNode }) {
           {/* Relationship count */}
           {node.relationship_count > 0 && (
             <span style={{ display: "flex", alignItems: "center", gap: 3, color: "#8c8c96" }}>
-              <LinkIcon size={11} />
-              <span style={{ fontSize: 11 }}>{node.relationship_count}</span>
+              <LinkIcon size={isMobile ? 10 : 11} />
+              <span style={{ fontSize: detailFontSize }}>{node.relationship_count}</span>
             </span>
           )}
         </div>
@@ -116,7 +126,7 @@ function Node({ node }: { node: TreeNode }) {
       {node.children.length > 0 && (
         <>
           {/* Vertical connector from parent to horizontal line */}
-          <div style={{ width: 1.5, height: 24, background: "#ddd9d0" }} />
+          <div style={{ width: 1.5, height: connectorHeight, background: "#ddd9d0" }} />
 
           {/* Children container */}
           <div style={{ position: "relative", display: "flex", justifyContent: "center" }}>
@@ -130,19 +140,18 @@ function Node({ node }: { node: TreeNode }) {
                   transform: "translateX(-50%)",
                   height: 1.5,
                   background: "#ddd9d0",
-                  /* Calculated to span from center of first child to center of last child */
-                  width: "calc(100% - 210px)",
+                  width: `calc(100% - ${nodeMinWidth}px)`,
                   minWidth: 20,
                 }}
               />
             )}
 
-            <div style={{ display: "flex", gap: 20 }}>
+            <div style={{ display: "flex", gap: childGap }}>
               {node.children.map((child) => (
                 <div key={child.id} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {/* Vertical connector from horizontal line to child */}
-                  <div style={{ width: 1.5, height: 24, background: "#ddd9d0" }} />
-                  <Node node={child} />
+                  <div style={{ width: 1.5, height: connectorHeight, background: "#ddd9d0" }} />
+                  <Node node={child} isMobile={isMobile} />
                 </div>
               ))}
             </div>
@@ -169,6 +178,10 @@ export default function OrgChartPage() {
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isMobile = useIsMobile();
+
+  // Touch-based panning for mobile
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function fetchTree() {
@@ -189,18 +202,22 @@ export default function OrgChartPage() {
     fetchTree();
   }, []);
 
+  // Shared mobile container height: viewport minus header (48px) and bottom tab bar (~60px)
+  const mobileContainerHeight = "calc(100vh - 48px - 60px)";
+
   if (loading) {
     return (
-      <div style={{ padding: 32 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
+      <div style={{ padding: isMobile ? 16 : 32 }}>
+        <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
           Organization Chart
         </div>
-        <div style={{ fontSize: 13, color: "#8c8c96", marginBottom: 24 }}>
-          Click any entity to view details
+        <div style={{ fontSize: isMobile ? 12 : 13, color: "#8c8c96", marginBottom: isMobile ? 16 : 24 }}>
+          {isMobile ? "Tap any entity to view details" : "Click any entity to view details"}
         </div>
         <div style={{
           background: "#ffffff", borderRadius: 12, border: "1px solid #e8e6df",
-          padding: 48, textAlign: "center", color: "#8c8c96", fontSize: 14,
+          padding: isMobile ? 32 : 48, textAlign: "center", color: "#8c8c96", fontSize: 14,
+          ...(isMobile ? { minHeight: mobileContainerHeight, display: "flex", alignItems: "center", justifyContent: "center" } : {}),
         }}>
           Loading...
         </div>
@@ -210,16 +227,17 @@ export default function OrgChartPage() {
 
   if (error) {
     return (
-      <div style={{ padding: 32 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
+      <div style={{ padding: isMobile ? 16 : 32 }}>
+        <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
           Organization Chart
         </div>
-        <div style={{ fontSize: 13, color: "#8c8c96", marginBottom: 24 }}>
-          Click any entity to view details
+        <div style={{ fontSize: isMobile ? 12 : 13, color: "#8c8c96", marginBottom: isMobile ? 16 : 24 }}>
+          {isMobile ? "Tap any entity to view details" : "Click any entity to view details"}
         </div>
         <div style={{
           background: "#ffffff", borderRadius: 12, border: "1px solid #e8e6df",
-          padding: 48, textAlign: "center", color: "#c73e3e", fontSize: 14,
+          padding: isMobile ? 32 : 48, textAlign: "center", color: "#c73e3e", fontSize: 14,
+          ...(isMobile ? { minHeight: mobileContainerHeight, display: "flex", alignItems: "center", justifyContent: "center" } : {}),
         }}>
           {error}
         </div>
@@ -228,33 +246,58 @@ export default function OrgChartPage() {
   }
 
   return (
-    <div style={{ padding: 32 }}>
+    <div style={{
+      padding: isMobile ? 16 : 32,
+      ...(isMobile ? { display: "flex", flexDirection: "column" as const, height: mobileContainerHeight, overflow: "hidden" } : {}),
+    }}>
       {/* Header */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, color: "#1a1a1a", marginBottom: 4 }}>
-          Organization Chart
-        </div>
-        <div style={{ fontSize: 13, color: "#8c8c96" }}>
-          Click any entity to view details
+      <div style={{ marginBottom: isMobile ? 12 : 24, flexShrink: 0 }}>
+        <div style={{
+          display: "flex",
+          flexDirection: isMobile ? "column" as const : "row" as const,
+          alignItems: isMobile ? "flex-start" : "baseline",
+          gap: isMobile ? 2 : 8,
+        }}>
+          <div style={{ fontSize: isMobile ? 17 : 20, fontWeight: 600, color: "#1a1a1a" }}>
+            Organization Chart
+          </div>
+          <div style={{ fontSize: isMobile ? 12 : 13, color: "#8c8c96" }}>
+            {isMobile ? "Tap any entity to view details" : "Click any entity to view details"}
+          </div>
         </div>
       </div>
 
-      {/* Tree card */}
-      <div style={{
-        background: "#ffffff",
-        borderRadius: 12,
-        border: "1px solid #e8e6df",
-        padding: 40,
-        overflowX: "auto",
-      }}>
+      {/* Tree card - scrollable/pannable on mobile */}
+      <div
+        ref={scrollContainerRef}
+        style={{
+          background: "#ffffff",
+          borderRadius: 12,
+          border: "1px solid #e8e6df",
+          padding: isMobile ? 16 : 40,
+          overflowX: "auto",
+          overflowY: "auto",
+          WebkitOverflowScrolling: "touch",
+          ...(isMobile ? {
+            flex: 1,
+            minHeight: 0,
+          } : {}),
+        }}
+      >
         {tree.length === 0 ? (
-          <div style={{ textAlign: "center", color: "#8c8c96", fontSize: 14, padding: 32 }}>
+          <div style={{ textAlign: "center", color: "#8c8c96", fontSize: isMobile ? 13 : 14, padding: isMobile ? 16 : 32 }}>
             No entities found. Create entities with parent relationships to build the org chart.
           </div>
         ) : (
-          <div style={{ display: "flex", justifyContent: "center", gap: 40 }}>
+          <div style={{
+            display: "inline-flex",
+            justifyContent: "center",
+            gap: isMobile ? 20 : 40,
+            minWidth: "100%",
+            paddingBottom: isMobile ? 16 : 0,
+          }}>
             {tree.map((root) => (
-              <Node key={root.id} node={root} />
+              <Node key={root.id} node={root} isMobile={isMobile} />
             ))}
           </div>
         )}
@@ -262,36 +305,42 @@ export default function OrgChartPage() {
 
       {/* Legend */}
       <div style={{
-        marginTop: 24,
+        marginTop: isMobile ? 12 : 24,
         display: "flex",
         alignItems: "center",
-        gap: 20,
+        gap: isMobile ? 10 : 20,
         flexWrap: "wrap",
+        flexShrink: 0,
+        ...(isMobile ? { paddingBottom: 8 } : {}),
       }}>
-        <span style={{ fontSize: 12, color: "#8c8c96", fontWeight: 500 }}>Entity Types:</span>
+        <span style={{ fontSize: isMobile ? 11 : 12, color: "#8c8c96", fontWeight: 500 }}>Entity Types:</span>
         {LEGEND_TYPES.map((t) => {
           const colors = EC[t.key] || EC.other;
           return (
-            <span key={t.key} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span key={t.key} style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 6 }}>
               <span style={{
-                width: 10,
-                height: 10,
+                width: isMobile ? 8 : 10,
+                height: isMobile ? 8 : 10,
                 borderRadius: 3,
                 border: `1.5px solid ${colors.border}`,
                 background: colors.bg,
               }} />
-              <span style={{ fontSize: 12, color: "#6b6b76" }}>{t.label}</span>
+              <span style={{ fontSize: isMobile ? 11 : 12, color: "#6b6b76" }}>{t.label}</span>
             </span>
           );
         })}
 
-        <span style={{ width: 1, height: 14, background: "#ddd9d0", margin: "0 4px" }} />
+        {!isMobile && (
+          <span style={{ width: 1, height: 14, background: "#ddd9d0", margin: "0 4px" }} />
+        )}
 
-        <span style={{ fontSize: 12, color: "#8c8c96", fontWeight: 500 }}>Filing Status:</span>
+        {isMobile && <div style={{ width: "100%" }} />}
+
+        <span style={{ fontSize: isMobile ? 11 : 12, color: "#8c8c96", fontWeight: 500 }}>Filing Status:</span>
         {Object.entries(FILING_STATUS_CONFIG).map(([key, cfg]) => (
           <span key={key} style={{ display: "flex", alignItems: "center", gap: 4 }}>
             <Dot color={cfg.color} size={6} />
-            <span style={{ fontSize: 12, color: "#6b6b76" }}>{cfg.label}</span>
+            <span style={{ fontSize: isMobile ? 11 : 12, color: "#6b6b76" }}>{cfg.label}</span>
           </span>
         ))}
       </div>

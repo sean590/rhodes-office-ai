@@ -11,7 +11,11 @@ interface UserInfo {
   role: string;
 }
 
-export function UserMenu() {
+interface UserMenuProps {
+  compact?: boolean;
+}
+
+export function UserMenu({ compact = false }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   const router = useRouter();
@@ -33,6 +37,24 @@ export function UserMenu() {
 
   const displayName = userInfo?.display_name || userInfo?.email?.split("@")[0] || "User";
   const initials = displayName.charAt(0).toUpperCase();
+
+  // Compact mode: just the avatar circle, no dropdown
+  if (compact) {
+    return (
+      <button
+        onClick={handleLogout}
+        style={{
+          width: 30, height: 30, borderRadius: "50%",
+          background: "linear-gradient(135deg, #2d5a3d, #3d7a53)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 11, fontWeight: 600, color: "#fff",
+          border: "none", cursor: "pointer", padding: 0,
+        }}
+      >
+        {initials}
+      </button>
+    );
+  }
 
   return (
     <div style={{ position: "relative" }}>

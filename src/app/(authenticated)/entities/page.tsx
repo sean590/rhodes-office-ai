@@ -11,6 +11,7 @@ import { PlusIcon, AlertIcon } from "@/components/ui/icons";
 import { ENTITY_TYPE_COLORS, ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { maskEin } from "@/lib/utils/format";
 import { getStateLabel } from "@/lib/constants";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { EntityType } from "@/lib/types/enums";
 
 /* ------------------------------------------------------------------ */
@@ -65,6 +66,7 @@ function getAllJurisdictions(entity: EntityListItem): string[] {
 
 export default function EntitiesPage() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [entities, setEntities] = useState<EntityListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -157,7 +159,7 @@ export default function EntitiesPage() {
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
       {/* ---- Header row ---- */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: isMobile ? "stretch" : "flex-start", gap: isMobile ? 12 : 0 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a1f", margin: 0 }}>Entities</h1>
           <div style={{ fontSize: 13, color: "#9494a0", marginTop: 2 }}>
@@ -211,106 +213,172 @@ export default function EntitiesPage() {
         />
       </div>
 
-      {/* ---- Table ---- */}
-      <div
-        style={{
-          background: "#ffffff",
-          border: "1px solid #e8e6df",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}
-      >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              <th style={thStyle}>Entity Name</th>
-              <th style={thStyle}>Type</th>
-              <th style={thStyle}>Formed In</th>
-              <th style={thStyle}>Registered In</th>
-              <th style={thStyle}>EIN</th>
-              <th style={thStyle}>Filing Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
-                  {search ? "No entities match your search." : "No entities found."}
-                </td>
-              </tr>
-            ) : (
-              filtered.map((entity) => {
-                const typeColor = ENTITY_TYPE_COLORS[entity.type] ?? ENTITY_TYPE_COLORS.other;
-                const typeLabel = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
-                const filingColor = FILING_STATUS_COLORS[entity.filing_status] ?? "#9494a0";
-                const filingLabel = FILING_STATUS_LABELS[entity.filing_status] ?? entity.filing_status;
-                const jurisdictions = getAllJurisdictions(entity);
+      {/* ---- Table / Cards ---- */}
+      {isMobile ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 32, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
+              {search ? "No entities match your search." : "No entities found."}
+            </div>
+          ) : (
+            filtered.map((entity) => {
+              const typeColor = ENTITY_TYPE_COLORS[entity.type] ?? ENTITY_TYPE_COLORS.other;
+              const typeLabel = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
+              const filingColor = FILING_STATUS_COLORS[entity.filing_status] ?? "#9494a0";
+              const filingLabel = FILING_STATUS_LABELS[entity.filing_status] ?? entity.filing_status;
 
-                return (
-                  <tr
-                    key={entity.id}
-                    onClick={() => router.push(`/entities/${entity.id}`)}
-                    style={{ cursor: "pointer", transition: "background 0.15s" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-                  >
-                    {/* Entity name + managers */}
-                    <td style={tdStyle}>
-                      <div style={{ fontWeight: 500, fontSize: 14, color: "#1a1a1f" }}>
-                        {entity.name}
-                      </div>
-                      {entity.managers.length > 0 && (
-                        <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
-                          {entity.managers.map((m) => m.name).join(", ")}
-                        </div>
-                      )}
-                    </td>
+              return (
+                <div
+                  key={entity.id}
+                  onClick={() => router.push(`/entities/${entity.id}`)}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e8e6df",
+                    borderRadius: 10,
+                    padding: "14px 16px",
+                    cursor: "pointer",
+                  }}
+                >
+                  {/* Name + type badge */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, color: "#1a1a1f" }}>
+                      {entity.name}
+                    </div>
+                    <Badge label={typeLabel} color={typeColor.text} bg={typeColor.bg} />
+                  </div>
 
-                    {/* Type badge */}
-                    <td style={tdStyle}>
-                      <Badge label={typeLabel} color={typeColor.text} bg={typeColor.bg} />
-                    </td>
+                  {/* Managers */}
+                  {entity.managers.length > 0 && (
+                    <div style={{ fontSize: 12, color: "#9494a0", marginTop: 4 }}>
+                      {entity.managers.map((m) => m.name).join(", ")}
+                    </div>
+                  )}
 
-                    {/* Formed In */}
-                    <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
+                  {/* State + EIN */}
+                  <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, color: "#1a1a1f" }}>
+                    <span>
                       {entity.formation_state
                         ? getStateLabel(entity.formation_state as never)
                         : "\u2014"}
-                    </td>
-
-                    {/* Registered In */}
-                    <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
-                      {jurisdictions.length > 0 ? jurisdictions.join(", ") : "\u2014"}
-                    </td>
-
-                    {/* EIN (masked, mono font) */}
-                    <td
-                      style={{
-                        ...tdStyle,
-                        fontSize: 13,
-                        color: "#1a1a1f",
-                        fontFamily: "'DM Mono', monospace",
-                      }}
-                    >
+                    </span>
+                    <span style={{ fontFamily: "'DM Mono', monospace" }}>
                       {maskEin(entity.ein)}
-                    </td>
+                    </span>
+                  </div>
 
-                    {/* Filing status */}
-                    <td style={tdStyle}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <Dot color={filingColor} />
-                        <span style={{ fontSize: 13, color: filingColor, fontWeight: 500 }}>
-                          {filingLabel}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                  {/* Filing status */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8 }}>
+                    <Dot color={filingColor} />
+                    <span style={{ fontSize: 12, color: filingColor, fontWeight: 500 }}>
+                      {filingLabel}
+                    </span>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e8e6df",
+            borderRadius: 12,
+            overflow: "hidden",
+          }}
+        >
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Entity Name</th>
+                <th style={thStyle}>Type</th>
+                <th style={thStyle}>Formed In</th>
+                <th style={thStyle}>Registered In</th>
+                <th style={thStyle}>EIN</th>
+                <th style={thStyle}>Filing Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
+                    {search ? "No entities match your search." : "No entities found."}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((entity) => {
+                  const typeColor = ENTITY_TYPE_COLORS[entity.type] ?? ENTITY_TYPE_COLORS.other;
+                  const typeLabel = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
+                  const filingColor = FILING_STATUS_COLORS[entity.filing_status] ?? "#9494a0";
+                  const filingLabel = FILING_STATUS_LABELS[entity.filing_status] ?? entity.filing_status;
+                  const jurisdictions = getAllJurisdictions(entity);
+
+                  return (
+                    <tr
+                      key={entity.id}
+                      onClick={() => router.push(`/entities/${entity.id}`)}
+                      style={{ cursor: "pointer", transition: "background 0.15s" }}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                    >
+                      {/* Entity name + managers */}
+                      <td style={tdStyle}>
+                        <div style={{ fontWeight: 500, fontSize: 14, color: "#1a1a1f" }}>
+                          {entity.name}
+                        </div>
+                        {entity.managers.length > 0 && (
+                          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>
+                            {entity.managers.map((m) => m.name).join(", ")}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Type badge */}
+                      <td style={tdStyle}>
+                        <Badge label={typeLabel} color={typeColor.text} bg={typeColor.bg} />
+                      </td>
+
+                      {/* Formed In */}
+                      <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
+                        {entity.formation_state
+                          ? getStateLabel(entity.formation_state as never)
+                          : "\u2014"}
+                      </td>
+
+                      {/* Registered In */}
+                      <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
+                        {jurisdictions.length > 0 ? jurisdictions.join(", ") : "\u2014"}
+                      </td>
+
+                      {/* EIN (masked, mono font) */}
+                      <td
+                        style={{
+                          ...tdStyle,
+                          fontSize: 13,
+                          color: "#1a1a1f",
+                          fontFamily: "'DM Mono', monospace",
+                        }}
+                      >
+                        {maskEin(entity.ein)}
+                      </td>
+
+                      {/* Filing status */}
+                      <td style={tdStyle}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <Dot color={filingColor} />
+                          <span style={{ fontSize: 13, color: filingColor, fontWeight: 500 }}>
+                            {filingLabel}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

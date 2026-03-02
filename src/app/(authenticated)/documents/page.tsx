@@ -10,6 +10,7 @@ import { DocIcon, SearchIcon, XIcon, UploadIcon, SparkleIcon, PlusIcon, DownIcon
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
@@ -62,6 +63,7 @@ function getDocCategory(docType: DocumentType): string {
 
 export default function DocumentsPage() {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [documents, setDocuments] = useState<DocWithEntity[]>([]);
   const [entities, setEntities] = useState<EntityBasic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -329,7 +331,7 @@ export default function DocumentsPage() {
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", justifyContent: "space-between", marginBottom: 24, gap: isMobile ? 12 : 0 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a1f", margin: 0 }}>
             Documents
@@ -362,7 +364,7 @@ export default function DocumentsPage() {
             } catch { /* ignore */ }
           }}
         >
-          <PlusIcon size={14} /> Upload Documents
+          <PlusIcon size={14} /> {isMobile ? "Upload" : "Upload Documents"}
         </Button>
       </div>
 
@@ -618,7 +620,10 @@ export default function DocumentsPage() {
           display: "flex",
           gap: 6,
           marginBottom: 16,
-          flexWrap: "wrap",
+          flexWrap: isMobile ? "nowrap" : "wrap",
+          overflowX: isMobile ? "auto" : undefined,
+          WebkitOverflowScrolling: "touch",
+          paddingBottom: isMobile ? 4 : 0,
         }}
       >
         {filterCategories.map((cat) => {
@@ -637,6 +642,8 @@ export default function DocumentsPage() {
                 fontWeight: 500,
                 cursor: "pointer",
                 fontFamily: "inherit",
+                flexShrink: 0,
+                whiteSpace: "nowrap",
               }}
             >
               {cat.label}
@@ -705,300 +712,572 @@ export default function DocumentsPage() {
           )}
         </div>
       ) : (
-        <Card style={{ padding: 0 }}>
-          {/* Table header */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
-              gap: 8,
-              padding: "10px 18px",
-              borderBottom: "1px solid #e8e6df",
-              fontSize: 11,
-              fontWeight: 600,
-              color: "#6b6b76",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}
-          >
-            <div>Document</div>
-            <div>Entity</div>
-            <div>Tags</div>
-            <div>Uploaded</div>
-            <div style={{ textAlign: "right" }}>Size</div>
-            <div />
-          </div>
+        isMobile ? (
+          /* ---- Mobile: Card layout ---- */
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {filtered.map((doc) => {
+              const docCategory = doc.document_category || getDocCategory(doc.document_type);
+              const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
+              const typeLabel = DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type;
 
-          {/* Table rows */}
-          {filtered.map((doc) => {
-            const isExpanded = expandedDocId === doc.id;
-            const docCategory = doc.document_category || getDocCategory(doc.document_type);
-            const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
-            const extraction = doc.ai_extraction as { summary?: string; actions?: unknown[] } | null;
-
-            return (
-              <div key={doc.id}>
-                {/* Compact row */}
+              return (
                 <div
-                  onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                  key={doc.id}
+                  onClick={() => setExpandedDocId(expandedDocId === doc.id ? null : doc.id)}
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
-                    gap: 8,
-                    padding: "10px 18px",
-                    borderBottom: isExpanded ? "none" : "1px solid #f8f7f4",
-                    fontSize: 13,
-                    alignItems: "center",
+                    background: "#ffffff",
+                    border: "1px solid #e8e6df",
+                    borderRadius: 10,
+                    padding: "14px 16px",
                     cursor: "pointer",
-                    transition: "background 0.1s",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = "")}
                 >
-                  {/* Document name + AI indicator */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <DocIcon size={14} />
+                  {/* Row 1: Name + Type badge */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+                      <DocIcon size={14} />
+                      <span
+                        style={{
+                          fontWeight: 600,
+                          fontSize: 14,
+                          color: "#1a1a1f",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {doc.name}
+                      </span>
+                      {doc.ai_extracted && (
+                        <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
+                          <SparkleIcon size={12} />
+                        </span>
+                      )}
+                    </div>
                     <span
                       style={{
-                        fontWeight: 500,
-                        color: "#1a1a1f",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {doc.name}
-                    </span>
-                    {doc.ai_extracted && (
-                      <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
-                        <SparkleIcon size={12} />
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Entity link */}
-                  {doc.entity_id ? (
-                    <Link
-                      href={`/entities/${doc.entity_id}`}
-                      onClick={(e) => e.stopPropagation()}
-                      style={{
-                        fontSize: 12,
+                        fontSize: 10,
+                        fontWeight: 600,
                         color: "#3366a8",
-                        textDecoration: "none",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
+                        background: "rgba(51,102,168,0.08)",
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        whiteSpace: "nowrap",
+                        flexShrink: 0,
+                      }}
+                    >
+                      {typeLabel}
+                    </span>
+                  </div>
+
+                  {/* Row 2: Entity name + upload date */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#9494a0", marginBottom: 6 }}>
+                    {doc.entity_id ? (
+                      <Link
+                        href={`/entities/${doc.entity_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          color: "#3366a8",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {doc.entity_name}
+                      </Link>
+                    ) : (
+                      <span style={{ fontStyle: "italic" }}>Unassigned</span>
+                    )}
+                    <span style={{ color: "#ddd9d0" }}>|</span>
+                    <span style={{ flexShrink: 0 }}>{formatRelativeDate(doc.created_at)}</span>
+                  </div>
+
+                  {/* Row 3: Category pill + file size */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: "#2d5a3d",
+                        background: "rgba(45,90,61,0.08)",
+                        padding: "2px 8px",
+                        borderRadius: 4,
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {doc.entity_name}
-                    </Link>
-                  ) : (
-                    <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>
-                      Unassigned
+                      {categoryLabel}
                     </span>
-                  )}
-
-                  {/* Tags — category pill */}
-                  <span
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: "#2d5a3d",
-                      background: "rgba(45,90,61,0.08)",
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                      whiteSpace: "nowrap",
-                      display: "inline-block",
-                      width: "fit-content",
-                    }}
-                  >
-                    {categoryLabel}
-                  </span>
-
-                  {/* Uploaded */}
-                  <span style={{ fontSize: 11, color: "#9494a0" }}>
-                    {formatRelativeDate(doc.created_at)}
-                  </span>
-
-                  {/* Size */}
-                  <span style={{ fontSize: 11, color: "#9494a0", textAlign: "right" }}>
-                    {formatFileSize(doc.file_size)}
-                  </span>
-
-                  {/* Expand indicator */}
-                  <div style={{ textAlign: "center", color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
-                    <DownIcon size={12} />
+                    <span style={{ fontSize: 11, color: "#9494a0" }}>
+                      {formatFileSize(doc.file_size)}
+                    </span>
                   </div>
-                </div>
 
-                {/* Expanded detail */}
-                {isExpanded && (
-                  <div
-                    style={{
-                      padding: "12px 18px 16px",
-                      borderBottom: "1px solid #e8e6df",
-                      background: "#fafaf7",
-                    }}
-                  >
-                    {/* Full document name — inline rename */}
-                    <div style={{ marginBottom: 10 }}>
-                      {editingDocId === doc.id ? (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <input
-                            autoFocus
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") handleRename(doc.id);
-                              if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
-                            }}
-                            style={{
-                              flex: 1,
-                              fontSize: 14,
-                              fontWeight: 600,
-                              color: "#1a1a1f",
-                              background: "#fff",
-                              border: "1px solid #ddd9d0",
-                              borderRadius: 6,
-                              padding: "4px 8px",
-                              fontFamily: "inherit",
-                              outline: "none",
-                            }}
-                          />
-                          <button
-                            onClick={() => handleRename(doc.id)}
-                            style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => { setEditingDocId(null); setEditingName(""); }}
-                            style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }}
-                            title="Rename"
-                            style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}
-                          >
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* All tags */}
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.08)", padding: "3px 10px", borderRadius: 4 }}>
-                        {categoryLabel}
-                      </span>
-                      {doc.document_type !== "other" && (
-                        <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
-                          {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
-                        </span>
-                      )}
-                      {doc.year && (
-                        <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
-                          {doc.year}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* AI Summary */}
-                    {extraction?.summary && (
-                      <div
-                        style={{
-                          background: "#fff",
-                          border: "1px solid #e8e6df",
-                          borderRadius: 6,
-                          padding: "10px 14px",
-                          fontSize: 12,
-                          color: "#4a4a52",
-                          lineHeight: 1.5,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                          AI Summary
-                        </div>
-                        {extraction.summary}
+                  {/* Expanded detail on tap */}
+                  {expandedDocId === doc.id && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        paddingTop: 12,
+                        borderTop: "1px solid #e8e6df",
+                      }}
+                    >
+                      {/* Inline rename */}
+                      <div style={{ marginBottom: 10 }}>
+                        {editingDocId === doc.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <input
+                              autoFocus
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleRename(doc.id);
+                                if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
+                              }}
+                              style={{
+                                flex: 1,
+                                minWidth: 0,
+                                fontSize: 14,
+                                fontWeight: 600,
+                                color: "#1a1a1f",
+                                background: "#fff",
+                                border: "1px solid #ddd9d0",
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                fontFamily: "inherit",
+                                outline: "none",
+                              }}
+                            />
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleRename(doc.id); }}
+                              style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingDocId(null); setEditingName(""); }}
+                              style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }}
+                              title="Rename"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
 
-                    {/* Details row */}
-                    <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
-                      <span>Size: {formatFileSize(doc.file_size)}</span>
-                      <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
-                      {doc.mime_type && <span>Type: {doc.mime_type}</span>}
+                      {/* All tags */}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                          {categoryLabel}
+                        </span>
+                        {doc.document_type !== "other" && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                            {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
+                          </span>
+                        )}
+                        {doc.year && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
+                            {doc.year}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* AI Summary */}
+                      {(doc.ai_extraction as { summary?: string } | null)?.summary && (
+                        <div
+                          style={{
+                            background: "#fafaf7",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "10px 14px",
+                            fontSize: 12,
+                            color: "#4a4a52",
+                            lineHeight: 1.5,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                            AI Summary
+                          </div>
+                          {(doc.ai_extraction as { summary?: string })?.summary}
+                        </div>
+                      )}
+
+                      {/* Details */}
+                      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
+                        <span>Size: {formatFileSize(doc.file_size)}</span>
+                        <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleProcess(doc.id); }}
+                          disabled={processingId === doc.id}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: processingId === doc.id ? "wait" : "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            fontSize: 12,
+                            color: "#c47520",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          <SparkleIcon size={12} />
+                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process" : "AI Process"}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDownload(doc.id); }}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            color: "#3366a8",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleDelete(doc.id); }}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            color: "#c73e3e",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
                     </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          /* ---- Desktop: Table layout ---- */
+          <Card style={{ padding: 0 }}>
+            {/* Table header */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
+                gap: 8,
+                padding: "10px 18px",
+                borderBottom: "1px solid #e8e6df",
+                fontSize: 11,
+                fontWeight: 600,
+                color: "#6b6b76",
+                textTransform: "uppercase",
+                letterSpacing: "0.05em",
+              }}
+            >
+              <div>Document</div>
+              <div>Entity</div>
+              <div>Tags</div>
+              <div>Uploaded</div>
+              <div style={{ textAlign: "right" }}>Size</div>
+              <div />
+            </div>
 
-                    {/* Action buttons */}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        onClick={() => handleProcess(doc.id)}
-                        disabled={processingId === doc.id}
+            {/* Table rows */}
+            {filtered.map((doc) => {
+              const isExpanded = expandedDocId === doc.id;
+              const docCategory = doc.document_category || getDocCategory(doc.document_type);
+              const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
+              const extraction = doc.ai_extraction as { summary?: string; actions?: unknown[] } | null;
+
+              return (
+                <div key={doc.id}>
+                  {/* Compact row */}
+                  <div
+                    onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 140px 120px 80px 70px 40px",
+                      gap: 8,
+                      padding: "10px 18px",
+                      borderBottom: isExpanded ? "none" : "1px solid #f8f7f4",
+                      fontSize: 13,
+                      alignItems: "center",
+                      cursor: "pointer",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                  >
+                    {/* Document name + AI indicator */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                      <DocIcon size={14} />
+                      <span
                         style={{
-                          background: "none",
-                          border: "1px solid #e8e6df",
-                          borderRadius: 6,
-                          padding: "5px 12px",
-                          cursor: processingId === doc.id ? "wait" : "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 5,
-                          fontSize: 12,
-                          color: "#c47520",
                           fontWeight: 500,
-                          fontFamily: "inherit",
+                          color: "#1a1a1f",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        <SparkleIcon size={12} />
-                        {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
-                      </button>
-                      <button
-                        onClick={() => handleDownload(doc.id)}
+                        {doc.name}
+                      </span>
+                      {doc.ai_extracted && (
+                        <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
+                          <SparkleIcon size={12} />
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Entity link */}
+                    {doc.entity_id ? (
+                      <Link
+                        href={`/entities/${doc.entity_id}`}
+                        onClick={(e) => e.stopPropagation()}
                         style={{
-                          background: "none",
-                          border: "1px solid #e8e6df",
-                          borderRadius: 6,
-                          padding: "5px 12px",
-                          cursor: "pointer",
                           fontSize: 12,
                           color: "#3366a8",
-                          fontWeight: 500,
-                          fontFamily: "inherit",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                       >
-                        Download
-                      </button>
-                      <button
-                        onClick={() => handleDelete(doc.id)}
-                        style={{
-                          background: "none",
-                          border: "1px solid #e8e6df",
-                          borderRadius: 6,
-                          padding: "5px 12px",
-                          cursor: "pointer",
-                          fontSize: 12,
-                          color: "#c73e3e",
-                          fontWeight: 500,
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        Delete
-                      </button>
+                        {doc.entity_name}
+                      </Link>
+                    ) : (
+                      <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>
+                        Unassigned
+                      </span>
+                    )}
+
+                    {/* Tags — category pill */}
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: "#2d5a3d",
+                        background: "rgba(45,90,61,0.08)",
+                        padding: "2px 8px",
+                        borderRadius: 4,
+                        whiteSpace: "nowrap",
+                        display: "inline-block",
+                        width: "fit-content",
+                      }}
+                    >
+                      {categoryLabel}
+                    </span>
+
+                    {/* Uploaded */}
+                    <span style={{ fontSize: 11, color: "#9494a0" }}>
+                      {formatRelativeDate(doc.created_at)}
+                    </span>
+
+                    {/* Size */}
+                    <span style={{ fontSize: 11, color: "#9494a0", textAlign: "right" }}>
+                      {formatFileSize(doc.file_size)}
+                    </span>
+
+                    {/* Expand indicator */}
+                    <div style={{ textAlign: "center", color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                      <DownIcon size={12} />
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </Card>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div
+                      style={{
+                        padding: "12px 18px 16px",
+                        borderBottom: "1px solid #e8e6df",
+                        background: "#fafaf7",
+                      }}
+                    >
+                      {/* Full document name — inline rename */}
+                      <div style={{ marginBottom: 10 }}>
+                        {editingDocId === doc.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <input
+                              autoFocus
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleRename(doc.id);
+                                if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
+                              }}
+                              style={{
+                                flex: 1,
+                                fontSize: 14,
+                                fontWeight: 600,
+                                color: "#1a1a1f",
+                                background: "#fff",
+                                border: "1px solid #ddd9d0",
+                                borderRadius: 6,
+                                padding: "4px 8px",
+                                fontFamily: "inherit",
+                                outline: "none",
+                              }}
+                            />
+                            <button
+                              onClick={() => handleRename(doc.id)}
+                              style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => { setEditingDocId(null); setEditingName(""); }}
+                              style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }}
+                              title="Rename"
+                              style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}
+                            >
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* All tags */}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                        <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                          {categoryLabel}
+                        </span>
+                        {doc.document_type !== "other" && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                            {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
+                          </span>
+                        )}
+                        {doc.year && (
+                          <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
+                            {doc.year}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* AI Summary */}
+                      {extraction?.summary && (
+                        <div
+                          style={{
+                            background: "#fff",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "10px 14px",
+                            fontSize: 12,
+                            color: "#4a4a52",
+                            lineHeight: 1.5,
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                            AI Summary
+                          </div>
+                          {extraction.summary}
+                        </div>
+                      )}
+
+                      {/* Details row */}
+                      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
+                        <span>Size: {formatFileSize(doc.file_size)}</span>
+                        <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
+                        {doc.mime_type && <span>Type: {doc.mime_type}</span>}
+                      </div>
+
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          onClick={() => handleProcess(doc.id)}
+                          disabled={processingId === doc.id}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: processingId === doc.id ? "wait" : "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                            fontSize: 12,
+                            color: "#c47520",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          <SparkleIcon size={12} />
+                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
+                        </button>
+                        <button
+                          onClick={() => handleDownload(doc.id)}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            color: "#3366a8",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          Download
+                        </button>
+                        <button
+                          onClick={() => handleDelete(doc.id)}
+                          style={{
+                            background: "none",
+                            border: "1px solid #e8e6df",
+                            borderRadius: 6,
+                            padding: "5px 12px",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            color: "#c73e3e",
+                            fontWeight: 500,
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </Card>
+        )
       )}
     </div>
   );
