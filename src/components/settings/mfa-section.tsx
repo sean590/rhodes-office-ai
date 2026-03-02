@@ -27,6 +27,8 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
   const [totpFactors, setTotpFactors] = useState<MfaFactor[]>([]);
   const [loading, setLoading] = useState(true);
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [totpSecret, setTotpSecret] = useState<string | null>(null);
+  const [secretCopied, setSecretCopied] = useState(false);
   const [factorId, setFactorId] = useState<string | null>(null);
   const [verifyCode, setVerifyCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +85,7 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
         return;
       }
       setQrCode(data.totp.qr_code);
+      setTotpSecret(data.totp.secret);
       setFactorId(data.id);
       setStep("verifying");
     } catch (err) {
@@ -113,6 +116,7 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
       }
       setStep("enabled");
       setQrCode(null);
+      setTotpSecret(null);
       setVerifyCode("");
       fetchFactors();
     } catch (err) {
@@ -316,18 +320,51 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
                 alignItems: isMobile ? "center" : "flex-start",
               }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={qrCode}
-                alt="MFA QR Code"
-                style={{
-                  width: 200,
-                  height: 200,
-                  borderRadius: 8,
-                  border: "1px solid #e8e6df",
-                  flexShrink: 0,
-                }}
-              />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={qrCode}
+                  alt="MFA QR Code"
+                  style={{
+                    width: 200,
+                    height: 200,
+                    borderRadius: 8,
+                    border: "1px solid #e8e6df",
+                  }}
+                />
+                {totpSecret && (
+                  <div style={{ width: 200, textAlign: "center" }}>
+                    <p style={{ fontSize: 11, color: "#9494a0", margin: "4px 0 6px 0" }}>
+                      Can&apos;t scan? Copy this code:
+                    </p>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(totpSecret);
+                        setSecretCopied(true);
+                        setTimeout(() => setSecretCopied(false), 2000);
+                      }}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        padding: "6px 8px",
+                        background: "#f5f4f0",
+                        border: "1px solid #ddd9d0",
+                        borderRadius: 4,
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                        letterSpacing: 1,
+                        wordBreak: "break-all",
+                        cursor: "pointer",
+                        color: "#1a1a1f",
+                        textAlign: "center",
+                      }}
+                      title="Click to copy"
+                    >
+                      {secretCopied ? "Copied!" : totpSecret}
+                    </button>
+                  </div>
+                )}
+              </div>
               <div style={{ flex: 1, width: isMobile ? "100%" : "auto" }}>
                 <label
                   style={{
@@ -383,6 +420,7 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
                     onClick={() => {
                       setStep("idle");
                       setQrCode(null);
+                      setTotpSecret(null);
                       setVerifyCode("");
                       setError(null);
                     }}
