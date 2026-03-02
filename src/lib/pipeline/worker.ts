@@ -7,6 +7,7 @@ import { invalidateDocumentTypeCache } from "@/lib/document-types";
 import { getDbContext, extractDocument } from "./extract";
 import type { ExtractionResult, SubDocument } from "./extract";
 import { ingestQueueItem } from "./ingest";
+import * as Sentry from "@sentry/nextjs";
 
 /**
  * Route a queue item after extraction: auto-ingest (no user action needed)
@@ -183,6 +184,14 @@ export async function processQueueItem(itemId: string): Promise<void> {
     // 12. Update batch stats
     await updateBatchStats(admin, item.batch_id);
   } catch (err) {
+    Sentry.withScope((scope) => {
+      scope.setTag("feature", "extraction");
+      scope.setExtra("queueItemId", itemId);
+      scope.setExtra("batchId", item.batch_id);
+      scope.setExtra("filename", item.original_filename);
+      scope.setExtra("docType", item.staged_doc_type);
+      Sentry.captureException(err);
+    });
     const rawMessage = err instanceof Error ? err.message : String(err);
     console.error(`Extraction failed for queue item ${itemId}:`, rawMessage);
 
@@ -354,6 +363,7 @@ export async function processBatch(
       try {
         await processQueueItem(itemId);
       } catch (err) {
+        Sentry.captureException(err);
         console.error(`Worker error for item ${itemId}:`, err);
       }
     }

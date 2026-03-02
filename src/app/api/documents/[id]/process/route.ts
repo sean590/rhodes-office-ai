@@ -6,6 +6,7 @@ import { getDbContext, extractDocument } from "@/lib/pipeline/extract";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { headers } from "next/headers";
+import * as Sentry from "@sentry/nextjs";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function POST(
@@ -200,6 +201,11 @@ export async function POST(
       year: result.year,
     });
   } catch (err) {
+    Sentry.withScope((scope) => {
+      scope.setTag("feature", "extraction");
+      scope.setExtra("route", "documents/[id]/process");
+      Sentry.captureException(err);
+    });
     console.error("POST /api/documents/[id]/process error:", err);
     const message = err instanceof Error ? err.message : "Internal server error";
     return NextResponse.json({ error: message }, { status: 500 });
