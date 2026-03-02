@@ -1,10 +1,14 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processBatch } from "@/lib/pipeline/worker";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { headers } from "next/headers";
+
+// Allow up to 5 minutes for batch processing
+export const maxDuration = 300;
 
 export async function POST(
   _request: Request,
@@ -51,9 +55,14 @@ export async function POST(
       })
       .eq("id", batchId);
 
-    // Start processing in the background (fire-and-forget)
-    processBatch(batchId, 3).catch((err) => {
-      console.error(`Background batch processing failed for ${batchId}:`, err);
+    // Schedule processing to run after the response is sent.
+    // next/server `after()` keeps the serverless function alive.
+    after(async () => {
+      try {
+        await processBatch(batchId, 3);
+      } catch (err) {
+        console.error(`Background batch processing failed for ${batchId}:`, err);
+      }
     });
 
     const reqHeaders = await headers();
