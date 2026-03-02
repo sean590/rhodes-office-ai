@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import type { Jurisdiction } from "@/lib/types";
 
 interface TreeNode {
@@ -15,6 +16,10 @@ interface TreeNode {
 }
 
 export async function GET() {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId } = ctx;
+
   try {
     const supabase = await createClient();
 
@@ -22,6 +27,7 @@ export async function GET() {
     const { data: entities, error: entitiesError } = await supabase
       .from("entities")
       .select("*")
+      .eq("organization_id", orgId)
       .neq("status", "deleted")
       .order("name");
 

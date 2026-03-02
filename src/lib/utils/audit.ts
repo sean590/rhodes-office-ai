@@ -9,6 +9,7 @@ interface AuditEvent {
   ipAddress?: string | null;
   userAgent?: string | null;
   sessionId?: string | null;
+  organizationId?: string | null;
 }
 
 export async function logAuditEvent(event: AuditEvent): Promise<void> {
@@ -23,6 +24,7 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
       ip_address: event.ipAddress ?? null,
       user_agent: event.userAgent ?? null,
       session_id: event.sessionId ?? null,
+      organization_id: event.organizationId ?? null,
     });
   } catch (err) {
     console.error("[AUDIT] Failed to log event:", err, event);

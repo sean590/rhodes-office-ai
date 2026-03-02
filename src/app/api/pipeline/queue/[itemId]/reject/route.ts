@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   try {
-    const { itemId } = await params;
-    const supabase = await createClient();
-    const admin = createAdminClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { user } = ctx;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { itemId } = await params;
+    const admin = createAdminClient();
 
     const body = await request.json().catch(() => ({}));
 

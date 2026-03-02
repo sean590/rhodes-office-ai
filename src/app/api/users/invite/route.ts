@@ -2,10 +2,16 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
+// TODO: migrate to /api/organizations/[orgId]/invites
 export async function POST(request: Request) {
   try {
+    const orgCtx = await requireOrg();
+    if (isError(orgCtx)) return orgCtx;
+    const { orgId: _orgId } = orgCtx;
+
     const supabase = await createClient();
     const admin = createAdminClient();
 

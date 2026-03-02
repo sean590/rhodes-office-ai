@@ -1,10 +1,15 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function buildChatContext() {
-  const supabase = await createClient();
+export async function buildChatContext(orgId: string) {
+  const supabase = createAdminClient();
 
+  // Step 1: Fetch org-scoped entities first to get entity IDs for sub-table filtering
+  const entitiesRes = await supabase.from("entities").select("*").eq("organization_id", orgId).order("name");
+  const entities = entitiesRes.data || [];
+  const entityIds = entities.map(e => e.id);
+
+  // Step 2: Fetch remaining root tables and sub-entity tables scoped to org's entities
   const [
-    entitiesRes,
     directoryRes,
     relationshipsRes,
     registrationsRes,
@@ -18,29 +23,49 @@ export async function buildChatContext() {
     documentsRes,
     complianceRes,
   ] = await Promise.all([
-    supabase.from("entities").select("*").order("name"),
-    supabase.from("directory_entries").select("*").order("name"),
-    supabase.from("relationships").select("*"),
-    supabase.from("entity_registrations").select("*"),
-    supabase.from("entity_managers").select("*"),
-    supabase.from("entity_members").select("*"),
-    supabase.from("trust_details").select("*"),
-    supabase.from("trust_roles").select("*"),
-    supabase.from("cap_table_entries").select("*"),
-    supabase.from("entity_partnership_reps").select("*"),
-    supabase.from("entity_roles").select("*"),
-    supabase.from("documents").select("id, name, document_type, document_category, year, entity_id, ai_extracted, ai_extraction, created_at").is("deleted_at", null).order("created_at", { ascending: false }),
-    supabase.from("compliance_obligations").select("*").order("next_due_date", { ascending: true }),
+    supabase.from("directory_entries").select("*").eq("organization_id", orgId).order("name"),
+    supabase.from("relationships").select("*").eq("organization_id", orgId),
+    entityIds.length > 0
+      ? supabase.from("entity_registrations").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("entity_managers").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("entity_members").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("trust_details").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    // trust_roles fetched separately after trust_details (needs trust_detail IDs)
+    Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("cap_table_entries").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("entity_partnership_reps").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("entity_roles").select("*").in("entity_id", entityIds)
+      : Promise.resolve({ data: [], error: null }),
+    supabase.from("documents").select("id, name, document_type, document_category, year, entity_id, ai_extracted, ai_extraction, created_at").eq("organization_id", orgId).is("deleted_at", null).order("created_at", { ascending: false }),
+    entityIds.length > 0
+      ? supabase.from("compliance_obligations").select("*").in("entity_id", entityIds).order("next_due_date", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
-  const entities = entitiesRes.data || [];
   const directory = directoryRes.data || [];
   const relationships = relationshipsRes.data || [];
   const registrations = registrationsRes.data || [];
   const managers = managersRes.data || [];
   const members = membersRes.data || [];
   const trustDetails = trustDetailsRes.data || [];
-  const trustRoles = trustRolesRes.data || [];
+  // Fetch trust_roles scoped by the trust_detail IDs from this org's entities
+  const trustDetailIds = (trustDetailsRes.data || []).map(t => t.id);
+  const trustRolesActual = trustDetailIds.length > 0
+    ? await supabase.from("trust_roles").select("*").in("trust_detail_id", trustDetailIds)
+    : { data: [], error: null };
+  const trustRoles = trustRolesActual.data || [];
   const capTable = capTableRes.data || [];
   const partnershipReps = partnershipRepsRes.data || [];
   const entityRoles = entityRolesRes.data || [];

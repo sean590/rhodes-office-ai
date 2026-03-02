@@ -6,6 +6,7 @@ import {
   calculateNextDueDateAfterCompletion,
 } from "@/lib/utils/compliance-engine";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 export async function PUT(
@@ -14,6 +15,13 @@ export async function PUT(
 ) {
   try {
     const { id, obligationId } = await params;
+    const orgCtx = await requireOrg();
+    if (isError(orgCtx)) return orgCtx;
+    const { orgId } = orgCtx;
+
+    const isValid = await validateEntityOrg(id, orgId);
+    if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+
     const supabase = await createClient();
     const admin = createAdminClient();
     const body = await request.json();
@@ -113,15 +121,14 @@ export async function PUT(
     }
 
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
-    const { data: { user } } = await supabase.auth.getUser();
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: orgCtx.user?.id ?? null,
       action: "update_obligation",
       resourceType: "compliance",
       resourceId: obligationId,
       metadata: { entity_id: id, status: body.status },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json(updated);

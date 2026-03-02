@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -9,15 +9,19 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
+
     const { id } = await params;
-    const supabase = await createClient();
     const admin = createAdminClient();
 
     // Get document record
-    const { data: doc, error } = await supabase
+    const { data: doc, error } = await admin
       .from("documents")
       .select("file_path, name, mime_type")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .single();
 
@@ -35,16 +39,15 @@ export async function GET(
     }
 
     // Audit log (downloads are audited even though this is a GET)
-    const { data: { user } } = await supabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "download",
       resourceType: "document",
       resourceId: id,
       metadata: { name: doc.name },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json({ url: signedUrl.signedUrl, name: doc.name, mime_type: doc.mime_type });

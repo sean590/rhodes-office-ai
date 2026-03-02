@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(request: Request) {
   try {
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
+    const admin = createAdminClient();
 
     const url = new URL(request.url);
     const resourceType = url.searchParams.get("resource_type");
@@ -18,9 +19,10 @@ export async function GET(request: Request) {
     const to = url.searchParams.get("to");
     const limit = parseInt(url.searchParams.get("limit") || "50", 10);
 
-    let query = supabase
+    let query = admin
       .from("audit_log")
       .select("*")
+      .eq("organization_id", orgId)
       .order("created_at", { ascending: false })
       .limit(Math.min(limit, 200));
 

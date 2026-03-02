@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
+import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import type { DocumentType } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 
@@ -12,6 +13,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
+    const isValid = await validateEntityOrg(id, orgId);
+    if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+
     const supabase = await createClient();
 
     const { data, error } = await supabase
@@ -38,6 +46,13 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
+    const isValid = await validateEntityOrg(id, orgId);
+    if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+
     const supabase = await createClient();
     const admin = createAdminClient();
 

@@ -13,6 +13,7 @@ export type FilingType = 'annual_report' | 'biennial_report' | 'statement_of_inf
 export type FilingStatus = 'current' | 'due_soon' | 'overdue' | 'not_required' | 'exempt';
 export type CustomFieldType = 'text' | 'checkbox' | 'date' | 'number' | 'dropdown' | 'url';
 export type UserRole = 'admin' | 'editor' | 'viewer';
+export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
 
 // Document types are now database-driven (document_types table).
 // This is a plain string to allow dynamic types created by AI.

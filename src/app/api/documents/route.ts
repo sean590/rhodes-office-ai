@@ -1,21 +1,26 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 import type { DocumentType } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function GET() {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const admin = createAdminClient();
 
     // Fetch all documents with entity names
     const { data: docs, error } = await admin
       .from("documents")
       .select("*, entities(name)")
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false });
 
@@ -39,7 +44,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
+
     const admin = createAdminClient();
 
     // Check for ?force=true query param (bypass duplicate check)
@@ -64,9 +72,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Document category is required" }, { status: 400 });
     }
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-
     // Read file buffer and compute SHA-256 hash
     const arrayBuffer = await file.arrayBuffer();
     const contentHash = createHash("sha256").update(Buffer.from(arrayBuffer)).digest("hex");
@@ -77,6 +82,7 @@ export async function POST(request: Request) {
         .from("documents")
         .select("id, name, entity_id, created_at")
         .eq("content_hash", contentHash)
+        .eq("organization_id", orgId)
         .is("deleted_at", null)
         .limit(1)
         .maybeSingle();
@@ -182,6 +188,7 @@ export async function POST(request: Request) {
     const { data: doc, error: dbError } = await admin
       .from("documents")
       .insert({
+        organization_id: orgId,
         entity_id: entityId || null,
         name,
         document_type: documentType,
@@ -190,7 +197,7 @@ export async function POST(request: Request) {
         file_path: filePath,
         file_size: file.size,
         mime_type: file.type,
-        uploaded_by: user?.id || null,
+        uploaded_by: user.id,
         notes: notes || null,
         content_hash: contentHash,
       })
@@ -204,14 +211,14 @@ export async function POST(request: Request) {
 
     // Audit log
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "upload",
       resourceType: "document",
       resourceId: doc.id,
       metadata: { name, entity_id: entityId },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json(doc, { status: 201 });

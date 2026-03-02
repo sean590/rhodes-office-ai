@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 export async function POST(
@@ -10,8 +10,12 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
+
     const { id } = await params;
-    const supabase = createAdminClient();
+    const admin = createAdminClient();
     const body = await request.json();
     const { actions, action_indices } = body;
 
@@ -20,10 +24,11 @@ export async function POST(
     }
 
     // Get current document to preserve existing ai_extraction data
-    const { data: doc, error: docError } = await supabase
+    const { data: doc, error: docError } = await admin
       .from("documents")
       .select("ai_extraction, entity_id")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .single();
 
     if (docError) {
@@ -56,7 +61,7 @@ export async function POST(
 
     const previousResults = (existingExtraction.applied_results || []) as unknown[];
 
-    await supabase
+    await admin
       .from("documents")
       .update({
         ...docUpdate,
@@ -71,12 +76,10 @@ export async function POST(
       .eq("id", id);
 
     // Audit log
-    const authSupabase = await createClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "apply_extraction",
       resourceType: "document",
       resourceId: id,
@@ -85,7 +88,7 @@ export async function POST(
         failed: results.filter(r => !r.success).length,
         action_indices: newIndices,
       },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json({

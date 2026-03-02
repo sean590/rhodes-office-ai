@@ -95,6 +95,36 @@ export function processingCompleteEmail(docName: string, entityName: string) {
   `);
 }
 
+export function orgInviteEmail({
+  orgName,
+  inviterName,
+  role,
+  inviteUrl,
+}: {
+  orgName: string;
+  inviterName: string;
+  role: string;
+  inviteUrl: string;
+}) {
+  return layout(`
+    <h2 style="margin:0 0 8px;font-size:18px">You&#39;ve Been Invited</h2>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      <strong>${inviterName}</strong> has invited you to join
+      <strong>${orgName}</strong> on Rhodes as a <strong>${role}</strong>.
+    </p>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 24px;font-size:13px">
+      Rhodes helps manage entities, track compliance, and process documents with AI — all in one place.
+    </p>
+    <a href="${inviteUrl}"
+       style="display:inline-block;background:${BRAND.green};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">
+      Accept Invite
+    </a>
+    <p style="color:${BRAND.muted};font-size:12px;margin:16px 0 0;line-height:1.5">
+      This invite expires in 7 days. If you weren&#39;t expecting this, you can ignore this email.
+    </p>
+  `);
+}
+
 export function entityDiscoveredEmail(entityName: string, docName: string) {
   return layout(`
     <h2 style="margin:0 0 8px;font-size:18px">New Entity Discovered</h2>

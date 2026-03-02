@@ -1,25 +1,31 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const supabase = await createClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
 
-    const { data: session, error: sessionError } = await supabase
+    const { id } = await params;
+    const admin = createAdminClient();
+
+    const { data: session, error: sessionError } = await admin
       .from("chat_sessions")
       .select("*")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .single();
 
     if (sessionError) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const { data: messages, error: messagesError } = await supabase
+    const { data: messages, error: messagesError } = await admin
       .from("chat_messages")
       .select("*")
       .eq("session_id", id)

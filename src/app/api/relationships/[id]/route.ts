@@ -1,11 +1,16 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { id } = await params;
     const supabase = createAdminClient();
     const body = await request.json();
@@ -40,6 +45,7 @@ export async function PUT(
       .from("relationships")
       .update(updates)
       .eq("id", id)
+      .eq("organization_id", orgId)
       .select()
       .single();
 
@@ -69,6 +75,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { id } = await params;
     const supabase = createAdminClient();
 
@@ -80,7 +90,8 @@ export async function DELETE(
       const { error } = await supabase
         .from("relationships")
         .delete()
-        .eq("id", id);
+        .eq("id", id)
+        .eq("organization_id", orgId);
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });
@@ -90,7 +101,8 @@ export async function DELETE(
       const { error } = await supabase
         .from("relationships")
         .update({ status: "terminated", updated_at: new Date().toISOString() })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("organization_id", orgId);
 
       if (error) {
         return NextResponse.json({ error: error.message }, { status: 500 });

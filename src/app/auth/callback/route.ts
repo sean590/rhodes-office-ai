@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/entities";
+  const next = searchParams.get("next") ?? "";
 
   if (code) {
     const supabase = await createClient();
@@ -39,7 +39,7 @@ export async function GET(request: Request) {
 
       const { data: existingProfile } = await admin
         .from("user_profiles")
-        .select("id")
+        .select("id, active_organization_id")
         .eq("id", data.user.id)
         .maybeSingle();
 
@@ -57,7 +57,31 @@ export async function GET(request: Request) {
         });
       }
 
-      return NextResponse.redirect(`${origin}${next}`);
+      // If `next` param is set (e.g. /invite/[token]), go there
+      if (next) {
+        return NextResponse.redirect(`${origin}${next}`);
+      }
+
+      // Check if user has an org membership
+      const { data: membership } = await admin
+        .from("organization_members")
+        .select("organization_id")
+        .eq("user_id", data.user.id)
+        .limit(1)
+        .maybeSingle();
+
+      if (membership) {
+        // Ensure active_organization_id is set
+        if (!existingProfile?.active_organization_id) {
+          await admin.from("user_profiles")
+            .update({ active_organization_id: membership.organization_id })
+            .eq("id", data.user.id);
+        }
+        return NextResponse.redirect(`${origin}/entities`);
+      }
+
+      // No org — send to onboarding (which now starts with org creation)
+      return NextResponse.redirect(`${origin}/onboarding`);
     }
   }
 

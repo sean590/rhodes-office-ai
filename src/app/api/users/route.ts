@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET() {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const supabase = await createClient();
 
     // Check current user is admin
@@ -24,10 +29,27 @@ export async function GET() {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
 
-    // Get all user profiles using admin client
+    // Get user IDs that belong to the current organization
+    const { data: orgMembers, error: membersError } = await admin
+      .from("organization_members")
+      .select("user_id")
+      .eq("organization_id", orgId);
+
+    if (membersError) {
+      return NextResponse.json({ error: membersError.message }, { status: 500 });
+    }
+
+    const memberUserIds = (orgMembers || []).map((m: { user_id: string }) => m.user_id);
+
+    if (memberUserIds.length === 0) {
+      return NextResponse.json([]);
+    }
+
+    // Get user profiles filtered to org members
     const { data: profiles, error } = await admin
       .from("user_profiles")
       .select("*")
+      .in("id", memberUserIds)
       .order("created_at", { ascending: true });
 
     if (error) {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateComplianceObligations } from "@/lib/utils/compliance-engine";
+import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 
 export async function GET(
   request: Request,
@@ -9,6 +10,13 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
+    const isValid = await validateEntityOrg(id, orgId);
+    if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+
     const supabase = await createClient();
 
     // Fetch entity

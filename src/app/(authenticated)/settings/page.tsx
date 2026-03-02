@@ -27,6 +27,9 @@ interface CurrentUserInfo {
   role: UserRole;
   display_name: string | null;
   avatar_url: string | null;
+  orgId?: string;
+  orgRole?: string;
+  orgName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +223,15 @@ export default function SettingsPage() {
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
   const [deletingUser, setDeletingUser] = useState<string | null>(null);
 
+  // Organization state
+  const [orgName, setOrgName] = useState("");
+  const [orgBillingEmail, setOrgBillingEmail] = useState("");
+  const [editingOrgName, setEditingOrgName] = useState(false);
+  const [savingOrg, setSavingOrg] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<Array<{
+    id: string; email: string; role: string; status: string; created_at: string; expires_at: string;
+  }>>([]);
+
   // Activity log state
   const [activityLog, setActivityLog] = useState<Array<{
     id: string;
@@ -244,6 +256,7 @@ export default function SettingsPage() {
       if (!res.ok) return;
       const data = await res.json();
       setCurrentUser(data);
+      if (data.orgName) setOrgName(data.orgName);
     } catch {
       // Silently fail — user info will be empty
     }
@@ -347,12 +360,12 @@ export default function SettingsPage() {
   };
 
   const handleInvite = async () => {
-    if (!inviteEmail.trim()) return;
+    if (!inviteEmail.trim() || !currentUser?.orgId) return;
     setInviting(true);
     setError(null);
     setInviteSuccess(null);
     try {
-      const res = await fetch("/api/users/invite", {
+      const res = await fetch(`/api/organizations/${currentUser.orgId}/invites`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
@@ -365,7 +378,6 @@ export default function SettingsPage() {
       setInviteEmail("");
       setInviteRole("viewer");
       setShowInvite(false);
-      // Refresh users list to show the new pending user
       await fetchUsers();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send invite");
@@ -374,7 +386,36 @@ export default function SettingsPage() {
     }
   };
 
-  const isAdmin = currentUser?.role === "admin";
+  const handleSaveOrgName = async () => {
+    if (!currentUser?.orgId || !orgName.trim()) return;
+    setSavingOrg(true);
+    try {
+      const res = await fetch(`/api/organizations/${currentUser.orgId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: orgName.trim() }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to update organization");
+      }
+      setEditingOrgName(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update");
+    } finally {
+      setSavingOrg(false);
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string) => {
+    if (!currentUser?.orgId) return;
+    try {
+      await fetch(`/api/organizations/${currentUser.orgId}/invites/${inviteId}`, { method: "DELETE" });
+      setPendingInvites((prev) => prev.filter((i) => i.id !== inviteId));
+    } catch { /* ignore */ }
+  };
+
+  const isAdmin = currentUser?.role === "admin" || currentUser?.orgRole === "owner" || currentUser?.orgRole === "admin";
 
   useEffect(() => {
     if (isAdmin) {
@@ -555,6 +596,64 @@ export default function SettingsPage() {
             </div>
           )}
         </AccordionSection>
+
+        {/* Organization */}
+        {currentUser?.orgId && (
+          <AccordionSection title="Organization" isMobile={isMobile} subtitle="Manage your organization settings">
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                  Organization Name
+                </div>
+                {editingOrgName ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={orgName}
+                      onChange={(e) => setOrgName(e.target.value)}
+                      style={{ flex: 1, padding: "8px 10px", fontSize: 13, border: "1px solid #ddd9d0", borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit", outline: "none" }}
+                    />
+                    <button
+                      onClick={handleSaveOrgName}
+                      disabled={savingOrg}
+                      style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#2d5a3d", border: "none", borderRadius: 6, cursor: "pointer" }}
+                    >
+                      {savingOrg ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      onClick={() => { setEditingOrgName(false); setOrgName(currentUser?.orgName || ""); }}
+                      style={{ padding: "8px 12px", fontSize: 12, color: "#6b6b76", background: "transparent", border: "1px solid #ddd9d0", borderRadius: 6, cursor: "pointer" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: 13, color: "#1a1a1f" }}>{orgName}</span>
+                    {currentUser?.orgRole === "owner" && (
+                      <button
+                        onClick={() => setEditingOrgName(true)}
+                        style={{ padding: "4px 10px", fontSize: 11, color: "#6b6b76", background: "transparent", border: "1px solid #ddd9d0", borderRadius: 4, cursor: "pointer" }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                  Your Role
+                </div>
+                <span style={{
+                  display: "inline-block", padding: "3px 10px", borderRadius: 10, fontSize: 12, fontWeight: 500,
+                  background: "rgba(45,90,61,0.10)", color: "#2d5a3d", textTransform: "capitalize",
+                }}>
+                  {currentUser?.orgRole || "member"}
+                </span>
+              </div>
+            </div>
+          </AccordionSection>
+        )}
 
         {/* Security & MFA */}
         <AccordionSection

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -9,13 +9,18 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const supabase = await createClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
 
-    const { data, error } = await supabase
+    const { id } = await params;
+    const admin = createAdminClient();
+
+    const { data, error } = await admin
       .from("documents")
       .select("*")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .single();
 
@@ -38,6 +43,10 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { id } = await params;
     const body = await request.json();
     const { name } = body;
@@ -52,6 +61,7 @@ export async function PATCH(
       .from("documents")
       .update({ name: name.trim() })
       .eq("id", id)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .select()
       .single();
@@ -75,6 +85,10 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
+
     const { id } = await params;
     const admin = createAdminClient();
 
@@ -83,6 +97,7 @@ export async function DELETE(
       .from("documents")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .select()
       .single();
@@ -95,17 +110,15 @@ export async function DELETE(
     }
 
     // Audit log
-    const supabase = await createClient();
-    const { data: { user } } = await supabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "delete",
       resourceType: "document",
       resourceId: id,
       metadata: {},
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json({ success: true });

@@ -1,15 +1,21 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET() {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const supabase = await createClient();
 
     // Fetch all relationships
     const { data: relationships, error } = await supabase
       .from("relationships")
       .select("*")
+      .eq("organization_id", orgId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -97,6 +103,10 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const supabase = createAdminClient();
     const body = await request.json();
 
@@ -139,6 +149,7 @@ export async function POST(request: Request) {
     }
 
     const insert: Record<string, unknown> = {
+      organization_id: orgId,
       type,
       description: description || null,
       terms: terms || null,

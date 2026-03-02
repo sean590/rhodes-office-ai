@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { userRoleSchema } from "@/lib/validations";
 import { headers } from "next/headers";
 
@@ -11,6 +12,10 @@ export async function PUT(
 ) {
   try {
     const { id } = await params;
+    const orgCtx = await requireOrg();
+    if (isError(orgCtx)) return orgCtx;
+    const { orgId } = orgCtx;
+
     const supabase = await createClient();
     const admin = createAdminClient();
 
@@ -53,6 +58,16 @@ export async function PUT(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    // Map user_profiles role to organization_members role: admin→admin, editor→member, viewer→viewer
+    const orgRoleMap: Record<string, string> = { admin: "admin", editor: "member", viewer: "viewer" };
+    const orgRole = orgRoleMap[role] || "viewer";
+
+    await admin
+      .from("organization_members")
+      .update({ role: orgRole, updated_at: new Date().toISOString() })
+      .eq("organization_id", orgId)
+      .eq("user_id", id);
+
     const reqHeaders = await headers();
     const ctx = getRequestContext(reqHeaders);
     await logAuditEvent({
@@ -60,7 +75,7 @@ export async function PUT(
       action: "role_change",
       resourceType: "user",
       resourceId: id,
-      metadata: { new_role: role },
+      metadata: { new_role: role, org_role: orgRole },
       ...ctx,
     });
 

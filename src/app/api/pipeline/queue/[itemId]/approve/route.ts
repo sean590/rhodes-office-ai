@@ -1,21 +1,19 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ingestQueueItem } from "@/lib/pipeline/ingest";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   try {
-    const { itemId } = await params;
-    const supabase = await createClient();
-    const admin = createAdminClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { itemId } = await params;
+    const admin = createAdminClient();
 
     const { data: userRow } = await admin
       .from("users")
@@ -55,6 +53,7 @@ export async function POST(
           address: proposed.address || null,
           registered_agent: proposed.registered_agent || null,
           business_purpose: proposed.business_purpose || null,
+          organization_id: orgId,
         })
         .select()
         .single();

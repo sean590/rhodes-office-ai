@@ -5,10 +5,15 @@ import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-
 import { validateShortName } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createEntitySchema } from "@/lib/validations";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 import type { Jurisdiction } from "@/lib/types";
 
 export async function GET() {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId } = ctx;
+
   try {
     const supabase = await createClient();
 
@@ -16,6 +21,7 @@ export async function GET() {
     const { data: entities, error: entitiesError } = await supabase
       .from("entities")
       .select("*")
+      .eq("organization_id", orgId)
       .neq("status", "deleted")
       .order("name");
 
@@ -156,6 +162,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId, user } = ctx;
+
   try {
     const supabase = createAdminClient();
     const body = await request.json();
@@ -204,6 +214,7 @@ export async function POST(request: Request) {
         parent_entity_id: parent_entity_id || null,
         notes: notes || null,
         legal_structure: legal_structure || (type === "trust" ? "trust" : null),
+        organization_id: orgId,
       })
       .select()
       .single();
@@ -243,17 +254,15 @@ export async function POST(request: Request) {
     }
 
     // Audit log
-    const authSupabase = await createClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "create",
       resourceType: "entity",
       resourceId: entity.id,
       metadata: { name, type },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json(entity, { status: 201 });

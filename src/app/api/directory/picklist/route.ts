@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET() {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const supabase = await createClient();
 
     // Fetch directory entries and entities in parallel
@@ -10,10 +15,12 @@ export async function GET() {
       supabase
         .from("directory_entries")
         .select("id, name, type")
+        .eq("organization_id", orgId)
         .order("name"),
       supabase
         .from("entities")
         .select("id, name, type")
+        .eq("organization_id", orgId)
         .order("name"),
     ]);
 

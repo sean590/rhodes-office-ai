@@ -4,16 +4,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { buildChatContext } from "@/lib/utils/chat-context";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { chatMessageSchema } from "@/lib/validations";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function POST(request: Request) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
+
     const supabase = await createClient();
     const admin = createAdminClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     if (!rateLimit(`chat:${user.id}`, 20, 60000)) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       .order("created_at", { ascending: true });
 
     // Build context
-    let systemPrompt = await buildChatContext();
+    let systemPrompt = await buildChatContext(orgId);
 
     // Append page context if provided
     if (page_context?.entityId && page_context?.entityName) {

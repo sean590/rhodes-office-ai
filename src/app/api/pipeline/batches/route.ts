@@ -1,19 +1,17 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createBatchSchema } from "@/lib/validations";
 import { headers } from "next/headers";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
-    const admin = createAdminClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const admin = createAdminClient();
 
     const body = await request.json();
     const parsed = createBatchSchema.safeParse(body);
@@ -41,6 +39,7 @@ export async function POST(request: Request) {
         entity_id: entity_id || null,
         entity_discovery,
         created_by: userRow ? user.id : null,
+        organization_id: orgId,
       })
       .select()
       .single();
@@ -51,14 +50,14 @@ export async function POST(request: Request) {
     }
 
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
       userId: user.id,
       action: "create_batch",
       resourceType: "pipeline",
       resourceId: data.id,
       metadata: { context, entity_id: entity_id || null },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json(data);

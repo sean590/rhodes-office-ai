@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+
     const { itemId } = await params;
-    const supabase = await createClient();
+    const admin = createAdminClient();
     const body = await request.json();
 
     const allowedFields = [
@@ -41,7 +45,7 @@ export async function PATCH(
     }
     updates.updated_at = new Date().toISOString();
 
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("document_queue")
       .update(updates)
       .eq("id", itemId)

@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(request: Request) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { searchParams } = new URL(request.url);
     const hash = searchParams.get("hash");
 
@@ -16,6 +21,7 @@ export async function GET(request: Request) {
       .from("documents")
       .select("id, name, entity_id, created_at")
       .eq("content_hash", hash)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .limit(1)
       .maybeSingle();

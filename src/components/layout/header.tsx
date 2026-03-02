@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -18,6 +19,14 @@ const NAV_TABS = [
 export function Header() {
   const pathname = usePathname();
   const isMobile = useIsMobile();
+  const [orgName, setOrgName] = useState("");
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data?.orgName) setOrgName(data.orgName); })
+      .catch(() => {});
+  }, []);
 
   if (isMobile) {
     return (
@@ -61,6 +70,12 @@ export function Header() {
           background: "rgba(45,90,61,0.08)", padding: "2px 8px", borderRadius: 10,
           textTransform: "uppercase", letterSpacing: "0.05em",
         }}>AI</span>
+        {orgName && (
+          <>
+            <span style={{ color: "#ddd9d0", fontSize: 14, fontWeight: 300 }}>/</span>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#6b6b76" }}>{orgName}</span>
+          </>
+        )}
       </div>
 
       {/* Nav */}

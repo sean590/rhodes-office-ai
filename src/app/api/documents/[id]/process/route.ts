@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, generateDisplayName, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { getDbContext, extractDocument } from "@/lib/pipeline/extract";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 import * as Sentry from "@sentry/nextjs";
 import type { DocumentCategory } from "@/lib/types/entities";
@@ -14,24 +14,23 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
-    const supabase = await createClient();
-    const admin = createAdminClient();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { id } = await params;
+    const admin = createAdminClient();
 
     if (!rateLimit(`process:${user.id}`, 10, 60000)) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 
     // Get document record
-    const { data: doc, error: docError } = await supabase
+    const { data: doc, error: docError } = await admin
       .from("documents")
       .select("*")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .single();
 
@@ -181,14 +180,14 @@ export async function POST(
 
     // Audit log
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
       userId: user.id,
       action: "process",
       resourceType: "document",
       resourceId: id,
       metadata: { action_count: result.actions?.length ?? 0 },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json({

@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET() {
   try {
-    const supabase = await createClient();
-    const admin = createAdminClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const admin = createAdminClient();
 
     // Resolve internal user ID from auth external_id
     const { data: internalUser } = await admin
@@ -27,6 +25,7 @@ export async function GET() {
       .from("chat_sessions")
       .select("*")
       .eq("user_id", internalUser.id)
+      .eq("organization_id", orgId)
       .order("updated_at", { ascending: false });
 
     if (error) {
@@ -42,13 +41,11 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const supabase = await createClient();
-    const admin = createAdminClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId, user } = ctx;
 
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const admin = createAdminClient();
 
     // Resolve internal user ID from auth external_id
     const { data: internalUser } = await admin
@@ -68,6 +65,7 @@ export async function POST(request: Request) {
       .from("chat_sessions")
       .insert({
         user_id: internalUser.id,
+        organization_id: orgId,
         title,
       })
       .select()

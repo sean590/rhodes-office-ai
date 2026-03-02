@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pipeline/classify";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 async function computeHash(buffer: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -15,20 +15,19 @@ export async function POST(
   { params }: { params: Promise<{ batchId: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { batchId } = await params;
-    const supabase = await createClient();
     const admin = createAdminClient();
 
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     // Verify batch exists
-    const { data: batch, error: batchError } = await supabase
+    const { data: batch, error: batchError } = await admin
       .from("document_batches")
       .select("id, entity_id, entity_discovery")
       .eq("id", batchId)
+      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
@@ -48,6 +47,7 @@ export async function POST(
       const { data } = await admin
         .from("entities")
         .select("id, name, short_name")
+        .eq("organization_id", orgId)
         .order("name");
       entities = data || [];
     }
@@ -64,6 +64,7 @@ export async function POST(
         .from("documents")
         .select("id, name")
         .eq("content_hash", contentHash)
+        .eq("organization_id", orgId)
         .is("deleted_at", null)
         .maybeSingle();
 
@@ -91,8 +92,8 @@ export async function POST(
         continue;
       }
 
-      // Upload file to storage
-      const storagePath = `queue/${batchId}/${file.name}`;
+      // Upload file to storage (org-scoped path)
+      const storagePath = `${orgId}/queue/${batchId}/${file.name}`;
       const { error: uploadError } = await admin.storage
         .from("documents")
         .upload(storagePath, buffer, {

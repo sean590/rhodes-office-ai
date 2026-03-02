@@ -4,12 +4,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { updateEntitySchema } from "@/lib/validations";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId } = ctx;
+
   try {
     const { id } = await params;
     const supabase = await createClient();
@@ -19,6 +24,7 @@ export async function GET(
       .from("entities")
       .select("*")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .single();
 
     if (entityError) {
@@ -329,6 +335,10 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId, user } = ctx;
+
   try {
     const { id } = await params;
     const supabase = createAdminClient();
@@ -369,6 +379,7 @@ export async function PUT(
       .from("entities")
       .update(updates)
       .eq("id", id)
+      .eq("organization_id", orgId)
       .select()
       .single();
 
@@ -387,17 +398,15 @@ export async function PUT(
     }
 
     // Audit log
-    const authSupabase = await createClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "edit",
       resourceType: "entity",
       resourceId: id,
       metadata: { fields: Object.keys(updates) },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json(entity);
@@ -411,15 +420,20 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const ctx = await requireOrg();
+  if (isError(ctx)) return ctx;
+  const { orgId, user } = ctx;
+
   try {
     const { id } = await params;
     const admin = createAdminClient();
 
-    // Check entity exists
+    // Check entity exists and belongs to org
     const { data: entity, error: fetchError } = await admin
       .from("entities")
       .select("id, name")
       .eq("id", id)
+      .eq("organization_id", orgId)
       .single();
 
     if (fetchError || !entity) {
@@ -430,24 +444,23 @@ export async function DELETE(
     const { error } = await admin
       .from("entities")
       .update({ status: "deleted", updated_at: new Date().toISOString() })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("organization_id", orgId);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
     // Audit log
-    const authSupabase = await createClient();
-    const { data: { user } } = await authSupabase.auth.getUser();
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders);
     await logAuditEvent({
-      userId: user?.id ?? null,
+      userId: user.id,
       action: "delete",
       resourceType: "entity",
       resourceId: id,
       metadata: { name: entity.name },
-      ...ctx,
+      ...reqCtx,
     });
 
     return NextResponse.json({ success: true, deleted: entity.name });

@@ -1,22 +1,26 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
+import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ batchId: string }> }
 ) {
   try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
     const { batchId } = await params;
-    const supabase = await createClient();
     const admin = createAdminClient();
 
     // Get batch
-    const { data: batch, error: batchError } = await supabase
+    const { data: batch, error: batchError } = await admin
       .from("document_batches")
       .select("*")
       .eq("id", batchId)
+      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
@@ -24,7 +28,7 @@ export async function GET(
     }
 
     // Get all queue items for this batch
-    const { data: items, error: itemsError } = await supabase
+    const { data: items, error: itemsError } = await admin
       .from("document_queue")
       .select("*")
       .eq("batch_id", batchId)
