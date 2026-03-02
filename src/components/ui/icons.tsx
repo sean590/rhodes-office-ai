@@ -160,12 +160,30 @@ export function FolderIcon({ size = 14, className }: IconProps) {
   );
 }
 
-export function EllipsisIcon({ size = 18, className, color }: IconProps & { color?: string }) {
+export function EllipsisIcon({ size = 18, className, color }: IconProps) {
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color || "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="1" />
-      <circle cx="5" cy="12" r="1" />
-      <circle cx="19" cy="12" r="1" />
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill={color || "currentColor"} stroke="none">
+      <circle cx="5" cy="12" r="2.5" />
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="19" cy="12" r="2.5" />
+    </svg>
+  );
+}
+
+export function EllipsisVerticalIcon({ size = 18, className, color }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill={color || "currentColor"} stroke="none">
+      <circle cx="12" cy="5" r="2.5" />
+      <circle cx="12" cy="12" r="2.5" />
+      <circle cx="12" cy="19" r="2.5" />
+    </svg>
+  );
+}
+
+export function PencilIcon({ size = 14, className, color }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color || "currentColor"} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
     </svg>
   );
 }

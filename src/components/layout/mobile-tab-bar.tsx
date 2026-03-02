@@ -81,13 +81,14 @@ export function MobileTabBar() {
         display: "flex",
         justifyContent: "space-around",
         alignItems: "center",
-        height: 56,
+        height: `calc(56px + env(safe-area-inset-bottom, 0px))`,
         paddingBottom: "env(safe-area-inset-bottom, 0px)",
         background: "#ffffff",
         borderTop: "1px solid #ddd9d0",
-        flexShrink: 0,
-        position: "sticky",
+        position: "fixed",
         bottom: 0,
+        left: 0,
+        right: 0,
         zIndex: 40,
       }}>
         {PRIMARY_TABS.map((tab) => {

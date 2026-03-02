@@ -17,6 +17,7 @@ export default function AuthenticatedLayout({
       <main style={{
         flex: 1,
         padding: isMobile ? 16 : 28,
+        paddingBottom: isMobile ? `calc(16px + 56px + env(safe-area-inset-bottom, 0px))` : 28,
         overflowY: "auto",
       }}>
         {children}

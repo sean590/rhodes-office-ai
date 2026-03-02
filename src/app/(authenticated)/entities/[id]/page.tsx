@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
-import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, SearchIcon, ChartIcon } from "@/components/ui/icons";
+import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, SearchIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
@@ -4272,6 +4272,89 @@ function DocumentsTab({
   );
 }
 
+/* ---- Entity Action Menu (three-dot dropdown with Edit / Delete) ---- */
+function EntityActionMenu({ entityId, entityName, router, isMobile }: { entityId: string; entityName: string; router: ReturnType<typeof useRouter>; isMobile: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const handleDelete = async () => {
+    setOpen(false);
+    if (!confirm(`Delete "${entityName}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Failed to delete entity");
+        return;
+      }
+      router.push("/entities");
+    } catch {
+      alert("Failed to delete entity");
+    }
+  };
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((p) => !p)}
+        style={{
+          background: "none", border: "1px solid #ddd9d0", borderRadius: 6,
+          padding: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+        }}
+      >
+        <EllipsisVerticalIcon size={16} color="#6b6b76" />
+      </button>
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", right: 0, marginTop: 4,
+          background: "#ffffff", border: "1px solid #ddd9d0", borderRadius: 8,
+          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 160, zIndex: 20,
+          overflow: "hidden",
+        }}>
+          {!isMobile && (
+            <button
+              onClick={() => { setOpen(false); router.push(`/entities/${entityId}/edit`); }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8, width: "100%",
+                padding: "10px 14px", background: "none", border: "none",
+                fontSize: 13, color: "#1a1a1f", cursor: "pointer", fontFamily: "inherit",
+                textAlign: "left",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+            >
+              <PencilIcon size={14} color="#6b6b76" /> Edit Entity
+            </button>
+          )}
+          <button
+            onClick={handleDelete}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, width: "100%",
+              padding: "10px 14px", background: "none", border: "none",
+              borderTop: !isMobile ? "1px solid #f0eee8" : "none",
+              fontSize: 13, color: "#c73e3e", cursor: "pointer", fontFamily: "inherit",
+              textAlign: "left",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
+            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
+          >
+            <XIcon size={14} /> Delete Entity
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main Page Component                                                */
 /* ------------------------------------------------------------------ */
@@ -4495,46 +4578,20 @@ export default function EntityDetailPage() {
         </div>
 
         <div style={{ flex: 1 }}>
-          {/* Entity name row with Edit/Delete buttons */}
-          <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", alignItems: isMobile ? "stretch" : "center", gap: isMobile ? 8 : 12 }}>
-            <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#1a1a1f", margin: 0, lineHeight: 1.2 }}>
+          {/* Entity name row with actions */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#1a1a1f", margin: 0, lineHeight: 1.2, flex: 1 }}>
               {entity.name}
+              {isMobile && (
+                <button
+                  onClick={() => router.push(`/entities/${entityId}/edit`)}
+                  style={{ background: "none", border: "none", cursor: "pointer", padding: 4, marginLeft: 6, verticalAlign: "middle" }}
+                >
+                  <PencilIcon size={14} color="#9494a0" />
+                </button>
+              )}
             </h1>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button size="sm" onClick={() => router.push(`/entities/${entityId}/edit`)} style={isMobile ? { flex: 1 } : undefined}>
-                Edit
-              </Button>
-              <button
-                onClick={async () => {
-                  if (!confirm(`Delete "${entity.name}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
-                  try {
-                    const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
-                    if (!res.ok) {
-                      const data = await res.json().catch(() => ({}));
-                      alert(data.error || "Failed to delete entity");
-                      return;
-                    }
-                    router.push("/entities");
-                  } catch {
-                    alert("Failed to delete entity");
-                  }
-                }}
-                style={{
-                  background: "none",
-                  border: "1px solid rgba(199,62,62,0.3)",
-                  borderRadius: 6,
-                  padding: "4px 10px",
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "#c73e3e",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  ...(isMobile ? { flex: 1 } : {}),
-                }}
-              >
-                Delete
-              </button>
-            </div>
+            <EntityActionMenu entityId={entityId} entityName={entity.name} router={router} isMobile={isMobile} />
           </div>
 
           {/* Subtitle row */}
