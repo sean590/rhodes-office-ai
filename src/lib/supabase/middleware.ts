@@ -48,7 +48,9 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/auth") ||
     request.nextUrl.pathname.startsWith("/invite") ||
+    request.nextUrl.pathname.startsWith("/access-restricted") ||
     request.nextUrl.pathname.startsWith("/api/invites") ||
+    request.nextUrl.pathname.startsWith("/api/waitlist") ||
     request.nextUrl.pathname.startsWith("/api/health") ||
     request.nextUrl.pathname.startsWith("/api/cron") ||
     request.nextUrl.pathname === "/monitoring";

@@ -12,57 +12,9 @@ export async function GET(request: Request) {
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
 
     if (!error && data.user) {
-      // Auto-create user record on first login
       const admin = createAdminClient();
-      const { data: existingUser } = await admin
-        .from("users")
-        .select("id")
-        .eq("external_id", data.user.id)
-        .single();
 
-      if (!existingUser) {
-        await admin.from("users").insert({
-          external_id: data.user.id,
-          email: data.user.email!,
-          name:
-            data.user.user_metadata?.full_name ||
-            data.user.email?.split("@")[0] ||
-            "User",
-          role: "viewer",
-          avatar_url: data.user.user_metadata?.avatar_url,
-        });
-      }
-
-      // Ensure user_profiles row exists and update name/avatar from OAuth
-      const displayName = data.user.user_metadata?.full_name || null;
-      const avatarUrl = data.user.user_metadata?.avatar_url || null;
-
-      const { data: existingProfile } = await admin
-        .from("user_profiles")
-        .select("id, active_organization_id")
-        .eq("id", data.user.id)
-        .maybeSingle();
-
-      if (existingProfile) {
-        // Update name/avatar on each login (picks up Google profile info)
-        await admin.from("user_profiles")
-          .update({ display_name: displayName, avatar_url: avatarUrl })
-          .eq("id", data.user.id);
-      } else {
-        await admin.from("user_profiles").insert({
-          id: data.user.id,
-          role: "viewer",
-          display_name: displayName,
-          avatar_url: avatarUrl,
-        });
-      }
-
-      // If `next` param is set (e.g. /invite/[token]), go there
-      if (next) {
-        return NextResponse.redirect(`${origin}${next}`);
-      }
-
-      // Check if user has an org membership
+      // 1. Check if user already has an org membership
       const { data: membership } = await admin
         .from("organization_members")
         .select("organization_id")
@@ -71,20 +23,101 @@ export async function GET(request: Request) {
         .maybeSingle();
 
       if (membership) {
-        // Ensure active_organization_id is set
+        // Existing member — ensure profile exists and is up to date
+        await ensureUserRecords(admin, data.user);
+
+        const { data: existingProfile } = await admin
+          .from("user_profiles")
+          .select("active_organization_id")
+          .eq("id", data.user.id)
+          .maybeSingle();
+
         if (!existingProfile?.active_organization_id) {
           await admin.from("user_profiles")
             .update({ active_organization_id: membership.organization_id })
             .eq("id", data.user.id);
         }
+
+        if (next) {
+          return NextResponse.redirect(`${origin}${next}`);
+        }
         return NextResponse.redirect(`${origin}/entities`);
       }
 
-      // No org — send to onboarding (which now starts with org creation)
-      return NextResponse.redirect(`${origin}/onboarding`);
+      // 2. Check for pending invite by email
+      const { data: invite } = await admin
+        .from("organization_invites")
+        .select("id, organization_id, role, token")
+        .eq("email", data.user.email!)
+        .eq("status", "pending")
+        .gt("expires_at", new Date().toISOString())
+        .limit(1)
+        .maybeSingle();
+
+      if (invite) {
+        // Invited user — create profile so invite acceptance works
+        await ensureUserRecords(admin, data.user);
+
+        const response = NextResponse.redirect(`${origin}/invite/${invite.token}`);
+        response.cookies.set("invite_token", invite.token, { httpOnly: true, maxAge: 3600 });
+        return response;
+      }
+
+      // 3. No membership, no invite — deny access
+      //    Sign out so there's no lingering session
+      //    Do NOT create user_profiles or users records
+      await supabase.auth.signOut();
+      const email = encodeURIComponent(data.user.email || "");
+      return NextResponse.redirect(`${origin}/access-restricted?email=${email}`);
     }
   }
 
   // Auth error — redirect back to login
   return NextResponse.redirect(`${origin}/login`);
+}
+
+/** Create users + user_profiles records if they don't exist yet */
+async function ensureUserRecords(
+  admin: ReturnType<typeof createAdminClient>,
+  user: { id: string; email?: string; user_metadata?: Record<string, string> }
+) {
+  const displayName = user.user_metadata?.full_name || null;
+  const avatarUrl = user.user_metadata?.avatar_url || null;
+
+  // Legacy users table
+  const { data: existingUser } = await admin
+    .from("users")
+    .select("id")
+    .eq("external_id", user.id)
+    .single();
+
+  if (!existingUser) {
+    await admin.from("users").insert({
+      external_id: user.id,
+      email: user.email!,
+      name: displayName || user.email?.split("@")[0] || "User",
+      role: "viewer",
+      avatar_url: avatarUrl,
+    });
+  }
+
+  // user_profiles
+  const { data: existingProfile } = await admin
+    .from("user_profiles")
+    .select("id")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  if (existingProfile) {
+    await admin.from("user_profiles")
+      .update({ display_name: displayName, avatar_url: avatarUrl })
+      .eq("id", user.id);
+  } else {
+    await admin.from("user_profiles").insert({
+      id: user.id,
+      role: "viewer",
+      display_name: displayName,
+      avatar_url: avatarUrl,
+    });
+  }
 }
