@@ -89,7 +89,7 @@ async function ensureUserRecords(
     .from("users")
     .select("id")
     .eq("external_id", user.id)
-    .single();
+    .maybeSingle();
 
   if (!existingUser) {
     await admin.from("users").insert({
