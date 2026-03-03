@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
@@ -11,29 +10,17 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const { id } = await params;
+    const { id: targetUserId } = await params;
     const orgCtx = await requireOrg();
     if (isError(orgCtx)) return orgCtx;
-    const { orgId } = orgCtx;
+    const { orgId, user } = orgCtx;
 
-    const supabase = await createClient();
-    const admin = createAdminClient();
-
-    // Check current user is admin
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: currentProfile } = await admin
-      .from("user_profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (currentProfile?.role !== "admin") {
+    // Only owner/admin can change roles
+    if (user.orgRole !== "owner" && user.orgRole !== "admin") {
       return NextResponse.json({ error: "Admin access required" }, { status: 403 });
     }
+
+    const admin = createAdminClient();
 
     const body = await request.json();
     const parsed = userRoleSchema.safeParse(body);
@@ -42,31 +29,43 @@ export async function PUT(
     }
     const { role } = parsed.data;
 
-    // Don't allow removing your own admin role
-    if (id === user.id && role !== "admin") {
-      return NextResponse.json({ error: "Cannot change your own admin role" }, { status: 400 });
+    // Don't allow changing your own role
+    if (targetUserId === user.id) {
+      return NextResponse.json({ error: "Cannot change your own role" }, { status: 400 });
     }
 
-    const { data, error } = await admin
-      .from("user_profiles")
-      .update({ role, updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .select()
+    // Don't allow non-owners to set someone to admin
+    if (role === "admin" && user.orgRole !== "owner") {
+      return NextResponse.json({ error: "Only owners can promote to admin" }, { status: 403 });
+    }
+
+    // Check target user is a member of this org
+    const { data: membership, error: memberError } = await admin
+      .from("organization_members")
+      .select("id, role")
+      .eq("organization_id", orgId)
+      .eq("user_id", targetUserId)
       .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    if (memberError || !membership) {
+      return NextResponse.json({ error: "User not found in this organization" }, { status: 404 });
     }
 
-    // Map user_profiles role to organization_members role: admin→admin, editor→member, viewer→viewer
-    const orgRoleMap: Record<string, string> = { admin: "admin", editor: "member", viewer: "viewer" };
-    const orgRole = orgRoleMap[role] || "viewer";
+    // Don't allow changing an owner's role (owners can only be changed by themselves or via transfer)
+    if (membership.role === "owner") {
+      return NextResponse.json({ error: "Cannot change an owner's role" }, { status: 403 });
+    }
 
-    await admin
+    // Update organization_members role
+    const { error: updateError } = await admin
       .from("organization_members")
-      .update({ role: orgRole, updated_at: new Date().toISOString() })
+      .update({ role })
       .eq("organization_id", orgId)
-      .eq("user_id", id);
+      .eq("user_id", targetUserId);
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
 
     const reqHeaders = await headers();
     const ctx = getRequestContext(reqHeaders);
@@ -74,12 +73,12 @@ export async function PUT(
       userId: user.id,
       action: "role_change",
       resourceType: "user",
-      resourceId: id,
-      metadata: { new_role: role, org_role: orgRole },
+      resourceId: targetUserId,
+      metadata: { new_role: role, organization_id: orgId },
       ...ctx,
     });
 
-    return NextResponse.json(data);
+    return NextResponse.json({ success: true, role });
   } catch (err) {
     console.error("PUT /api/users/[id]/role error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

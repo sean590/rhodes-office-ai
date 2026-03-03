@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createHash } from "crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import type { DocumentType } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 
@@ -48,7 +50,7 @@ export async function POST(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -79,7 +81,7 @@ export async function POST(
     }
 
     // Get current user from the session-aware client
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
 
     // Read file buffer and compute SHA-256 hash
     const arrayBuffer = await file.arrayBuffer();
@@ -199,7 +201,7 @@ export async function POST(
         file_path: filePath,
         file_size: file.size,
         mime_type: file.type,
-        uploaded_by: user?.id || null,
+        uploaded_by: authUser?.id || null,
         notes: notes || null,
         content_hash: contentHash,
       })
@@ -225,6 +227,17 @@ export async function POST(
         console.error("Junction insert error:", junctionError);
       }
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "upload",
+      resourceType: "document",
+      resourceId: id,
+      metadata: { document_name: name, document_id: doc.id, document_type: documentType },
+      ...reqCtx,
+    });
 
     return NextResponse.json(doc, { status: 201 });
   } catch (err) {

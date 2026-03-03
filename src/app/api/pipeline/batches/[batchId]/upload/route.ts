@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pipeline/classify";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 async function computeHash(buffer: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -17,7 +19,7 @@ export async function POST(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { batchId } = await params;
     const admin = createAdminClient();
@@ -178,6 +180,22 @@ export async function POST(
         updated_at: new Date().toISOString(),
       })
       .eq("id", batchId);
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "upload",
+      resourceType: "pipeline",
+      resourceId: batchId,
+      metadata: {
+        file_count: files.length,
+        uploaded_count: uploaded.length,
+        duplicate_count: duplicates.length,
+        filenames: files.map((f) => f.name),
+      },
+      ...reqCtx,
+    });
 
     return NextResponse.json({
       uploaded: uploaded.length,

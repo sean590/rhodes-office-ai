@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function PATCH(
   request: Request,
@@ -9,6 +11,7 @@ export async function PATCH(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
+    const { user } = ctx;
 
     const { itemId } = await params;
     const admin = createAdminClient();
@@ -55,6 +58,17 @@ export async function PATCH(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "edit",
+      resourceType: "pipeline_item",
+      resourceId: itemId,
+      metadata: { fields_changed: Object.keys(updates).filter((k) => k !== "updated_at" && k !== "user_corrected" && k !== "staging_confidence") },
+      ...reqCtx,
+    });
 
     return NextResponse.json(data);
   } catch (err) {

@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateComplianceObligations } from "@/lib/utils/compliance-engine";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   request: Request,
@@ -12,7 +14,7 @@ export async function POST(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -174,6 +176,17 @@ export async function POST(
     if (fetchError) {
       return NextResponse.json({ error: fetchError.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "sync_compliance",
+      resourceType: "compliance",
+      resourceId: id,
+      metadata: { obligations_synced: generated.length },
+      ...reqCtx,
+    });
 
     return NextResponse.json({
       obligations: updated || [],

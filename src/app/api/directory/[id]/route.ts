@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function PUT(
   request: Request,
@@ -9,7 +11,7 @@ export async function PUT(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { id } = await params;
     const supabase = createAdminClient();
@@ -49,6 +51,17 @@ export async function PUT(
       );
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "edit",
+      resourceType: "directory_entry",
+      resourceId: id,
+      metadata: { fields_updated: Object.keys(updates).filter(k => k !== "updated_at") },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("PUT /api/directory/[id] error:", err);
@@ -66,7 +79,7 @@ export async function DELETE(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { id } = await params;
     const supabase = createAdminClient();
@@ -200,6 +213,17 @@ export async function DELETE(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "directory_entry",
+      resourceId: id,
+      metadata: { replacement_id, replacement_name: replacementName },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ success: true, replaced_with: replacement_id });
   } catch (err) {

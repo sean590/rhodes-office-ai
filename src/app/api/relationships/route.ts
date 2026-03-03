@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function GET() {
   try {
@@ -105,7 +107,7 @@ export async function POST(request: Request) {
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const supabase = createAdminClient();
     const body = await request.json();
@@ -174,6 +176,23 @@ export async function POST(request: Request) {
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "create",
+      resourceType: "relationship",
+      resourceId: data.id,
+      metadata: {
+        type,
+        from_entity_id: from_entity_id || null,
+        from_directory_id: from_directory_id || null,
+        to_entity_id: to_entity_id || null,
+        to_directory_id: to_directory_id || null,
+      },
+      ...reqCtx,
+    });
 
     return NextResponse.json(data, { status: 201 });
   } catch (err) {

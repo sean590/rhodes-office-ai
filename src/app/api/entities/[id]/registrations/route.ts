@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function GET(
   request: Request,
@@ -43,7 +45,7 @@ export async function POST(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -79,6 +81,17 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "create",
+      resourceType: "entity_registration",
+      resourceId: id,
+      metadata: { jurisdiction },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     console.error("POST /api/entities/[id]/registrations error:", err);
@@ -94,7 +107,7 @@ export async function PUT(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -136,6 +149,17 @@ export async function PUT(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "edit",
+      resourceType: "entity_registration",
+      resourceId: id,
+      metadata: { registration_id },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("PUT /api/entities/[id]/registrations error:", err);
@@ -151,7 +175,7 @@ export async function DELETE(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -178,6 +202,17 @@ export async function DELETE(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "entity_registration",
+      resourceId: id,
+      metadata: { registration_id },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

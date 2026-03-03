@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   request: Request,
@@ -32,6 +34,17 @@ export async function POST(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "reject",
+      resourceType: "pipeline_item",
+      resourceId: itemId,
+      metadata: { reason: body.reason || null },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ status: "rejected", item: data });
   } catch (err) {

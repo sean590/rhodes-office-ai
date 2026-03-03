@@ -32,12 +32,12 @@ export const updateEntitySchema = z.object({
 });
 
 export const userRoleSchema = z.object({
-  role: z.enum(["admin", "editor", "viewer"]),
+  role: z.enum(["admin", "member", "viewer"]),
 });
 
 export const inviteUserSchema = z.object({
   email: z.email("Invalid email address"),
-  role: z.enum(["admin", "editor", "viewer"]).default("viewer"),
+  role: z.enum(["admin", "member", "viewer"]).default("viewer"),
 });
 
 export const chatMessageSchema = z.object({

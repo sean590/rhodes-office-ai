@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   request: Request,
@@ -10,7 +12,7 @@ export async function POST(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -49,6 +51,17 @@ export async function POST(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "create",
+      resourceType: "entity_role",
+      resourceId: id,
+      metadata: { role_title, name },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data, { status: 201 });
   } catch (err) {
     console.error("POST /api/entities/[id]/roles error:", err);
@@ -64,7 +77,7 @@ export async function DELETE(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -90,6 +103,17 @@ export async function DELETE(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "entity_role",
+      resourceId: id,
+      metadata: { role_id },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

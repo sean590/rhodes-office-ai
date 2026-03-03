@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function PUT(
   request: Request,
@@ -9,7 +11,7 @@ export async function PUT(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { id } = await params;
     const supabase = createAdminClient();
@@ -60,6 +62,17 @@ export async function PUT(
       );
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "edit",
+      resourceType: "relationship",
+      resourceId: id,
+      metadata: { fields_changed: Object.keys(updates).filter((k) => k !== "updated_at") },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("PUT /api/relationships/[id] error:", err);
@@ -77,7 +90,7 @@ export async function DELETE(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { id } = await params;
     const supabase = createAdminClient();
@@ -108,6 +121,17 @@ export async function DELETE(
         return NextResponse.json({ error: error.message }, { status: 500 });
       }
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "relationship",
+      resourceId: id,
+      metadata: { hard },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {

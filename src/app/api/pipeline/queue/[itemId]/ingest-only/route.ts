@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ingestQueueItem } from "@/lib/pipeline/ingest";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   _request: Request,
@@ -46,6 +48,17 @@ export async function POST(
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "ingest",
+      resourceType: "pipeline_item",
+      resourceId: itemId,
+      metadata: { batch_id: item.batch_id },
+      ...reqCtx,
+    });
 
     return NextResponse.json({
       status: "approved",

@@ -9,7 +9,7 @@ import { MfaSection } from "@/components/settings/mfa-section";
 // Types
 // ---------------------------------------------------------------------------
 
-type UserRole = "admin" | "editor" | "viewer";
+type UserRole = "owner" | "admin" | "member" | "viewer";
 
 interface UserProfile {
   id: string;
@@ -36,14 +36,18 @@ interface CurrentUserInfo {
 // Constants
 // ---------------------------------------------------------------------------
 
-const ROLE_BADGE_STYLES: Record<UserRole, { bg: string; color: string }> = {
+const ROLE_BADGE_STYLES: Record<string, { bg: string; color: string }> = {
+  owner: { bg: "rgba(45,90,61,0.15)", color: "#2d5a3d" },
   admin: { bg: "rgba(45,90,61,0.10)", color: "#2d5a3d" },
+  member: { bg: "rgba(51,102,168,0.10)", color: "#3366a8" },
   editor: { bg: "rgba(51,102,168,0.10)", color: "#3366a8" },
   viewer: { bg: "rgba(148,148,160,0.10)", color: "#6b6b76" },
 };
 
-const ROLE_LABELS: Record<UserRole, string> = {
+const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
   admin: "Admin",
+  member: "Member",
   editor: "Editor",
   viewer: "Viewer",
 };
@@ -807,7 +811,7 @@ export default function SettingsPage() {
                       }}
                     >
                       <option value="viewer">Viewer</option>
-                      <option value="editor">Editor</option>
+                      <option value="member">Member</option>
                       <option value="admin">Admin</option>
                     </select>
                   </div>
@@ -947,7 +951,7 @@ export default function SettingsPage() {
                               }}
                             >
                               <option value="admin">Admin</option>
-                              <option value="editor">Editor</option>
+                              <option value="member">Member</option>
                               <option value="viewer">Viewer</option>
                             </select>
                           )}
@@ -1144,7 +1148,7 @@ export default function SettingsPage() {
                                 }}
                               >
                                 <option value="admin">Admin</option>
-                                <option value="editor">Editor</option>
+                                <option value="member">Member</option>
                                 <option value="viewer">Viewer</option>
                               </select>
                             )}

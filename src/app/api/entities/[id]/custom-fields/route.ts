@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
+import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   request: Request,
@@ -10,7 +12,7 @@ export async function POST(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -61,6 +63,17 @@ export async function POST(
       }
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "create",
+      resourceType: "custom_field",
+      resourceId: id,
+      metadata: { field_name: label, field_type, field_def_id: fieldDef.id },
+      ...reqCtx,
+    });
+
     return NextResponse.json({ ...fieldDef, value: fieldValue }, { status: 201 });
   } catch (err) {
     console.error("POST /api/entities/[id]/custom-fields error:", err);
@@ -76,7 +89,7 @@ export async function PUT(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -133,6 +146,17 @@ export async function PUT(
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "edit",
+      resourceType: "custom_field",
+      resourceId: id,
+      metadata: { field_id: field_def_id },
+      ...reqCtx,
+    });
+
     return NextResponse.json(data);
   } catch (err) {
     console.error("PUT /api/entities/[id]/custom-fields error:", err);
@@ -148,7 +172,7 @@ export async function DELETE(
     const { id } = await params;
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
@@ -182,6 +206,17 @@ export async function DELETE(
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    const reqHeaders = await headers();
+    const reqCtx = getRequestContext(reqHeaders);
+    await logAuditEvent({
+      userId: user.id,
+      action: "delete",
+      resourceType: "custom_field",
+      resourceId: id,
+      metadata: { field_id: field_def_id },
+      ...reqCtx,
+    });
 
     return NextResponse.json({ success: true });
   } catch (err) {
