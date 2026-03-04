@@ -4,6 +4,7 @@
  * for the Claude API across three tiers of PDF complexity.
  */
 
+import "./pdf-polyfill"; // Must be before pdf-parse to stub DOMMatrix/Path2D/ImageData
 import { PDFDocument } from "pdf-lib";
 import { PDFParse } from "pdf-parse";
 
