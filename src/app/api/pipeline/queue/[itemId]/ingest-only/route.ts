@@ -12,7 +12,7 @@ export async function POST(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { user } = ctx;
+    const { orgId, user } = ctx;
 
     const { itemId } = await params;
     const admin = createAdminClient();
@@ -41,6 +41,7 @@ export async function POST(
     const result = await ingestQueueItem({
       item,
       userId,
+      orgId,
       applyMutations: false,
       finalStatus: "approved",
     });

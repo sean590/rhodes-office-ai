@@ -39,6 +39,7 @@ export async function POST(
     const { results, firstCreatedEntityId } = await applyActions(actions, {
       documentId: id,
       existingEntityId: doc.entity_id || undefined,
+      orgId,
     });
 
     // If document has no entity and we created one, associate them

@@ -18,6 +18,7 @@ export interface ApplyResult {
 export interface ApplyOptions {
   documentId?: string;  // For linking compliance obligations
   existingEntityId?: string;  // Document's current entity_id
+  orgId?: string;  // Organization ID for new root-table records
 }
 
 /**
@@ -60,6 +61,7 @@ export async function applyActions(
               registered_agent: item.data.registered_agent || null,
               notes: item.data.notes || null,
               business_purpose: item.data.business_purpose || null,
+              organization_id: options.orgId,
             })
             .select()
             .single();
@@ -153,6 +155,7 @@ export async function applyActions(
               frequency: freq,
               annual_estimate: item.data.annual_estimate ?? null,
               status: "active",
+              organization_id: options.orgId,
             })
             .select()
             .single();
@@ -359,6 +362,7 @@ export async function applyActions(
               name: item.data.name,
               type: item.data.type || "individual",
               email: item.data.email || null,
+              organization_id: options.orgId,
             })
             .select()
             .single();
@@ -376,6 +380,7 @@ export async function applyActions(
               entity_id: item.data.entity_id,
               is_global: false,
               sort_order: 0,
+              organization_id: options.orgId,
             })
             .select()
             .single();

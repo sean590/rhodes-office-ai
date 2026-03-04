@@ -15,6 +15,8 @@ export interface IngestOptions {
   item: Record<string, unknown>;
   /** User ID for uploaded_by/reviewed_by (null-safe for FK constraint) */
   userId?: string | null;
+  /** Organization ID for the document */
+  orgId: string;
   /** Whether to apply ai_proposed_actions (false for ingest-only) */
   applyMutations?: boolean;
   /** Status to set on the queue item after ingestion */
@@ -30,7 +32,7 @@ export interface IngestResult {
 }
 
 export async function ingestQueueItem(options: IngestOptions): Promise<IngestResult> {
-  const { item, userId = null, applyMutations = true, finalStatus = "approved" } = options;
+  const { item, userId = null, orgId, applyMutations = true, finalStatus = "approved" } = options;
   const admin = createAdminClient();
 
   try {
@@ -105,6 +107,7 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
         jurisdiction: item.ai_jurisdiction || null,
         source_page_range: item.ai_page_range || null,
         k1_recipient: item.ai_k1_recipient || null,
+        organization_id: orgId,
         ai_extracted: true,
         ai_extraction: item.ai_extraction,
         ai_extracted_at: item.extraction_completed_at || new Date().toISOString(),
@@ -142,6 +145,7 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
         const { results, firstCreatedEntityId } = await applyActions(actions, {
           documentId: doc.id,
           existingEntityId: finalEntityId || undefined,
+          orgId,
         });
 
         if (!finalEntityId && firstCreatedEntityId) {

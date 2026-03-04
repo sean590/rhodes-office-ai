@@ -56,6 +56,7 @@ export async function POST(
       const result = await ingestQueueItem({
         item,
         userId,
+        orgId,
         applyMutations: true,
         finalStatus: "approved",
       });

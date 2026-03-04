@@ -52,10 +52,10 @@ function routeAfterExtraction(
 export async function processQueueItem(itemId: string): Promise<void> {
   const admin = createAdminClient();
 
-  // 1. Fetch queue item
+  // 1. Fetch queue item (include batch org ID)
   const { data: item, error: itemError } = await admin
     .from("document_queue")
-    .select("*, document_batches!fk_queue_batch(entity_discovery)")
+    .select("*, document_batches!fk_queue_batch(entity_discovery, organization_id)")
     .eq("id", itemId)
     .single();
 
@@ -90,6 +90,7 @@ export async function processQueueItem(itemId: string): Promise<void> {
     // 5. Determine options
     const batchData = item.document_batches;
     const entityDiscovery = batchData?.entity_discovery ?? false;
+    const batchOrgId = batchData?.organization_id as string;
     const isCompositeCandidate =
       item.is_composite ||
       item.staged_doc_type === "tax_package" ||
@@ -124,7 +125,7 @@ export async function processQueueItem(itemId: string): Promise<void> {
 
     // 8. Handle composite results — create child queue items
     if (result.is_composite && result.sub_documents.length > 0) {
-      await handleCompositeResult(admin, item, result.sub_documents);
+      await handleCompositeResult(admin, item, result.sub_documents, batchOrgId);
     }
 
     // 9. Route: auto-ingest or review queue
@@ -167,6 +168,7 @@ export async function processQueueItem(itemId: string): Promise<void> {
       if (updatedItem) {
         const ingestResult = await ingestQueueItem({
           item: updatedItem,
+          orgId: batchOrgId,
           applyMutations: false, // auto-ingest items have no actions by definition
           finalStatus: "auto_ingested",
         });
@@ -224,7 +226,8 @@ export async function processQueueItem(itemId: string): Promise<void> {
 async function handleCompositeResult(
   admin: ReturnType<typeof createAdminClient>,
   parentItem: Record<string, unknown>,
-  subDocuments: SubDocument[]
+  subDocuments: SubDocument[],
+  batchOrgId: string
 ): Promise<void> {
   for (const sub of subDocuments) {
     // Determine routing for each child
@@ -269,6 +272,7 @@ async function handleCompositeResult(
     if (childRoute === "extracted" && childItem) {
       const ingestResult = await ingestQueueItem({
         item: childItem,
+        orgId: batchOrgId,
         applyMutations: false,
         finalStatus: "auto_ingested",
       });

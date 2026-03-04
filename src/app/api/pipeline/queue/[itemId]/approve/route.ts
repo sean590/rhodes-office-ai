@@ -140,6 +140,7 @@ export async function POST(
           const childResult = await ingestQueueItem({
             item: child,
             userId,
+            orgId,
             applyMutations: false,
             finalStatus: "approved",
           });
@@ -153,6 +154,7 @@ export async function POST(
     const result = await ingestQueueItem({
       item,
       userId,
+      orgId,
       applyMutations: true,
       finalStatus: "approved",
     });
