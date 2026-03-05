@@ -229,7 +229,6 @@ export default function SettingsPage() {
 
   // Organization state
   const [orgName, setOrgName] = useState("");
-  const [orgBillingEmail, setOrgBillingEmail] = useState("");
   const [editingOrgName, setEditingOrgName] = useState(false);
   const [savingOrg, setSavingOrg] = useState(false);
   const [pendingInvites, setPendingInvites] = useState<Array<{
@@ -287,6 +286,18 @@ export default function SettingsPage() {
     }
   }, []);
 
+  // Fetch pending invites from org members endpoint
+  const fetchPendingInvites = useCallback(async (orgId: string) => {
+    try {
+      const res = await fetch(`/api/organizations/${orgId}/members`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setPendingInvites(data.invites || []);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
   // Fetch activity log (admin only)
   const fetchActivity = useCallback(async () => {
     setActivityLoading(true);
@@ -311,6 +322,13 @@ export default function SettingsPage() {
       setLoading(false)
     );
   }, [fetchCurrentUser, fetchUsers]);
+
+  // Fetch pending invites once we know the org
+  useEffect(() => {
+    if (currentUser?.orgId) {
+      fetchPendingInvites(currentUser.orgId);
+    }
+  }, [currentUser?.orgId, fetchPendingInvites]);
 
   const setPageContext = useSetPageContext();
   useEffect(() => {
@@ -383,6 +401,7 @@ export default function SettingsPage() {
       setInviteRole("viewer");
       setShowInvite(false);
       await fetchUsers();
+      if (currentUser?.orgId) await fetchPendingInvites(currentUser.orgId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send invite");
     } finally {
@@ -414,8 +433,10 @@ export default function SettingsPage() {
   const handleRevokeInvite = async (inviteId: string) => {
     if (!currentUser?.orgId) return;
     try {
-      await fetch(`/api/organizations/${currentUser.orgId}/invites/${inviteId}`, { method: "DELETE" });
-      setPendingInvites((prev) => prev.filter((i) => i.id !== inviteId));
+      const res = await fetch(`/api/organizations/${currentUser.orgId}/invites/${inviteId}`, { method: "DELETE" });
+      if (res.ok) {
+        setPendingInvites((prev) => prev.filter((i) => i.id !== inviteId));
+      }
     } catch { /* ignore */ }
   };
 
@@ -1203,6 +1224,84 @@ export default function SettingsPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {/* Pending Invites */}
+            {pendingInvites.length > 0 && (
+              <div style={{ marginTop: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+                  Pending Invites
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {pendingInvites.map((inv) => (
+                    <div
+                      key={inv.id}
+                      style={{
+                        display: "flex",
+                        alignItems: isMobile ? "flex-start" : "center",
+                        flexDirection: isMobile ? "column" : "row",
+                        justifyContent: "space-between",
+                        gap: isMobile ? 8 : 12,
+                        padding: isMobile ? 14 : "10px 12px",
+                        background: "#fafaf7",
+                        border: "1px solid #e8e6df",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f", wordBreak: "break-all" }}>
+                          {inv.email}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                          <span style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            background: "rgba(255,169,0,0.10)",
+                            color: "#b37400",
+                          }}>
+                            Pending
+                          </span>
+                          <span style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            borderRadius: 10,
+                            fontSize: 11,
+                            fontWeight: 500,
+                            background: ROLE_BADGE_STYLES[inv.role]?.bg || "#f0f0f0",
+                            color: ROLE_BADGE_STYLES[inv.role]?.color || "#6b6b76",
+                          }}>
+                            {ROLE_LABELS[inv.role] || inv.role}
+                          </span>
+                          {inv.expires_at && (
+                            <span style={{ fontSize: 11, color: "#9494a0" }}>
+                              Expires {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRevokeInvite(inv.id)}
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "#dc2626",
+                          cursor: "pointer",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          padding: isMobile ? "10px 8px" : "4px 8px",
+                          minHeight: isMobile ? 44 : undefined,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </AccordionSection>
