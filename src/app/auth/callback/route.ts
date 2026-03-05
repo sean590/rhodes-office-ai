@@ -2,6 +2,23 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const ACTIVITY_COOKIE = "rhodes_last_activity";
+const SESSION_START_COOKIE = "rhodes_session_start";
+
+/** Set fresh session timeout cookies on a redirect response */
+function setFreshSessionCookies(response: NextResponse): NextResponse {
+  const now = Date.now().toString();
+  const cookieOpts = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    maxAge: 60 * 60 * 24,
+  };
+  response.cookies.set(ACTIVITY_COOKIE, now, cookieOpts);
+  response.cookies.set(SESSION_START_COOKIE, now, cookieOpts);
+  return response;
+}
+
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
@@ -39,9 +56,9 @@ export async function GET(request: Request) {
         }
 
         if (next) {
-          return NextResponse.redirect(`${origin}${next}`);
+          return setFreshSessionCookies(NextResponse.redirect(`${origin}${next}`));
         }
-        return NextResponse.redirect(`${origin}/entities`);
+        return setFreshSessionCookies(NextResponse.redirect(`${origin}/entities`));
       }
 
       // 2. Check for pending invite by email
@@ -58,7 +75,7 @@ export async function GET(request: Request) {
         // Invited user — create profile so invite acceptance works
         await ensureUserRecords(admin, data.user);
 
-        const response = NextResponse.redirect(`${origin}/invite/${invite.token}`);
+        const response = setFreshSessionCookies(NextResponse.redirect(`${origin}/invite/${invite.token}`));
         response.cookies.set("invite_token", invite.token, { httpOnly: true, maxAge: 3600 });
         return response;
       }
