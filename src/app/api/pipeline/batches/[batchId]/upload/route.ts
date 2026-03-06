@@ -60,45 +60,63 @@ export async function POST(
     const uploaded: Array<Record<string, unknown>> = [];
     const duplicates: Array<{ filename: string; reason: string }> = [];
 
+    // Pre-compute hashes and validate all files
+    const validFiles: Array<{ file: File; buffer: ArrayBuffer; hash: string }> = [];
     for (const file of files) {
       const fileCheck = validateUploadedFile(file);
       if (!fileCheck.valid) {
         duplicates.push({ filename: file.name, reason: fileCheck.error });
         continue;
       }
-
       const buffer = await file.arrayBuffer();
-      const contentHash = await computeHash(buffer);
+      const hash = await computeHash(buffer);
+      validFiles.push({ file, buffer, hash });
+    }
 
-      // Check for duplicates in existing documents
-      const { data: existingDoc } = await admin
-        .from("documents")
-        .select("id, name")
-        .eq("content_hash", contentHash)
-        .eq("organization_id", orgId)
-        .is("deleted_at", null)
-        .maybeSingle();
+    // Batch duplicate checks — 2 queries instead of 2N
+    const allHashes = validFiles.map((f) => f.hash);
+    const duplicateDocHashes = new Map<string, string>();
+    const duplicateQueueHashes = new Map<string, string>();
 
-      if (existingDoc) {
+    if (allHashes.length > 0) {
+      const [docDupes, queueDupes] = await Promise.all([
+        admin
+          .from("documents")
+          .select("content_hash, name")
+          .in("content_hash", allHashes)
+          .eq("organization_id", orgId)
+          .is("deleted_at", null),
+        admin
+          .from("document_queue")
+          .select("content_hash, original_filename")
+          .in("content_hash", allHashes)
+          .not("status", "in", '("rejected","error")'),
+      ]);
+
+      for (const doc of docDupes.data || []) {
+        duplicateDocHashes.set(doc.content_hash, doc.name);
+      }
+      for (const q of queueDupes.data || []) {
+        duplicateQueueHashes.set(q.content_hash, q.original_filename);
+      }
+    }
+
+    for (const { file, buffer, hash: contentHash } of validFiles) {
+      // Check against batch duplicate results
+      const existingDocName = duplicateDocHashes.get(contentHash);
+      if (existingDocName) {
         duplicates.push({
           filename: file.name,
-          reason: `Duplicate of existing document "${existingDoc.name}"`,
+          reason: `Duplicate of existing document "${existingDocName}"`,
         });
         continue;
       }
 
-      // Check for duplicates in current queue
-      const { data: existingQueue } = await admin
-        .from("document_queue")
-        .select("id, original_filename")
-        .eq("content_hash", contentHash)
-        .not("status", "in", '("rejected","error")')
-        .maybeSingle();
-
-      if (existingQueue) {
+      const existingQueueName = duplicateQueueHashes.get(contentHash);
+      if (existingQueueName) {
         duplicates.push({
           filename: file.name,
-          reason: `Duplicate of queued file "${existingQueue.original_filename}"`,
+          reason: `Duplicate of queued file "${existingQueueName}"`,
         });
         continue;
       }

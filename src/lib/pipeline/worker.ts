@@ -48,8 +48,12 @@ function routeAfterExtraction(
 
 /**
  * Process a single queue item through AI extraction.
+ * Accepts an optional pre-fetched dbContext to avoid redundant DB queries within a batch.
  */
-export async function processQueueItem(itemId: string): Promise<void> {
+export async function processQueueItem(
+  itemId: string,
+  cachedDbContext?: Record<string, unknown[]>
+): Promise<void> {
   const admin = createAdminClient();
 
   // 1. Fetch queue item (include batch org ID)
@@ -84,13 +88,13 @@ export async function processQueueItem(itemId: string): Promise<void> {
       throw new Error(`Failed to download file: ${downloadError?.message || "No data"}`);
     }
 
-    // 4. Get DB context
-    const dbContext = await getDbContext(admin);
+    // 4. Get DB context (use cached if provided, otherwise fetch org-scoped)
+    const batchData = item.document_batches;
+    const batchOrgId = batchData?.organization_id as string;
+    const dbContext = cachedDbContext ?? await getDbContext(admin, batchOrgId);
 
     // 5. Determine options
-    const batchData = item.document_batches;
     const entityDiscovery = batchData?.entity_discovery ?? false;
-    const batchOrgId = batchData?.organization_id as string;
     const isCompositeCandidate =
       item.is_composite ||
       item.staged_doc_type === "tax_package" ||
@@ -229,7 +233,7 @@ async function handleCompositeResult(
   subDocuments: SubDocument[],
   batchOrgId: string
 ): Promise<void> {
-  for (const sub of subDocuments) {
+  await Promise.all(subDocuments.map(async (sub) => {
     // Determine routing for each child
     const hasActions = sub.actions && sub.actions.length > 0;
     const hasEntity = !!sub.entity_id;
@@ -283,7 +287,7 @@ async function handleCompositeResult(
           .eq("id", childItem.id);
       }
     }
-  }
+  }));
 }
 
 /**
@@ -337,6 +341,7 @@ async function updateBatchStats(
 
 /**
  * Process all queued items in a batch with concurrency control.
+ * Fetches DB context once and shares it across all items.
  */
 export async function processBatch(
   batchId: string,
@@ -356,6 +361,16 @@ export async function processBatch(
     return;
   }
 
+  // Fetch batch org ID for scoped DB context
+  const { data: batch } = await admin
+    .from("document_batches")
+    .select("organization_id")
+    .eq("id", batchId)
+    .single();
+
+  // Pre-fetch DB context once for the entire batch (org-scoped)
+  const dbContext = await getDbContext(admin, batch?.organization_id ?? undefined);
+
   // Process with semaphore-controlled concurrency
   const itemIds = items.map((i) => i.id);
   let index = 0;
@@ -365,7 +380,7 @@ export async function processBatch(
       const currentIndex = index++;
       const itemId = itemIds[currentIndex];
       try {
-        await processQueueItem(itemId);
+        await processQueueItem(itemId, dbContext);
       } catch (err) {
         Sentry.captureException(err);
         console.error(`Worker error for item ${itemId}:`, err);

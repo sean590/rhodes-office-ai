@@ -50,7 +50,7 @@ export async function POST(
     }
 
     // Get DB context and run extraction via shared function
-    const dbContext = await getDbContext(admin);
+    const dbContext = await getDbContext(admin, orgId);
     const result = await extractDocument(
       fileData,
       doc.mime_type,

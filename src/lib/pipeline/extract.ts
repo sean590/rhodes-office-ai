@@ -31,47 +31,71 @@ function computeConfidence(actions: unknown[]): number | null {
 
 // --- DB Context Builder ---
 
-export async function getDbContext(supabase: ReturnType<typeof createAdminClient>) {
-  const [
-    entitiesRes,
-    directoryRes,
-    relationshipsRes,
-    registrationsRes,
-    managersRes,
-    membersRes,
-    trustDetailsRes,
-    trustRolesRes,
-    capTableRes,
-    partnershipRepsRes,
-    entityRolesRes,
-    complianceRes,
-  ] = await Promise.all([
-    supabase.from("entities").select("*").order("name"),
-    supabase.from("directory_entries").select("*").order("name"),
-    supabase.from("relationships").select("*"),
-    supabase.from("entity_registrations").select("*"),
-    supabase.from("entity_managers").select("*"),
-    supabase.from("entity_members").select("*"),
-    supabase.from("trust_details").select("*"),
-    supabase.from("trust_roles").select("*"),
-    supabase.from("cap_table_entries").select("*"),
-    supabase.from("entity_partnership_reps").select("*"),
-    supabase.from("entity_roles").select("*"),
-    supabase.from("compliance_obligations").select("*").order("next_due_date", { ascending: true }),
+export async function getDbContext(supabase: ReturnType<typeof createAdminClient>, orgId?: string) {
+  // Phase 1: Fetch org-scoped root tables + entities (need entity IDs for sub-table filtering)
+  const entitiesQuery = supabase
+    .from("entities")
+    .select("id, name, type, ein, formation_state, status, business_purpose")
+    .order("name");
+  const directoryQuery = supabase
+    .from("directory_entries")
+    .select("id, name, type, email, aliases")
+    .order("name");
+  const relationshipsQuery = supabase
+    .from("relationships")
+    .select("id, type, from_entity_id, to_entity_id, description");
+  const complianceQuery = supabase
+    .from("compliance_obligations")
+    .select("id, entity_id, name, jurisdiction, obligation_type, status, next_due_date, completed_at, rule_id")
+    .order("next_due_date", { ascending: true });
+
+  if (orgId) {
+    entitiesQuery.eq("organization_id", orgId);
+    directoryQuery.eq("organization_id", orgId);
+    relationshipsQuery.eq("organization_id", orgId);
+    complianceQuery.eq("organization_id", orgId);
+  }
+
+  const [entitiesRes, directoryRes, relationshipsRes, complianceRes] = await Promise.all([
+    entitiesQuery, directoryQuery, relationshipsQuery, complianceQuery,
   ]);
 
+  const entities = entitiesRes.data || [];
+  const entityIds = entities.map((e) => e.id);
+
+  // Phase 2: Fetch sub-entity tables, scoped by entity IDs
+  const subQueries = entityIds.length > 0
+    ? await Promise.all([
+        supabase.from("entity_registrations").select("id, entity_id, jurisdiction, qualification_date, last_filing_date, state_id").in("entity_id", entityIds),
+        supabase.from("entity_managers").select("entity_id, name").in("entity_id", entityIds),
+        supabase.from("entity_members").select("entity_id, name").in("entity_id", entityIds),
+        supabase.from("trust_details").select("id, entity_id, trust_type, grantor_name").in("entity_id", entityIds),
+        supabase.from("cap_table_entries").select("entity_id, investor_name, ownership_pct").in("entity_id", entityIds),
+        supabase.from("entity_partnership_reps").select("entity_id, name").in("entity_id", entityIds),
+        supabase.from("entity_roles").select("entity_id, role_title, name").in("entity_id", entityIds),
+      ])
+    : Array(7).fill({ data: [] });
+
+  const trustDetails = subQueries[3].data || [];
+  const trustDetailIds = trustDetails.map((t: { id: string }) => t.id);
+
+  // Trust roles are keyed by trust_detail_id, not entity_id
+  const trustRolesRes = trustDetailIds.length > 0
+    ? await supabase.from("trust_roles").select("trust_detail_id, role, name").in("trust_detail_id", trustDetailIds)
+    : { data: [] };
+
   return {
-    entities: entitiesRes.data || [],
+    entities,
     directory: directoryRes.data || [],
     relationships: relationshipsRes.data || [],
-    registrations: registrationsRes.data || [],
-    managers: managersRes.data || [],
-    members: membersRes.data || [],
-    trust_details: trustDetailsRes.data || [],
+    registrations: subQueries[0].data || [],
+    managers: subQueries[1].data || [],
+    members: subQueries[2].data || [],
+    trust_details: trustDetails,
     trust_roles: trustRolesRes.data || [],
-    cap_table: capTableRes.data || [],
-    partnership_reps: partnershipRepsRes.data || [],
-    entity_roles: entityRolesRes.data || [],
+    cap_table: subQueries[4].data || [],
+    partnership_reps: subQueries[5].data || [],
+    entity_roles: subQueries[6].data || [],
     compliance_obligations: complianceRes.data || [],
   };
 }
