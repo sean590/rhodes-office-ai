@@ -111,7 +111,9 @@ export default function DocumentsPage() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchAll();
+    return () => controller.abort();
   }, [fetchAll]);
 
   const setPageContext = useSetPageContext();
@@ -1035,10 +1037,8 @@ export default function DocumentsPage() {
                       fontSize: 13,
                       alignItems: "center",
                       cursor: "pointer",
-                      transition: "background 0.1s",
                     }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                    className="row-hover"
                   >
                     {/* Document name + AI indicator */}
                     <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>

@@ -61,6 +61,24 @@ function getAllJurisdictions(entity: EntityListItem): string[] {
   return Array.from(codes);
 }
 
+/* Table styles (stable references — avoids re-creation on every render) */
+const thStyle: React.CSSProperties = {
+  padding: "10px 16px",
+  textAlign: "left" as const,
+  fontSize: 11,
+  fontWeight: 600,
+  color: "#9494a0",
+  textTransform: "uppercase" as const,
+  letterSpacing: "0.06em",
+  borderBottom: "1px solid #e8e6df",
+};
+
+const tdStyle: React.CSSProperties = {
+  padding: "14px 16px",
+  borderBottom: "1px solid #f0eee8",
+  verticalAlign: "top" as const,
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -74,19 +92,22 @@ export default function EntitiesPage() {
 
   /* Fetch entities on mount */
   useEffect(() => {
+    const controller = new AbortController();
     async function load() {
       try {
-        const res = await fetch("/api/entities");
+        const res = await fetch("/api/entities", { signal: controller.signal });
         if (!res.ok) throw new Error("Failed to fetch entities");
         const data = await res.json();
         setEntities(data);
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
         console.error(err);
       } finally {
         setLoading(false);
       }
     }
     load();
+    return () => controller.abort();
   }, []);
 
   const setPageContext = useSetPageContext();
@@ -131,24 +152,6 @@ export default function EntitiesPage() {
 
   const overdueCount = filingAlerts.filter((e) => e.filing_status === "overdue").length;
   const dueSoonCount = filingAlerts.filter((e) => e.filing_status === "due_soon").length;
-
-  /* Table column header style */
-  const thStyle: React.CSSProperties = {
-    padding: "10px 16px",
-    textAlign: "left" as const,
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#9494a0",
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    borderBottom: "1px solid #e8e6df",
-  };
-
-  const tdStyle: React.CSSProperties = {
-    padding: "14px 16px",
-    borderBottom: "1px solid #f0eee8",
-    verticalAlign: "top" as const,
-  };
 
   /* ---------------------------------------------------------------- */
   /*  Render                                                           */
@@ -324,9 +327,8 @@ export default function EntitiesPage() {
                     <tr
                       key={entity.id}
                       onClick={() => router.push(`/entities/${entity.id}`)}
-                      style={{ cursor: "pointer", transition: "background 0.15s" }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                      className="row-hover"
+                      style={{ cursor: "pointer" }}
                     >
                       {/* Entity name + managers */}
                       <td style={tdStyle}>

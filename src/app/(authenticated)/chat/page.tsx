@@ -111,8 +111,10 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchSessions();
     fetchRefs();
+    return () => controller.abort();
   }, [fetchSessions, fetchRefs]);
 
   // -------------------------------------------------------------------

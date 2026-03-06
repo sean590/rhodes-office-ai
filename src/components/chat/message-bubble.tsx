@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { renderMarkdown } from "@/lib/utils/markdown";
 import { linkifyReferences, LinkableRef } from "@/lib/utils/linkify";
 import type { ChatMessage } from "@/lib/types/chat";
@@ -10,7 +11,7 @@ interface MessageBubbleProps {
   compact?: boolean;
 }
 
-export function MessageBubble({ message, refs, compact }: MessageBubbleProps) {
+export const MessageBubble = memo(function MessageBubble({ message, refs, compact }: MessageBubbleProps) {
   const isUser = message.role === "user";
 
   const bubbleStyle: React.CSSProperties = isUser
@@ -63,7 +64,7 @@ export function MessageBubble({ message, refs, compact }: MessageBubbleProps) {
       </div>
     </div>
   );
-}
+});
 
 /**
  * Streaming indicator bubble (three animated dots + "Thinking...")

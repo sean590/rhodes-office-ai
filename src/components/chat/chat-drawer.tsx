@@ -93,6 +93,8 @@ export function ChatDrawer({ isOpen, onClose, isMobile }: ChatDrawerProps) {
       fetchSessions();
       fetchRefs();
     }
+  // Cleanup note: fetch callbacks are stable (useCallback with []),
+  // and only fire once via initializedRef guard
   }, [isOpen, fetchSessions, fetchRefs]);
 
   // -------------------------------------------------------------------

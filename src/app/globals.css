@@ -67,6 +67,13 @@
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
   }
+
+  .row-hover {
+    transition: background 0.15s;
+  }
+  .row-hover:hover {
+    background: #fafaf7;
+  }
 }
 
 /* Prevent horizontal scroll on mobile */

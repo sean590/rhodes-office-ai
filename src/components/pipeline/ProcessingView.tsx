@@ -170,11 +170,10 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
       body: JSON.stringify({ status: "queued" }),
     });
     await fetch(`/api/pipeline/batches/${batchId}/process`, { method: "POST" });
-    // Resume polling
-    if (!pollRef.current) {
-      setPhase("processing");
-      pollRef.current = setInterval(fetchBatch, 2500);
-    }
+    // Resume polling — clear any existing interval first to prevent stacking
+    if (pollRef.current) clearInterval(pollRef.current);
+    setPhase("processing");
+    pollRef.current = setInterval(fetchBatch, 2500);
     await fetchBatch();
   };
 

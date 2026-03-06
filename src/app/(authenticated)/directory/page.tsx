@@ -119,7 +119,9 @@ export default function DirectoryPage() {
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     fetchEntries();
+    return () => controller.abort();
   }, [fetchEntries]);
 
   const setPageContext = useSetPageContext();
@@ -860,12 +862,11 @@ export default function DirectoryPage() {
                     {/* ---- Compact row ---- */}
                     <tr
                       onClick={() => toggleExpanded(entry.id)}
+                      className="row-hover"
                       style={{
                         cursor: "pointer",
                         display: isExpanded ? "none" : undefined,
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                     >
                       <td style={{ ...tdStyle, fontWeight: 500 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
