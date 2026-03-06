@@ -23,10 +23,11 @@ export async function GET() {
 
     const { data, error } = await admin
       .from("chat_sessions")
-      .select("*")
+      .select("id, title, user_id, organization_id, created_at, updated_at")
       .eq("user_id", internalUser.id)
       .eq("organization_id", orgId)
-      .order("updated_at", { ascending: false });
+      .order("updated_at", { ascending: false })
+      .limit(100);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });

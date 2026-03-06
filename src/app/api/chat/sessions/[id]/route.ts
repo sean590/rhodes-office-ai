@@ -27,12 +27,13 @@ export async function GET(
 
     const { data: messages, error: messagesError } = await admin
       .from("chat_messages")
-      .select("*")
+      .select("id, session_id, role, content, created_at")
       .eq("session_id", id)
-      .order("created_at", { ascending: true });
+      .order("created_at", { ascending: true })
+      .limit(500);
 
     if (messagesError) {
-      return NextResponse.json({ error: messagesError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json({

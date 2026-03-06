@@ -324,7 +324,9 @@ export async function GET(
       compliance_obligations: complianceRes.data || [],
     };
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/entities/[id] error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

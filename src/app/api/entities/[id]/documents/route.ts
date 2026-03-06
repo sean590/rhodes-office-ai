@@ -25,18 +25,25 @@ export async function GET(
 
     const supabase = await createClient();
 
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "200", 10), 500);
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
     const { data, error } = await supabase
       .from("documents")
-      .select("*")
+      .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, entity_id, direction, created_at, updated_at")
       .eq("entity_id", id)
       .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    return NextResponse.json(data || []);
+    return NextResponse.json(data || [], {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/entities/[id]/documents error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -26,13 +26,14 @@ export async function GET() {
     // Fetch all entities (exclude soft-deleted)
     const { data: entities, error: entitiesError } = await supabase
       .from("entities")
-      .select("*")
+      .select("id, name, type, formation_state, parent_entity_id")
       .eq("organization_id", orgId)
       .neq("status", "deleted")
-      .order("name");
+      .order("name")
+      .limit(500);
 
     if (entitiesError) {
-      return NextResponse.json({ error: entitiesError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!entities || entities.length === 0) {
@@ -72,16 +73,31 @@ export async function GET() {
     const relationshipsFrom = relationshipsFromRes.data || [];
     const relationshipsTo = relationshipsToRes.data || [];
 
+    // Build lookup maps for O(1) access
+    const regMap = new Map<string, typeof registrations>();
+    for (const r of registrations) {
+      const arr = regMap.get(r.entity_id) || [];
+      arr.push(r);
+      regMap.set(r.entity_id, arr);
+    }
+    const relFromCount = new Map<string, number>();
+    for (const r of relationshipsFrom) {
+      relFromCount.set(r.from_entity_id, (relFromCount.get(r.from_entity_id) || 0) + 1);
+    }
+    const relToCount = new Map<string, number>();
+    for (const r of relationshipsTo) {
+      relToCount.set(r.to_entity_id, (relToCount.get(r.to_entity_id) || 0) + 1);
+    }
+
     // Build a map of entity id -> enriched data
     const entityMap = new Map<string, TreeNode>();
 
     for (const entity of entities) {
-      const entityRegistrations = registrations.filter((r) => r.entity_id === entity.id);
+      const entityRegistrations = regMap.get(entity.id) || [];
 
       // Count relationships where this entity is either from or to
       const relCount =
-        relationshipsFrom.filter((r) => r.from_entity_id === entity.id).length +
-        relationshipsTo.filter((r) => r.to_entity_id === entity.id).length;
+        (relFromCount.get(entity.id) || 0) + (relToCount.get(entity.id) || 0);
 
       // Additional registrations = total registrations beyond the formation state
       const additionalRegCount = entityRegistrations.filter(
@@ -141,7 +157,9 @@ export async function GET() {
       }
     }
 
-    return NextResponse.json(roots);
+    return NextResponse.json(roots, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/entities/tree error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

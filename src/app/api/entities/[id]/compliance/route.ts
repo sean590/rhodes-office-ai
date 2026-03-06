@@ -101,7 +101,9 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ obligations });
+    return NextResponse.json({ obligations }, {
+      headers: { "Cache-Control": "private, max-age=60" },
+    });
   } catch (err) {
     console.error("GET /api/entities/[id]/compliance error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

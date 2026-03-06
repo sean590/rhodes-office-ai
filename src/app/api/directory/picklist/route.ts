@@ -16,12 +16,14 @@ export async function GET() {
         .from("directory_entries")
         .select("id, name, type")
         .eq("organization_id", orgId)
-        .order("name"),
+        .order("name")
+        .limit(500),
       supabase
         .from("entities")
         .select("id, name, type")
         .eq("organization_id", orgId)
-        .order("name"),
+        .order("name")
+        .limit(500),
     ]);
 
     if (directoryResult.error) {
@@ -59,7 +61,9 @@ export async function GET() {
       a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
     );
 
-    return NextResponse.json(combined);
+    return NextResponse.json(combined, {
+      headers: { "Cache-Control": "private, max-age=60" },
+    });
   } catch (err) {
     console.error("GET /api/directory/picklist error:", err);
     return NextResponse.json(

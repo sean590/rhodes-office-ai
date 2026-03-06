@@ -9,6 +9,8 @@ import { headers } from "next/headers";
 import * as Sentry from "@sentry/nextjs";
 import type { DocumentCategory } from "@/lib/types/entities";
 
+export const maxDuration = 180;
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }

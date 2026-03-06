@@ -31,7 +31,7 @@ export async function GET(request: Request) {
       .range(offset, offset + limit - 1);
 
     if (entitiesError) {
-      return NextResponse.json({ error: entitiesError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!entities || entities.length === 0) {
@@ -94,21 +94,53 @@ export async function GET(request: Request) {
     const relationshipsTo = relationshipsToRes.data || [];
     const complianceObligations = complianceRes.data || [];
 
+    // Build lookup maps for O(1) access per entity (avoids O(n²) .filter() loops)
+    const regMap = new Map<string, typeof registrations>();
+    for (const r of registrations) {
+      const arr = regMap.get(r.entity_id) || [];
+      arr.push(r);
+      regMap.set(r.entity_id, arr);
+    }
+    const mgrMap = new Map<string, typeof managers>();
+    for (const m of managers) {
+      const arr = mgrMap.get(m.entity_id) || [];
+      arr.push(m);
+      mgrMap.set(m.entity_id, arr);
+    }
+    const memMap = new Map<string, typeof members>();
+    for (const m of members) {
+      const arr = memMap.get(m.entity_id) || [];
+      arr.push(m);
+      memMap.set(m.entity_id, arr);
+    }
+    const relFromCount = new Map<string, number>();
+    for (const r of relationshipsFrom) {
+      relFromCount.set(r.from_entity_id, (relFromCount.get(r.from_entity_id) || 0) + 1);
+    }
+    const relToCount = new Map<string, number>();
+    for (const r of relationshipsTo) {
+      relToCount.set(r.to_entity_id, (relToCount.get(r.to_entity_id) || 0) + 1);
+    }
+    const oblMap = new Map<string, typeof complianceObligations>();
+    for (const o of complianceObligations) {
+      if (!o.entity_id) continue;
+      const arr = oblMap.get(o.entity_id) || [];
+      arr.push(o);
+      oblMap.set(o.entity_id, arr);
+    }
+
     // Build enriched entity list
     const enriched = entities.map((entity) => {
-      const entityRegistrations = registrations.filter((r) => r.entity_id === entity.id);
-      const entityManagers = managers.filter((m) => m.entity_id === entity.id);
-      const entityMembers = members.filter((m) => m.entity_id === entity.id);
+      const entityRegistrations = regMap.get(entity.id) || [];
+      const entityManagers = mgrMap.get(entity.id) || [];
+      const entityMembers = memMap.get(entity.id) || [];
 
       // Count relationships where this entity is either from or to
       const relCount =
-        relationshipsFrom.filter((r) => r.from_entity_id === entity.id).length +
-        relationshipsTo.filter((r) => r.to_entity_id === entity.id).length;
+        (relFromCount.get(entity.id) || 0) + (relToCount.get(entity.id) || 0);
 
       // Derive filing_status from compliance obligations if available, else fall back
-      const entityObligations = complianceObligations.filter(
-        (o) => o.entity_id === entity.id
-      );
+      const entityObligations = oblMap.get(entity.id) || [];
 
       let worstStatus: string;
       if (entityObligations.length > 0) {
