@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "script-src 'self' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co",
               "font-src 'self' https://fonts.gstatic.com",
@@ -38,7 +38,6 @@ export default withSentryConfig(nextConfig, {
   project: "rhodesoffice",
   silent: !process.env.CI,
   widenClientFileUpload: true,
-  tunnelRoute: "/monitoring",
   sourcemaps: {
     deleteSourcemapsAfterUpload: true,
   },

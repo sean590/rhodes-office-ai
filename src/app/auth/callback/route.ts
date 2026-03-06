@@ -76,7 +76,12 @@ export async function GET(request: Request) {
         await ensureUserRecords(admin, data.user);
 
         const response = setFreshSessionCookies(NextResponse.redirect(`${origin}/invite/${invite.token}`));
-        response.cookies.set("invite_token", invite.token, { httpOnly: true, maxAge: 3600 });
+        response.cookies.set("invite_token", invite.token, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === "production",
+          sameSite: "lax",
+          maxAge: 3600,
+        });
         return response;
       }
 

@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       if (error.code === "23505") {
         return NextResponse.json({ success: true });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });

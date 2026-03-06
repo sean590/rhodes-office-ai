@@ -26,14 +26,14 @@ export async function GET() {
 
     if (directoryResult.error) {
       return NextResponse.json(
-        { error: directoryResult.error.message },
+        { error: "Internal server error" },
         { status: 500 }
       );
     }
 
     if (entitiesResult.error) {
       return NextResponse.json(
-        { error: entitiesResult.error.message },
+        { error: "Internal server error" },
         { status: 500 }
       );
     }

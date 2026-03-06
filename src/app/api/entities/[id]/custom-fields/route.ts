@@ -143,7 +143,7 @@ export async function PUT(
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const reqHeaders = await headers();
@@ -204,7 +204,7 @@ export async function DELETE(
       .eq("entity_id", id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const reqHeaders = await headers();

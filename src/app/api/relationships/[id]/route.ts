@@ -52,7 +52,7 @@ export async function PUT(
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!data) {
@@ -107,7 +107,7 @@ export async function DELETE(
         .eq("organization_id", orgId);
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
     } else {
       // Soft delete: set status to terminated
@@ -118,7 +118,7 @@ export async function DELETE(
         .eq("organization_id", orgId);
 
       if (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
     }
 

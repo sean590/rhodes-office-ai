@@ -28,7 +28,7 @@ export async function GET(
       if (error.code === "PGRST116") {
         return NextResponse.json({ error: "Document not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json(data);
@@ -70,7 +70,7 @@ export async function PATCH(
       if (error.code === "PGRST116") {
         return NextResponse.json({ error: "Document not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json(data);
@@ -106,7 +106,7 @@ export async function DELETE(
       if (error.code === "PGRST116") {
         return NextResponse.json({ error: "Document not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Audit log

@@ -19,6 +19,11 @@ export async function GET(
   }
 
   const { orgId } = await params;
+
+  if (user.orgId !== orgId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const admin = createAdminClient();
 
   const { data: org, error } = await admin

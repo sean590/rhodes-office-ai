@@ -66,19 +66,19 @@ export async function GET() {
       ]);
 
     if (registrationsRes.error) {
-      return NextResponse.json({ error: registrationsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (managersRes.error) {
-      return NextResponse.json({ error: managersRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (membersRes.error) {
-      return NextResponse.json({ error: membersRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relationshipsFromRes.error) {
-      return NextResponse.json({ error: relationshipsFromRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relationshipsToRes.error) {
-      return NextResponse.json({ error: relationshipsToRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     // complianceRes errors are non-fatal — fall back to old calculation
 

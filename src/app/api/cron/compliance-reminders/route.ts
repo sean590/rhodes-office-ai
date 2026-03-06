@@ -30,7 +30,7 @@ export async function GET(request: Request) {
 
         if (error) {
           logger.error("Failed to fetch compliance obligations", { error: error.message });
-          return Response.json({ error: error.message }, { status: 500 });
+          return Response.json({ error: "Internal server error" }, { status: 500 });
         }
 
         if (!obligations || obligations.length === 0) {

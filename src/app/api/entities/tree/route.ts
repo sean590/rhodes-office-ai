@@ -59,13 +59,13 @@ export async function GET() {
       ]);
 
     if (registrationsRes.error) {
-      return NextResponse.json({ error: registrationsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relationshipsFromRes.error) {
-      return NextResponse.json({ error: relationshipsFromRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relationshipsToRes.error) {
-      return NextResponse.json({ error: relationshipsToRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const registrations = registrationsRes.data || [];

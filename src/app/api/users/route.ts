@@ -41,7 +41,7 @@ export async function GET() {
       .in("id", memberUserIds);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Enrich profiles with email from auth.users

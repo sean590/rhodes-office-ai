@@ -6,7 +6,11 @@ export async function GET(request: Request) {
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { user, orgId } = ctx;
+
+    if (user.orgRole !== "admin" && user.orgRole !== "owner") {
+      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
+    }
 
     const admin = createAdminClient();
 
@@ -36,7 +40,7 @@ export async function GET(request: Request) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json(data || []);

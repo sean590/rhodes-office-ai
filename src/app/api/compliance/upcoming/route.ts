@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       .order("next_due_date", { ascending: true });
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     return NextResponse.json({ obligations: obligations || [] });

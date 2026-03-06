@@ -60,7 +60,7 @@ export async function POST(
       .single();
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const reqHeaders = await headers();
@@ -134,7 +134,7 @@ export async function DELETE(
       .eq("trust_detail_id", trustDetails.id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const reqHeaders = await headers();

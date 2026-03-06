@@ -112,40 +112,40 @@ export async function GET(
 
     // Check for errors
     if (registrationsRes.error) {
-      return NextResponse.json({ error: registrationsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (managersRes.error) {
-      return NextResponse.json({ error: managersRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (membersRes.error) {
-      return NextResponse.json({ error: membersRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (customFieldDefsRes.error) {
-      return NextResponse.json({ error: customFieldDefsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (customFieldValsRes.error) {
-      return NextResponse.json({ error: customFieldValsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (trustDetailsRes.error) {
-      return NextResponse.json({ error: trustDetailsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relsFromEntityRes.error) {
-      return NextResponse.json({ error: relsFromEntityRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (relsToEntityRes.error) {
-      return NextResponse.json({ error: relsToEntityRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (capTableRes.error) {
-      return NextResponse.json({ error: capTableRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (partnershipRepsRes.error) {
-      return NextResponse.json({ error: partnershipRepsRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (entityRolesRes.error) {
-      return NextResponse.json({ error: entityRolesRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (complianceRes.error) {
-      return NextResponse.json({ error: complianceRes.error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Merge custom field definitions with their values
@@ -394,7 +394,7 @@ export async function PUT(
           { status: 409 }
         );
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Audit log
@@ -448,7 +448,7 @@ export async function DELETE(
       .eq("organization_id", orgId);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Audit log

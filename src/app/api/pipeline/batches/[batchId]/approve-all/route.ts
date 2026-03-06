@@ -43,7 +43,7 @@ export async function POST(
       .eq("status", "review_ready");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!items || items.length === 0) {
