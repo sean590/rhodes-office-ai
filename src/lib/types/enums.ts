@@ -12,7 +12,6 @@ export type InvestorType = 'individual' | 'entity' | 'external_fund' | 'family_o
 export type FilingType = 'annual_report' | 'biennial_report' | 'statement_of_information' | 'franchise_tax' | 'annual_list' | 'periodic_report' | 'foreign_qualification_renewal' | 'business_license' | 'publication' | 'registered_agent' | 'estimated_fee' | 'commerce_tax' | 'information_report' | 'decennial_report' | 'business_entity_tax' | 'statement_of_info' | 'other';
 export type FilingStatus = 'current' | 'due_soon' | 'overdue' | 'not_required' | 'exempt';
 export type CustomFieldType = 'text' | 'checkbox' | 'date' | 'number' | 'dropdown' | 'url';
-export type UserRole = 'admin' | 'editor' | 'viewer';
 export type OrgRole = 'owner' | 'admin' | 'member' | 'viewer';
 
 // Document types are now database-driven (document_types table).

@@ -12,7 +12,6 @@ export async function GET() {
       return NextResponse.json({
         id: currentUser.id,
         email: currentUser.email,
-        role: currentUser.role,
         display_name: currentUser.display_name,
         avatar_url: currentUser.avatar_url,
         orgId: currentUser.orgId,
@@ -30,30 +29,19 @@ export async function GET() {
 
     const admin = createAdminClient();
 
-    // Auto-create profile if it doesn't exist
-    // Check if any admins exist — first user gets admin role
-    const { count: adminCount } = await admin
-      .from("user_profiles")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "admin");
-
-    const role = adminCount === 0 ? "admin" : "viewer";
-
     const { data: newProfile } = await admin
       .from("user_profiles")
       .insert({
         id: user.id,
-        role,
         display_name: user.user_metadata?.full_name || user.user_metadata?.name || null,
         avatar_url: user.user_metadata?.avatar_url || null,
       })
-      .select("role, display_name, avatar_url")
+      .select("display_name, avatar_url")
       .single();
 
     return NextResponse.json({
       id: user.id,
       email: user.email || "",
-      role: newProfile?.role || role,
       display_name: newProfile?.display_name || null,
       avatar_url: newProfile?.avatar_url || null,
       orgId: "",
