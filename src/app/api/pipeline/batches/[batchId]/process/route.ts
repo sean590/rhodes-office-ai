@@ -76,7 +76,7 @@ export async function POST(
     });
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "process_batch",

@@ -40,7 +40,7 @@ export async function GET(
 
     // Audit log (downloads are audited even though this is a GET)
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "download",

@@ -11,7 +11,7 @@ export async function PATCH(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { user } = ctx;
+    const { user, orgId } = ctx;
 
     const { itemId } = await params;
     const admin = createAdminClient();
@@ -60,7 +60,7 @@ export async function PATCH(
     }
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "edit",

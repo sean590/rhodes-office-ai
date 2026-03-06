@@ -32,12 +32,13 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
   }
 }
 
-export function getRequestContext(headers: Headers) {
+export function getRequestContext(headers: Headers, organizationId?: string) {
   return {
     ipAddress:
       headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       headers.get("x-real-ip") ??
       null,
     userAgent: headers.get("user-agent") ?? null,
+    ...(organizationId ? { organizationId } : {}),
   };
 }

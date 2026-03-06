@@ -10,7 +10,7 @@ export async function POST(request: Request) {
   try {
     const orgCtx = await requireOrg();
     if (isError(orgCtx)) return orgCtx;
-    const { orgId: _orgId } = orgCtx;
+    const { orgId } = orgCtx;
 
     const supabase = await createClient();
     const admin = createAdminClient();
@@ -81,7 +81,7 @@ export async function POST(request: Request) {
     }
 
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const ctx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "invite",

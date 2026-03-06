@@ -209,7 +209,7 @@ export async function POST(
       .eq("id", batchId);
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "upload",

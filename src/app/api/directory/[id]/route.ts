@@ -52,7 +52,7 @@ export async function PUT(
     }
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "edit",
@@ -215,7 +215,7 @@ export async function DELETE(
     }
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "delete",

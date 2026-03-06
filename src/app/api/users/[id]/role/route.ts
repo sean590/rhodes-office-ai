@@ -68,7 +68,7 @@ export async function PUT(
     }
 
     const reqHeaders = await headers();
-    const ctx = getRequestContext(reqHeaders);
+    const ctx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "role_change",

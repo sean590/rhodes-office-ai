@@ -11,7 +11,7 @@ export async function POST(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { user } = ctx;
+    const { user, orgId } = ctx;
 
     const { itemId } = await params;
     const admin = createAdminClient();
@@ -36,7 +36,7 @@ export async function POST(
     }
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: user.id,
       action: "reject",

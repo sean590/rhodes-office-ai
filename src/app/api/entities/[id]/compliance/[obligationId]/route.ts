@@ -121,7 +121,7 @@ export async function PUT(
     }
 
     const reqHeaders = await headers();
-    const reqCtx = getRequestContext(reqHeaders);
+    const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
       userId: orgCtx.user?.id ?? null,
       action: "update_obligation",
