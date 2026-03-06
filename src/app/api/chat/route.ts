@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const supabase = await createClient();
     const admin = createAdminClient();
 
-    if (!rateLimit(`chat:${user.id}`, 20, 60000)) {
+    if (!(await rateLimit(`chat:${user.id}`, 20, 60000))) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 

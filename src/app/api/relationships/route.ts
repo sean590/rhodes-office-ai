@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
@@ -13,12 +13,17 @@ export async function GET() {
 
     const supabase = await createClient();
 
-    // Fetch all relationships
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+    // Fetch relationships
     const { data: relationships, error } = await supabase
       .from("relationships")
       .select("*")
       .eq("organization_id", orgId)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -93,7 +98,9 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json(enriched);
+    return NextResponse.json(enriched, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/relationships error:", err);
     return NextResponse.json(

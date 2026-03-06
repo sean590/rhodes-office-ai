@@ -21,7 +21,7 @@ export async function POST(
     const { id } = await params;
     const admin = createAdminClient();
 
-    if (!rateLimit(`process:${user.id}`, 10, 60000)) {
+    if (!(await rateLimit(`process:${user.id}`, 10, 60000))) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 

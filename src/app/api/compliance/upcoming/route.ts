@@ -30,7 +30,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    return NextResponse.json({ obligations: obligations || [] });
+    return NextResponse.json({ obligations: obligations || [] }, {
+      headers: { "Cache-Control": "private, max-age=300" },
+    });
   } catch (err) {
     console.error("GET /api/compliance/upcoming error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

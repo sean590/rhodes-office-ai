@@ -25,8 +25,8 @@ export default function InvitePage() {
   useEffect(() => {
     async function load() {
       try {
-        // Check if logged in
-        const meRes = await fetch("/api/auth/me");
+        // Check if logged in (manual redirect to prevent following proxy redirect to /login)
+        const meRes = await fetch("/api/auth/me", { redirect: "manual" });
         setIsLoggedIn(meRes.ok);
 
         // Fetch invite details

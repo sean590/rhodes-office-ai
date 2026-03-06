@@ -8,7 +8,7 @@ import { headers } from "next/headers";
 import type { DocumentType } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
@@ -16,13 +16,18 @@ export async function GET() {
 
     const admin = createAdminClient();
 
-    // Fetch all documents with entity names
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+    // Fetch documents with entity names (omit heavy ai_extraction JSONB for list view)
     const { data: docs, error } = await admin
       .from("documents")
-      .select("*, entities(name)")
+      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, status, created_at, updated_at, organization_id, entities(name)")
       .eq("organization_id", orgId)
       .is("deleted_at", null)
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -31,11 +36,13 @@ export async function GET() {
     // Flatten entity name into each doc
     const result = (docs || []).map((doc) => ({
       ...doc,
-      entity_name: (doc.entities as { name: string } | null)?.name || null,
+      entity_name: (doc.entities as unknown as { name: string } | null)?.name || null,
       entities: undefined,
     }));
 
-    return NextResponse.json(result);
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/documents error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

@@ -1,6 +1,32 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { Redis } from "@upstash/redis";
+
+const CACHE_TTL_SEC = 300; // 5 minutes
+
+let redis: Redis | null = null;
+function getRedis(): Redis | null {
+  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
+  if (!redis) {
+    redis = new Redis({
+      url: process.env.KV_REST_API_URL,
+      token: process.env.KV_REST_API_TOKEN,
+    });
+  }
+  return redis;
+}
 
 export async function buildChatContext(orgId: string) {
+  const client = getRedis();
+  const cacheKey = `chat-ctx:${orgId}`;
+
+  if (client) {
+    try {
+      const cached = await client.get<string>(cacheKey);
+      if (cached) return cached;
+    } catch {
+      // Redis unavailable, fall through to rebuild
+    }
+  }
   const supabase = createAdminClient();
 
   // Step 1: Fetch org-scoped entities first to get entity IDs for sub-table filtering
@@ -186,6 +212,14 @@ When referencing documents, use the document name and include the year if availa
   }
 
   context += `\nAnswer questions about entities, relationships, compliance, organizational structure, and documents. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.`;
+
+  if (client) {
+    try {
+      await client.set(cacheKey, context, { ex: CACHE_TTL_SEC });
+    } catch {
+      // Redis unavailable, context still returned normally
+    }
+  }
 
   return context;
 }

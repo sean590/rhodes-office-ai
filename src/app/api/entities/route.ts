@@ -9,7 +9,7 @@ import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 import type { Jurisdiction } from "@/lib/types";
 
-export async function GET() {
+export async function GET(request: Request) {
   const ctx = await requireOrg();
   if (isError(ctx)) return ctx;
   const { orgId } = ctx;
@@ -17,13 +17,18 @@ export async function GET() {
   try {
     const supabase = await createClient();
 
-    // Fetch all entities (exclude soft-deleted)
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+    const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+
+    // Fetch entities (exclude soft-deleted, omit heavy text fields for list view)
     const { data: entities, error: entitiesError } = await supabase
       .from("entities")
-      .select("*")
+      .select("id, name, type, status, ein, formation_state, formed_date, registered_agent, short_name, parent_entity_id, legal_structure, organization_id, created_at, updated_at")
       .eq("organization_id", orgId)
       .neq("status", "deleted")
-      .order("name");
+      .order("name")
+      .range(offset, offset + limit - 1);
 
     if (entitiesError) {
       return NextResponse.json({ error: entitiesError.message }, { status: 500 });
@@ -154,7 +159,9 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json(enriched);
+    return NextResponse.json(enriched, {
+      headers: { "Cache-Control": "private, max-age=30" },
+    });
   } catch (err) {
     console.error("GET /api/entities error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -227,7 +234,7 @@ export async function POST(request: Request) {
           { status: 409 }
         );
       }
-      return NextResponse.json({ error: entityError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Create the initial registration for the formation state
