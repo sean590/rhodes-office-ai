@@ -24,7 +24,7 @@ export async function GET(request: Request) {
     // Fetch documents with entity names (omit heavy ai_extraction JSONB for list view)
     const { data: docs, error } = await admin
       .from("documents")
-      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, status, created_at, updated_at, organization_id, entities(name)")
+      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name)")
       .eq("organization_id", orgId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
