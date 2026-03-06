@@ -23,7 +23,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co",
               "font-src 'self' https://fonts.gstatic.com",
-              "connect-src 'self' https://*.supabase.co https://api.anthropic.com https://*.ingest.sentry.io",
+              "connect-src 'self' https://*.supabase.co https://*.rhodesoffice.ai https://api.anthropic.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
               "frame-ancestors 'none'",
             ].join("; "),
           },

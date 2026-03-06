@@ -40,7 +40,7 @@ export async function POST(request: Request) {
       });
 
     if (saveError) {
-      return NextResponse.json({ error: saveError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Get message history
@@ -53,9 +53,10 @@ export async function POST(request: Request) {
     // Build context
     let systemPrompt = await buildChatContext(orgId);
 
-    // Append page context if provided
+    // Append page context if provided (sanitize user-supplied values)
+    const sanitize = (s: string) => s.replace(/[<>"'`\\]/g, "").slice(0, 255);
     if (page_context?.entityId && page_context?.entityName) {
-      systemPrompt += `\n\nThe user is currently viewing the entity detail page for "${page_context.entityName}" (ID: ${page_context.entityId}). If they ask questions like "what are the managers?" or refer to "this entity," they mean this entity.`;
+      systemPrompt += `\n\nThe user is currently viewing the entity detail page for "${sanitize(page_context.entityName)}" (ID: ${sanitize(page_context.entityId)}). If they ask questions like "what are the managers?" or refer to "this entity," they mean this entity.`;
     } else if (page_context?.page === "documents_list") {
       systemPrompt += `\n\nThe user is currently viewing the Documents page.`;
       if (page_context.filters?.entityId) {

@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { createRelationshipSchema } from "@/lib/validations";
 
 export async function GET(request: Request) {
   try {
@@ -119,6 +120,11 @@ export async function POST(request: Request) {
     const supabase = createAdminClient();
     const body = await request.json();
 
+    const parsed = createRelationshipSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
+    }
+
     const {
       type,
       description,
@@ -133,14 +139,7 @@ export async function POST(request: Request) {
       annual_estimate,
       document_ref,
       notes,
-    } = body;
-
-    if (!type) {
-      return NextResponse.json(
-        { error: "Type is required" },
-        { status: 400 }
-      );
-    }
+    } = parsed.data;
 
     // Must have at least one "from" and one "to" party
     if (!from_entity_id && !from_directory_id) {

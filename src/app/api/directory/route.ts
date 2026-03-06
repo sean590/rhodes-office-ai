@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { createDirectoryEntrySchema } from "@/lib/validations";
 
 export async function GET(request: Request) {
   try {
@@ -163,14 +164,12 @@ export async function POST(request: Request) {
     const supabase = createAdminClient();
     const body = await request.json();
 
-    const { name, type, email, aliases } = body;
-
-    if (!name || !type) {
-      return NextResponse.json(
-        { error: "Name and type are required" },
-        { status: 400 }
-      );
+    const parsed = createDirectoryEntrySchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: parsed.error.issues[0].message }, { status: 400 });
     }
+
+    const { name, type, email, aliases } = parsed.data;
 
     const { data, error } = await supabase
       .from("directory_entries")
@@ -179,7 +178,7 @@ export async function POST(request: Request) {
         name,
         type,
         email: email || null,
-        aliases: Array.isArray(aliases) ? aliases.filter((a: string) => a.trim()) : [],
+        aliases: aliases ? aliases.filter((a: string) => a.trim()) : [],
       })
       .select()
       .single();

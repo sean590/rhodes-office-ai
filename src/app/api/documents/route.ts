@@ -6,6 +6,7 @@ import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 import type { DocumentType } from "@/lib/types/enums";
+import { validateUploadedFile } from "@/lib/validations";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function GET(request: Request) {
@@ -73,6 +74,11 @@ export async function POST(request: Request) {
 
     if (!file) {
       return NextResponse.json({ error: "File is required" }, { status: 400 });
+    }
+
+    const fileCheck = validateUploadedFile(file);
+    if (!fileCheck.valid) {
+      return NextResponse.json({ error: fileCheck.error }, { status: 400 });
     }
 
     if (!documentCategory) {

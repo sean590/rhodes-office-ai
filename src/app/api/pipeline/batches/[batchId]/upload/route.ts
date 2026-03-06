@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pipeline/classify";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { validateUploadedFile } from "@/lib/validations";
 
 async function computeHash(buffer: ArrayBuffer): Promise<string> {
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
@@ -58,6 +59,12 @@ export async function POST(
     const duplicates: Array<{ filename: string; reason: string }> = [];
 
     for (const file of files) {
+      const fileCheck = validateUploadedFile(file);
+      if (!fileCheck.valid) {
+        duplicates.push({ filename: file.name, reason: fileCheck.error });
+        continue;
+      }
+
       const buffer = await file.arrayBuffer();
       const contentHash = await computeHash(buffer);
 

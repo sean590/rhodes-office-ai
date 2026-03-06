@@ -7,6 +7,7 @@ import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import type { DocumentType } from "@/lib/types/enums";
+import { validateUploadedFile } from "@/lib/validations";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function GET(
@@ -74,6 +75,11 @@ export async function POST(
 
     if (!file) {
       return NextResponse.json({ error: "File is required" }, { status: 400 });
+    }
+
+    const fileCheck = validateUploadedFile(file);
+    if (!fileCheck.valid) {
+      return NextResponse.json({ error: fileCheck.error }, { status: 400 });
     }
 
     if (!documentCategory) {
@@ -211,7 +217,7 @@ export async function POST(
     if (dbError) {
       // Clean up uploaded file if DB insert fails
       await admin.storage.from("documents").remove([filePath]);
-      return NextResponse.json({ error: dbError.message }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // If relationship_id provided, create junction record
