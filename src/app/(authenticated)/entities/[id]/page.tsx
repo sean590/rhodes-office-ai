@@ -4948,17 +4948,38 @@ export default function EntityDetailPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               {activityLog.map((entry) => {
                 const actionLabels: Record<string, string> = {
-                  create: "Created",
-                  edit: "Edited",
-                  delete: "Deleted",
-                  upload: "Uploaded document",
-                  download: "Downloaded document",
-                  process: "Processed document",
-                  apply_extraction: "Applied AI extraction",
-                  update_obligation: "Updated obligation",
+                  create: "Added",
+                  edit: "Updated",
+                  delete: "Removed",
+                  upload: "Uploaded",
+                  download: "Downloaded",
+                  process: "Processed",
+                  apply_extraction: "Applied AI extraction to",
+                  update_obligation: "Updated",
+                  role_change: "Changed role for",
+                  reject: "Rejected",
+                  approve: "Approved",
+                };
+                const resourceLabels: Record<string, string> = {
+                  entity: "entity",
+                  entity_role: "role",
+                  entity_registration: "registration",
+                  entity_member: "member",
+                  entity_manager: "manager",
+                  document: "document",
+                  trust_details: "trust details",
+                  trust_role: "trust role",
+                  cap_table_entry: "cap table entry",
+                  partnership_rep: "partnership representative",
+                  custom_field: "custom field",
+                  compliance_obligation: "compliance obligation",
+                  relationship: "relationship",
+                  pipeline_item: "pipeline item",
+                  pipeline: "pipeline batch",
+                  user: "user",
                 };
                 const label = actionLabels[entry.action] || entry.action;
-                const resourceLabel = entry.resource_type === "document" ? "document" : "entity";
+                const resourceLabel = resourceLabels[entry.resource_type] || entry.resource_type;
                 const time = new Date(entry.created_at);
                 const timeStr = time.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
                   " at " + time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -4966,9 +4987,13 @@ export default function EntityDetailPage() {
                 // Extract useful metadata
                 const meta = entry.metadata || {};
                 const details: string[] = [];
+                if (meta.role_title) details.push(String(meta.role_title));
                 if (meta.name) details.push(String(meta.name));
+                if (meta.jurisdiction) details.push(String(meta.jurisdiction));
+                if (meta.fields_updated) details.push(`updated: ${(meta.fields_updated as string[]).join(", ")}`);
                 if (meta.fields) details.push(`fields: ${(meta.fields as string[]).join(", ")}`);
                 if (meta.action_count) details.push(`${meta.action_count} actions`);
+                if (meta.reason) details.push(String(meta.reason));
 
                 return (
                   <div
