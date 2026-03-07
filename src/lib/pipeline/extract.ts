@@ -400,20 +400,35 @@ export async function extractDocument(
 
   const maxTokens = options?.compositeDetection ? 8192 : 4096;
 
-  const claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: "user", content: userContent }],
-    }),
-  });
+  // 4-minute timeout — leaves room for error handling before Vercel's maxDuration
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 240_000);
+
+  let claudeResponse: Response;
+  try {
+    claudeResponse = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userContent }],
+      }),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    clearTimeout(timeout);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("AI processing timed out — the document may be too large. Try uploading individual sections.");
+    }
+    throw err;
+  }
+  clearTimeout(timeout);
 
   if (!claudeResponse.ok) {
     const errorText = await claudeResponse.text();
