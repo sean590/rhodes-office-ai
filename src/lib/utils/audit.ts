@@ -15,7 +15,7 @@ interface AuditEvent {
 export async function logAuditEvent(event: AuditEvent): Promise<void> {
   try {
     const supabase = createAdminClient();
-    await supabase.from("audit_log").insert({
+    const { error } = await supabase.from("audit_log").insert({
       user_id: event.userId,
       action: event.action,
       resource_type: event.resourceType,
@@ -26,6 +26,9 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
       session_id: event.sessionId ?? null,
       organization_id: event.organizationId ?? null,
     });
+    if (error) {
+      console.error("[AUDIT] Insert failed:", error.message, error.code, error.details, event);
+    }
   } catch (err) {
     console.error("[AUDIT] Failed to log event:", err, event);
     // Never throw — audit failures must not block the primary operation
