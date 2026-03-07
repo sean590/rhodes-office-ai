@@ -80,6 +80,7 @@ export async function processQueueItem(
 
   try {
     // 3. Download file from storage
+    console.log(`[PIPELINE] ${itemId}: downloading file ${item.file_path}`);
     const { data: fileData, error: downloadError } = await admin.storage
       .from("documents")
       .download(item.file_path);
@@ -87,11 +88,14 @@ export async function processQueueItem(
     if (downloadError || !fileData) {
       throw new Error(`Failed to download file: ${downloadError?.message || "No data"}`);
     }
+    console.log(`[PIPELINE] ${itemId}: downloaded ${item.original_filename}`);
 
     // 4. Get DB context (use cached if provided, otherwise fetch org-scoped)
     const batchData = item.document_batches;
     const batchOrgId = batchData?.organization_id as string;
+    console.log(`[PIPELINE] ${itemId}: fetching DB context (cached=${!!cachedDbContext}, orgId=${batchOrgId})`);
     const dbContext = cachedDbContext ?? await getDbContext(admin, batchOrgId);
+    console.log(`[PIPELINE] ${itemId}: DB context ready (${(dbContext.entities as unknown[]).length} entities)`);
 
     // 5. Determine options
     const entityDiscovery = batchData?.entity_discovery ?? false;
@@ -101,6 +105,7 @@ export async function processQueueItem(
       (item.staged_category === "tax" && item.mime_type === "application/pdf");
 
     // 6. Call shared extraction
+    console.log(`[PIPELINE] ${itemId}: calling Claude API (composite=${isCompositeCandidate})`);
     const result = await extractDocument(
       fileData,
       item.mime_type,
@@ -113,6 +118,7 @@ export async function processQueueItem(
         compositeDetection: isCompositeCandidate,
       }
     );
+    console.log(`[PIPELINE] ${itemId}: extraction complete (tokens=${result.tokens_used}, entity=${result.entity_id})`);
 
     // 7. Handle dynamic document type creation
     if (result.is_new_document_type && result.document_type && result.new_type_label) {
@@ -358,8 +364,11 @@ export async function processBatch(
     .order("created_at");
 
   if (error || !items || items.length === 0) {
+    console.log(`[PIPELINE] Batch ${batchId}: no queued items found (error=${!!error})`);
     return;
   }
+
+  console.log(`[PIPELINE] Batch ${batchId}: processing ${items.length} items`);
 
   // Fetch batch org ID for scoped DB context
   const { data: batch } = await admin
@@ -369,7 +378,9 @@ export async function processBatch(
     .single();
 
   // Pre-fetch DB context once for the entire batch (org-scoped)
+  console.log(`[PIPELINE] Batch ${batchId}: fetching DB context for org ${batch?.organization_id}`);
   const dbContext = await getDbContext(admin, batch?.organization_id ?? undefined);
+  console.log(`[PIPELINE] Batch ${batchId}: DB context ready`);
 
   // Process with semaphore-controlled concurrency
   const itemIds = items.map((i) => i.id);
