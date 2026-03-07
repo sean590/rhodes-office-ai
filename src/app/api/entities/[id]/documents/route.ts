@@ -31,7 +31,7 @@ export async function GET(
 
     const { data, error } = await supabase
       .from("documents")
-      .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, entity_id, direction, created_at, updated_at")
+      .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
       .eq("entity_id", id)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })

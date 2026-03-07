@@ -35,7 +35,7 @@ export async function getDbContext(supabase: ReturnType<typeof createAdminClient
   // Phase 1: Fetch org-scoped root tables + entities (need entity IDs for sub-table filtering)
   const entitiesQuery = supabase
     .from("entities")
-    .select("id, name, type, ein, formation_state, status, business_purpose")
+    .select("id, name, short_name, type, ein, formation_state, status, business_purpose")
     .order("name");
   const directoryQuery = supabase
     .from("directory_entries")
@@ -124,8 +124,8 @@ Your job is to read the document and propose specific, actionable changes to the
 
 ## Current Database State
 
-### Entities (${(dbContext.entities as Array<{id: string; name: string; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).length} total)
-${(dbContext.entities as Array<{id: string; name: string; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).map((e) => `- ${e.name} (id: ${e.id}, type: ${e.type}, EIN: ${e.ein || 'N/A'}, state: ${e.formation_state}, status: ${e.status}${e.business_purpose ? `, purpose: ${e.business_purpose}` : ''})`).join('\n')}
+### Entities (${(dbContext.entities as Array<{id: string; name: string; short_name: string | null; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).length} total)
+${(dbContext.entities as Array<{id: string; name: string; short_name: string | null; type: string; ein: string | null; formation_state: string; status: string; business_purpose: string | null}>).map((e) => `- ${e.name}${e.short_name ? ` (aka "${e.short_name}")` : ''} (id: ${e.id}, type: ${e.type}, EIN: ${e.ein || 'N/A'}, state: ${e.formation_state}, status: ${e.status}${e.business_purpose ? `, purpose: ${e.business_purpose}` : ''})`).join('\n')}
 
 ### Directory Entries (${(dbContext.directory as Array<{id: string; name: string; type: string; email: string | null; aliases: string[] | null}>).length} total)
 ${(dbContext.directory as Array<{id: string; name: string; type: string; email: string | null; aliases: string[] | null}>).map((d) => `- ${d.name}${d.aliases && d.aliases.length > 0 ? ` (AKA: ${d.aliases.join(', ')})` : ''} (id: ${d.id}, type: ${d.type}, email: ${d.email || 'N/A'})`).join('\n')}
