@@ -202,7 +202,7 @@ For "entity_match_confidence":
 
 - **create_entity**: { "name": string, "type": "holding_company"|"investment_fund"|"operating_company"|"real_estate"|"special_purpose"|"management_company"|"trust"|"other", "ein": string|null, "formation_state": "XX", "formed_date": "YYYY-MM-DD"|null, "address": string|null, "registered_agent": string|null, "notes": string|null, "business_purpose": string|null }
 - **update_entity**: { "entity_id": "uuid", "fields": { field: value, ... } }
-- **create_relationship**: { "from_entity_id": "uuid"|null, "from_directory_id": "uuid"|null, "to_entity_id": "uuid"|null, "to_directory_id": "uuid"|null, "type": string, "description": string, "terms": string|null, "frequency": string|null, "annual_estimate": number|null }
+- **create_relationship**: { "from_entity_id": "uuid"|null, "from_directory_id": "uuid"|null, "to_entity_id": "uuid"|null, "to_directory_id": "uuid"|null, "type": "profit_share"|"fixed_fee"|"management_fee"|"performance_fee"|"equity"|"loan"|"guarantee"|"service_agreement"|"license"|"lease"|"purchase_agreement"|"subscription_agreement"|"operating_agreement"|"trust_agreement"|"consulting"|"insurance"|"other", "description": string, "terms": string|null, "frequency": string|null, "annual_estimate": number|null }
 - **add_member**: { "entity_id": "uuid", "name": string }
 - **add_manager**: { "entity_id": "uuid", "name": string }
 - **add_registration**: { "entity_id": "uuid", "jurisdiction": "XX", "qualification_date": "YYYY-MM-DD"|null, "last_filing_date": "YYYY-MM-DD"|null, "state_id": string|null }

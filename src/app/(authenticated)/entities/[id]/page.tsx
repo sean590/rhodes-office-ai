@@ -3419,6 +3419,7 @@ function DocumentsTab({
       }
 
       const docId = aiReviewDocId;
+      setDismissedDocIds((prev) => new Set([...prev, docId]));
       setAiReviewDocId(null);
       setAiActions((prev) => {
         const next = { ...prev };
