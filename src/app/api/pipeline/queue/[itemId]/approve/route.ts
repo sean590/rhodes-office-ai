@@ -6,7 +6,7 @@ import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ itemId: string }> }
 ) {
   try {
@@ -16,6 +16,18 @@ export async function POST(
 
     const { itemId } = await params;
     const admin = createAdminClient();
+
+    // Parse optional excluded_actions from request body
+    let excludedActionIndices: number[] = [];
+    const contentType = request.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      try {
+        const body = await request.json();
+        if (Array.isArray(body?.excluded_actions)) {
+          excludedActionIndices = body.excluded_actions.filter((i: unknown) => typeof i === "number");
+        }
+      } catch { /* empty body is fine */ }
+    }
 
     const { data: userRow } = await admin
       .from("users")
@@ -149,6 +161,14 @@ export async function POST(
           }
         }
       }
+    }
+
+    // Filter out excluded actions before ingesting
+    if (excludedActionIndices.length > 0 && Array.isArray(item.ai_proposed_actions)) {
+      const excludedSet = new Set(excludedActionIndices);
+      item.ai_proposed_actions = (item.ai_proposed_actions as unknown[]).filter(
+        (_: unknown, i: number) => !excludedSet.has(i)
+      );
     }
 
     const result = await ingestQueueItem({

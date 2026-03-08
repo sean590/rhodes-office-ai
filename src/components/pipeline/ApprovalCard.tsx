@@ -8,13 +8,15 @@ import type { QueueItem } from "@/lib/types/entities";
 interface ApprovalCardProps {
   item: QueueItem;
   entities: Array<{ id: string; name: string }>;
-  onApprove: (itemId: string) => Promise<void>;
+  onApprove: (itemId: string, excludedActionIndices?: number[]) => Promise<void>;
   onIngestOnly: (itemId: string) => Promise<void>;
   onAssignEntity: (itemId: string, entityId: string) => Promise<void>;
 }
 
 export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssignEntity }: ApprovalCardProps) {
   const [loading, setLoading] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [unchecked, setUnchecked] = useState<Set<number>>(new Set());
   const [selectedEntityId, setSelectedEntityId] = useState(item.staged_entity_id || "");
 
   // Sync when staged_entity_id updates (e.g. after sibling entity creation)
@@ -111,13 +113,36 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
     const entityId = item.ai_entity_id;
     const entity = entities.find((e) => e.id === entityId);
     const entityName = entity?.name || item.staged_entity_name || "Unknown Entity";
+    const selectedCount = actions.length - unchecked.size;
+
+    const toggleAction = (index: number) => {
+      setUnchecked((prev) => {
+        const next = new Set(prev);
+        if (next.has(index)) next.delete(index);
+        else next.add(index);
+        return next;
+      });
+    };
+
     return (
       <div style={{ border: "1px solid #e8e6df", borderRadius: 8, padding: 16, marginBottom: 12, background: "#fafaf7" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
           <span style={{ color: "#b08000", fontSize: 14 }}>&#9888;</span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", flex: 1 }}>
             Database Changes: &ldquo;{entityName}&rdquo;
           </span>
+          {actions.length > 1 && (
+            <button
+              onClick={() => { setEditing(!editing); setUnchecked(new Set()); }}
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: 4,
+                color: editing ? "#2d5a3d" : "#9494a0", fontSize: 14,
+              }}
+              title={editing ? "Cancel editing" : "Select individual changes"}
+            >
+              &#9998;
+            </button>
+          )}
         </div>
         <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
           AI extracted data that would update this entity.
@@ -128,13 +153,42 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
           </div>
           <div style={{ fontSize: 12, color: "#6b6b76" }}>
             {actions.map((a, i) => (
-              <div key={i} style={{ marginBottom: 2 }}>&#8226; {formatAction(a)}</div>
+              <div
+                key={i}
+                style={{
+                  marginBottom: 4,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  opacity: editing && unchecked.has(i) ? 0.4 : 1,
+                }}
+              >
+                {editing ? (
+                  <input
+                    type="checkbox"
+                    checked={!unchecked.has(i)}
+                    onChange={() => toggleAction(i)}
+                    style={{ margin: 0, cursor: "pointer", accentColor: "#2d5a3d" }}
+                  />
+                ) : (
+                  <span>&#8226;</span>
+                )}
+                <span>{formatAction(a)}</span>
+              </div>
             ))}
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Button size="sm" variant="primary" disabled={loading} onClick={() => handleAction(() => onApprove(item.id))}>
-            {loading ? "Applying..." : "Approve Changes"}
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={loading || (editing && selectedCount === 0)}
+            onClick={() => handleAction(() => {
+              const excluded = unchecked.size > 0 ? Array.from(unchecked) : undefined;
+              return onApprove(item.id, excluded);
+            })}
+          >
+            {loading ? "Applying..." : editing && unchecked.size > 0 ? `Approve ${selectedCount}/${actions.length} Changes` : "Approve Changes"}
           </Button>
           <Button size="sm" variant="secondary" disabled={loading} onClick={() => handleAction(() => onIngestOnly(item.id))}>
             Ingest Only

@@ -122,9 +122,15 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   }, [fetchBatch]);
 
   // --- Actions ---
-  const approveItem = async (itemId: string) => {
+  const approveItem = async (itemId: string, excludedActionIndices?: number[]) => {
     try {
-      const res = await fetch(`/api/pipeline/queue/${itemId}/approve`, { method: "POST" });
+      const fetchOptions: RequestInit = {
+        method: "POST",
+        ...(excludedActionIndices && excludedActionIndices.length > 0
+          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_actions: excludedActionIndices }) }
+          : {}),
+      };
+      const res = await fetch(`/api/pipeline/queue/${itemId}/approve`, fetchOptions);
       if (res.ok) {
         const data = await res.json();
         // If a new entity was created, refresh the entities list
