@@ -4946,53 +4946,118 @@ export default function EntityDetailPage() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
               {activityLog.map((entry) => {
-                const actionLabels: Record<string, string> = {
-                  create: "Added",
-                  edit: "Updated",
-                  delete: "Removed",
-                  upload: "Uploaded",
-                  download: "Downloaded",
-                  process: "Processed",
-                  apply_extraction: "Applied AI extraction to",
-                  update_obligation: "Updated",
-                  role_change: "Changed role for",
-                  reject: "Rejected",
-                  approve: "Approved",
-                };
-                const resourceLabels: Record<string, string> = {
-                  entity: "entity",
-                  entity_role: "role",
-                  entity_registration: "registration",
-                  entity_member: "member",
-                  entity_manager: "manager",
-                  document: "document",
-                  trust_details: "trust details",
-                  trust_role: "trust role",
-                  cap_table_entry: "cap table entry",
-                  partnership_rep: "partnership representative",
-                  custom_field: "custom field",
-                  compliance_obligation: "compliance obligation",
-                  relationship: "relationship",
-                  pipeline_item: "pipeline item",
-                  pipeline: "pipeline batch",
-                  user: "user",
-                };
-                const label = actionLabels[entry.action] || entry.action;
-                const resourceLabel = resourceLabels[entry.resource_type] || entry.resource_type;
+                const meta = entry.metadata || {};
                 const time = new Date(entry.created_at);
                 const timeStr = time.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
                   " at " + time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-                // Extract useful metadata
-                const meta = entry.metadata || {};
-                const details: string[] = [];
-                if (meta.role_title) details.push(String(meta.role_title));
-                if (meta.name) details.push(String(meta.name));
-                if (meta.jurisdiction) details.push(String(meta.jurisdiction));
-                if (meta.fields_updated) details.push(`updated: ${(meta.fields_updated as string[]).join(", ")}`);
-                if (meta.fields) details.push(`fields: ${(meta.fields as string[]).join(", ")}`);
-                if (meta.action_count) details.push(`${meta.action_count} actions`);
-                if (meta.reason) details.push(String(meta.reason));
+                // Build a human-readable description of what happened
+                let title = "";
+                let detail = "";
+
+                const a = entry.action;
+                const rt = entry.resource_type;
+
+                if (a === "create" && rt === "entity") {
+                  title = "Entity created";
+                  if (meta.name) detail = `${meta.name} (${meta.type || "entity"})`;
+                } else if (a === "edit" && rt === "entity") {
+                  title = "Entity updated";
+                  if (meta.fields) detail = `Changed: ${(meta.fields as string[]).join(", ")}`;
+                } else if (a === "delete" && rt === "entity") {
+                  title = "Entity deleted";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "entity_role") {
+                  title = `Added role: ${meta.role_title || "role"}`;
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "delete" && rt === "entity_role") {
+                  title = `Removed role: ${meta.role_title || "role"}`;
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "entity_member") {
+                  title = "Added member";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "delete" && rt === "entity_member") {
+                  title = "Removed member";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "entity_manager") {
+                  title = "Added manager";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "delete" && rt === "entity_manager") {
+                  title = "Removed manager";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "entity_registration") {
+                  title = "Added registration";
+                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
+                } else if (a === "edit" && rt === "entity_registration") {
+                  title = "Updated registration";
+                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
+                } else if (a === "delete" && rt === "entity_registration") {
+                  title = "Removed registration";
+                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
+                } else if (a === "upload" && rt === "document") {
+                  title = "Uploaded document";
+                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
+                } else if (a === "delete" && rt === "document") {
+                  title = "Deleted document";
+                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
+                } else if (a === "download" && rt === "document") {
+                  title = "Downloaded document";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "apply_extraction") {
+                  const applied = meta.applied as number || 0;
+                  const failed = meta.failed as number || 0;
+                  title = `Applied AI extraction (${applied} change${applied !== 1 ? "s" : ""}${failed > 0 ? `, ${failed} failed` : ""})`;
+                  if (Array.isArray(meta.changes) && meta.changes.length > 0) {
+                    detail = (meta.changes as string[]).join("; ");
+                  }
+                } else if (a === "dismiss_extraction") {
+                  title = "Dismissed AI suggestions";
+                } else if (a === "process") {
+                  title = "Processed document with AI";
+                  if (meta.action_count) detail = `${meta.action_count} changes proposed`;
+                } else if (a === "approve" && rt === "pipeline_item") {
+                  title = "Approved pipeline item";
+                  if (meta.actions_applied) detail = `${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`;
+                } else if (a === "edit" && rt === "trust_details") {
+                  title = "Updated trust details";
+                  if (meta.fields_updated) detail = `Changed: ${(meta.fields_updated as string[]).join(", ")}`;
+                } else if (a === "create" && rt === "trust_role") {
+                  title = `Added trust role: ${meta.role || "role"}`;
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "delete" && rt === "trust_role") {
+                  title = `Removed trust role: ${meta.role || "role"}`;
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "cap_table_entry") {
+                  title = "Added cap table entry";
+                  if (meta.investor_name) detail = String(meta.investor_name);
+                } else if (a === "delete" && rt === "cap_table_entry") {
+                  title = "Removed cap table entry";
+                  if (meta.investor_name) detail = String(meta.investor_name);
+                } else if (a === "create" && rt === "partnership_rep") {
+                  title = "Added partnership representative";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "delete" && rt === "partnership_rep") {
+                  title = "Removed partnership representative";
+                  if (meta.name) detail = String(meta.name);
+                } else if (a === "create" && rt === "custom_field") {
+                  title = "Added custom field";
+                  if (meta.field_name) detail = String(meta.field_name);
+                } else if (a === "edit" && rt === "custom_field") {
+                  title = "Updated custom field";
+                } else if (a === "delete" && rt === "custom_field") {
+                  title = "Removed custom field";
+                } else if (a === "update_obligation" || (a === "edit" && rt === "compliance_obligation")) {
+                  title = "Updated compliance obligation";
+                  if (meta.status) detail = `Status: ${meta.status}`;
+                } else if (a === "create" && rt === "relationship") {
+                  title = "Created relationship";
+                } else if (a === "upload" && rt === "pipeline") {
+                  title = "Uploaded documents via pipeline";
+                  if (meta.file_count) detail = `${meta.file_count} file${meta.file_count !== 1 ? "s" : ""}`;
+                } else {
+                  // Fallback
+                  title = `${a} ${rt}`.replace(/_/g, " ");
+                }
 
                 return (
                   <div
@@ -5007,13 +5072,12 @@ export default function EntityDetailPage() {
                     }}
                   >
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: "#1a1a1f" }}>
-                        <span style={{ fontWeight: 500 }}>{label}</span>
-                        <span style={{ color: "#6b6b76" }}> {resourceLabel}</span>
+                      <div style={{ fontSize: 13, color: "#1a1a1f", fontWeight: 500 }}>
+                        {title}
                       </div>
-                      {details.length > 0 && (
-                        <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>
-                          {details.join(" · ")}
+                      {detail && (
+                        <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2, lineHeight: 1.4 }}>
+                          {detail}
                         </div>
                       )}
                     </div>

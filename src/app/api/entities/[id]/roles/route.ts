@@ -95,6 +95,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the role details before deleting
+    const { data: role } = await supabase
+      .from("entity_roles")
+      .select("role_title, name")
+      .eq("id", role_id)
+      .single();
+
     const { error } = await supabase
       .from("entity_roles")
       .delete()
@@ -113,7 +120,7 @@ export async function DELETE(
       resourceType: "entity_role",
       resourceId: id,
       entityId: id,
-      metadata: { role_id },
+      metadata: { role_id, role_title: role?.role_title, name: role?.name },
       ...reqCtx,
     });
 

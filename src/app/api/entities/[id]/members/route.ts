@@ -91,6 +91,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the member name before deleting
+    const { data: member } = await supabase
+      .from("entity_members")
+      .select("name")
+      .eq("id", member_id)
+      .single();
+
     // Verify the member belongs to this entity
     const { error } = await supabase
       .from("entity_members")
@@ -110,7 +117,7 @@ export async function DELETE(
       resourceType: "entity_member",
       resourceId: id,
       entityId: id,
-      metadata: { member_id },
+      metadata: { member_id, name: member?.name },
       ...reqCtx,
     });
 

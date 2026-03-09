@@ -91,6 +91,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the partnership rep name before deleting
+    const { data: rep } = await supabase
+      .from("entity_partnership_reps")
+      .select("name")
+      .eq("id", partnership_rep_id)
+      .single();
+
     const { error } = await supabase
       .from("entity_partnership_reps")
       .delete()
@@ -109,7 +116,7 @@ export async function DELETE(
       resourceType: "partnership_rep",
       resourceId: id,
       entityId: id,
-      metadata: { rep_id: partnership_rep_id },
+      metadata: { rep_id: partnership_rep_id, name: rep?.name },
       ...reqCtx,
     });
 

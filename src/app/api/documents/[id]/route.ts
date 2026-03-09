@@ -118,7 +118,7 @@ export async function DELETE(
       resourceType: "document",
       resourceId: id,
       entityId: doc.entity_id,
-      metadata: {},
+      metadata: { document_name: doc.name, document_type: doc.document_type },
       ...reqCtx,
     });
 

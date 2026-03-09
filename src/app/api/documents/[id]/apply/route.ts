@@ -79,16 +79,37 @@ export async function POST(
     // Audit log
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
+    // Summarize applied actions for audit trail
+    const actionSummaries = actions.map((a: { action: string; data: Record<string, unknown> }) => {
+      const d = a.data || {};
+      switch (a.action) {
+        case "create_directory_entry": return `Created directory entry: ${d.name}`;
+        case "create_relationship": return `Created relationship: ${d.type} — ${d.description || ""}`;
+        case "add_member": return `Added member: ${d.name}`;
+        case "add_manager": return `Added manager: ${d.name}`;
+        case "add_registration": return `Added registration: ${d.jurisdiction}`;
+        case "update_registration": return `Updated registration filing date`;
+        case "update_entity": return `Updated entity fields: ${Object.keys(d.fields as Record<string, unknown> || {}).join(", ")}`;
+        case "add_trust_role": return `Added trust role: ${d.role} = ${d.name}`;
+        case "update_cap_table": return `Updated cap table: ${d.investor_name} (${d.ownership_pct}%)`;
+        case "add_role": return `Added role: ${d.role_title} = ${d.name}`;
+        case "add_partnership_rep": return `Added partnership rep: ${d.name}`;
+        case "complete_obligation": return `Completed obligation`;
+        default: return a.action;
+      }
+    });
+
     await logAuditEvent({
       userId: user.id,
-      action: "apply_extraction",
+      action: dismiss_all ? "dismiss_extraction" : "apply_extraction",
       resourceType: "document",
       resourceId: id,
       entityId: doc.entity_id,
       metadata: {
         applied: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
-        action_indices: newIndices,
+        changes: actionSummaries,
+        document_name: (existingExtraction.summary as string)?.slice(0, 80) || null,
       },
       ...reqCtx,
     });

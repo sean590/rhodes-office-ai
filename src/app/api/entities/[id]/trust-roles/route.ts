@@ -128,6 +128,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the trust role details before deleting
+    const { data: trustRole } = await supabase
+      .from("trust_roles")
+      .select("role, name")
+      .eq("id", role_id)
+      .single();
+
     const { error } = await supabase
       .from("trust_roles")
       .delete()
@@ -146,7 +153,7 @@ export async function DELETE(
       resourceType: "trust_role",
       resourceId: id,
       entityId: id,
-      metadata: { role_id },
+      metadata: { role_id, role: trustRole?.role, name: trustRole?.name },
       ...reqCtx,
     });
 

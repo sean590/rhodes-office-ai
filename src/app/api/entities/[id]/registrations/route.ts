@@ -197,6 +197,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the registration jurisdiction before deleting
+    const { data: reg } = await supabase
+      .from("entity_registrations")
+      .select("jurisdiction")
+      .eq("id", registration_id)
+      .single();
+
     // Verify the registration belongs to this entity
     const { error } = await supabase
       .from("entity_registrations")
@@ -216,7 +223,7 @@ export async function DELETE(
       resourceType: "entity_registration",
       resourceId: id,
       entityId: id,
-      metadata: { registration_id },
+      metadata: { registration_id, jurisdiction: reg?.jurisdiction },
       ...reqCtx,
     });
 

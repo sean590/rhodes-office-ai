@@ -152,6 +152,13 @@ export async function DELETE(
       return NextResponse.json({ error: "entry_id is required" }, { status: 400 });
     }
 
+    // Fetch the cap table entry details before deleting
+    const { data: entry } = await supabase
+      .from("cap_table_entries")
+      .select("investor_name")
+      .eq("id", entry_id)
+      .single();
+
     const { error } = await supabase
       .from("cap_table_entries")
       .delete()
@@ -170,7 +177,7 @@ export async function DELETE(
       resourceType: "cap_table_entry",
       resourceId: id,
       entityId: id,
-      metadata: { entry_id },
+      metadata: { entry_id, investor_name: entry?.investor_name },
       ...reqCtx,
     });
 

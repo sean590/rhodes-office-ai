@@ -91,6 +91,13 @@ export async function DELETE(
       );
     }
 
+    // Fetch the manager name before deleting
+    const { data: manager } = await supabase
+      .from("entity_managers")
+      .select("name")
+      .eq("id", manager_id)
+      .single();
+
     // Verify the manager belongs to this entity
     const { error } = await supabase
       .from("entity_managers")
@@ -110,7 +117,7 @@ export async function DELETE(
       resourceType: "entity_manager",
       resourceId: id,
       entityId: id,
-      metadata: { manager_id },
+      metadata: { manager_id, name: manager?.name },
       ...reqCtx,
     });
 
