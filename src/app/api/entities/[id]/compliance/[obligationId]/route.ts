@@ -127,6 +127,7 @@ export async function PUT(
       action: "update_obligation",
       resourceType: "compliance",
       resourceId: obligationId,
+      entityId: id,
       metadata: { entity_id: id, status: body.status },
       ...reqCtx,
     });

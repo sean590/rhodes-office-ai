@@ -54,6 +54,7 @@ export async function POST(
       action: "create",
       resourceType: "entity_manager",
       resourceId: id,
+      entityId: id,
       metadata: { name },
       ...reqCtx,
     });
@@ -108,6 +109,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "entity_manager",
       resourceId: id,
+      entityId: id,
       metadata: { manager_id },
       ...reqCtx,
     });

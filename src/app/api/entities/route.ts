@@ -300,6 +300,7 @@ export async function POST(request: Request) {
       action: "create",
       resourceType: "entity",
       resourceId: entity.id,
+      entityId: entity.id,
       metadata: { name, type },
       ...reqCtx,
     });

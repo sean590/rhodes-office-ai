@@ -58,6 +58,7 @@ export async function POST(
       action: "create",
       resourceType: "entity_role",
       resourceId: id,
+      entityId: id,
       metadata: { role_title, name },
       ...reqCtx,
     });
@@ -111,6 +112,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "entity_role",
       resourceId: id,
+      entityId: id,
       metadata: { role_id },
       ...reqCtx,
     });

@@ -190,6 +190,7 @@ export async function POST(
       action: "approve",
       resourceType: "pipeline_item",
       resourceId: itemId,
+      entityId: item.ai_entity_id || newEntityId,
       metadata: {
         batch_id: item.batch_id,
         new_entity_id: newEntityId,

@@ -5,6 +5,7 @@ interface AuditEvent {
   action: string;
   resourceType: string;
   resourceId?: string | null;
+  entityId?: string | null;
   metadata?: Record<string, unknown>;
   ipAddress?: string | null;
   userAgent?: string | null;
@@ -20,6 +21,7 @@ export async function logAuditEvent(event: AuditEvent): Promise<void> {
       action: event.action,
       resource_type: event.resourceType,
       resource_id: event.resourceId ?? null,
+      entity_id: event.entityId ?? null,
       metadata: event.metadata ?? {},
       ip_address: event.ipAddress ?? null,
       user_agent: event.userAgent ?? null,

@@ -70,6 +70,7 @@ export async function POST(
       action: "create",
       resourceType: "trust_role",
       resourceId: id,
+      entityId: id,
       metadata: { role, name },
       ...reqCtx,
     });
@@ -144,6 +145,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "trust_role",
       resourceId: id,
+      entityId: id,
       metadata: { role_id },
       ...reqCtx,
     });

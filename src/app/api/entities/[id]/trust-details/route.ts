@@ -83,6 +83,7 @@ export async function PUT(
       action: "edit",
       resourceType: "trust_details",
       resourceId: id,
+      entityId: id,
       metadata: { fields_updated: Object.keys(updates) },
       ...reqCtx,
     });

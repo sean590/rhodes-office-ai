@@ -17,6 +17,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const resourceType = url.searchParams.get("resource_type");
     const resourceId = url.searchParams.get("resource_id");
+    const entityId = url.searchParams.get("entity_id");
     const userId = url.searchParams.get("user_id");
     const action = url.searchParams.get("action");
     const from = url.searchParams.get("from");
@@ -32,6 +33,7 @@ export async function GET(request: Request) {
 
     if (resourceType) query = query.eq("resource_type", resourceType);
     if (resourceId) query = query.eq("resource_id", resourceId);
+    if (entityId) query = query.eq("entity_id", entityId);
     if (userId) query = query.eq("user_id", userId);
     if (action) query = query.eq("action", action);
     if (from) query = query.gte("created_at", from);

@@ -70,6 +70,7 @@ export async function POST(
       action: "create",
       resourceType: "custom_field",
       resourceId: id,
+      entityId: id,
       metadata: { field_name: label, field_type, field_def_id: fieldDef.id },
       ...reqCtx,
     });
@@ -153,6 +154,7 @@ export async function PUT(
       action: "edit",
       resourceType: "custom_field",
       resourceId: id,
+      entityId: id,
       metadata: { field_id: field_def_id },
       ...reqCtx,
     });
@@ -214,6 +216,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "custom_field",
       resourceId: id,
+      entityId: id,
       metadata: { field_id: field_def_id },
       ...reqCtx,
     });

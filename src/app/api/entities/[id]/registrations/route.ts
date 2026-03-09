@@ -91,6 +91,7 @@ export async function POST(
       action: "create",
       resourceType: "entity_registration",
       resourceId: id,
+      entityId: id,
       metadata: { jurisdiction },
       ...reqCtx,
     });
@@ -159,6 +160,7 @@ export async function PUT(
       action: "edit",
       resourceType: "entity_registration",
       resourceId: id,
+      entityId: id,
       metadata: { registration_id },
       ...reqCtx,
     });
@@ -213,6 +215,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "entity_registration",
       resourceId: id,
+      entityId: id,
       metadata: { registration_id },
       ...reqCtx,
     });

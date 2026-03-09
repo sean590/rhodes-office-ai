@@ -53,6 +53,7 @@ export async function POST(
       action: "create",
       resourceType: "cap_table_entry",
       resourceId: id,
+      entityId: id,
       metadata: { investor_name },
       ...reqCtx,
     });
@@ -117,6 +118,7 @@ export async function PUT(
       action: "edit",
       resourceType: "cap_table_entry",
       resourceId: id,
+      entityId: id,
       metadata: { entry_id },
       ...reqCtx,
     });
@@ -167,6 +169,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "cap_table_entry",
       resourceId: id,
+      entityId: id,
       metadata: { entry_id },
       ...reqCtx,
     });

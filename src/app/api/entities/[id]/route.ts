@@ -407,6 +407,7 @@ export async function PUT(
       action: "edit",
       resourceType: "entity",
       resourceId: id,
+      entityId: id,
       metadata: { fields: Object.keys(updates) },
       ...reqCtx,
     });
@@ -461,6 +462,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "entity",
       resourceId: id,
+      entityId: id,
       metadata: { name: entity.name },
       ...reqCtx,
     });

@@ -184,6 +184,7 @@ export async function POST(
       action: "sync_compliance",
       resourceType: "compliance",
       resourceId: id,
+      entityId: id,
       metadata: { obligations_synced: generated.length },
       ...reqCtx,
     });

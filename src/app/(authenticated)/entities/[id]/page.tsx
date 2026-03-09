@@ -3987,16 +3987,14 @@ function DocumentsTab({
             <Button
               onClick={async () => {
                 if (aiReviewDocId) {
-                  // Mark all displayed indices as reviewed in DB so they don't come back
+                  // Mark all actions as reviewed in DB so they don't come back after refresh
                   const allIndices = originalIndicesMap[aiReviewDocId] || [];
-                  if (allIndices.length > 0) {
-                    await fetch(`/api/documents/${aiReviewDocId}/apply`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ actions: [], action_indices: allIndices }),
-                    });
-                    await onRefresh();
-                  }
+                  await fetch(`/api/documents/${aiReviewDocId}/apply`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ actions: [], action_indices: allIndices, dismiss_all: true }),
+                  });
+                  await onRefresh();
                   setDismissedDocIds((prev) => new Set([...prev, aiReviewDocId]));
                 }
                 setAiReviewDocId(null);
@@ -4440,7 +4438,7 @@ export default function EntityDetailPage() {
   const fetchActivity = useCallback(async () => {
     setActivityLoading(true);
     try {
-      const res = await fetch(`/api/audit?resource_id=${entityId}&limit=50`);
+      const res = await fetch(`/api/audit?entity_id=${entityId}&limit=50`);
       if (res.ok) {
         const data = await res.json();
         setActivityLog(data);

@@ -93,7 +93,7 @@ export async function DELETE(
     const admin = createAdminClient();
 
     // Soft delete using admin client
-    const { error } = await admin
+    const { data: doc, error } = await admin
       .from("documents")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
@@ -117,6 +117,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "document",
       resourceId: id,
+      entityId: doc.entity_id,
       metadata: {},
       ...reqCtx,
     });

@@ -54,6 +54,7 @@ export async function POST(
       action: "create",
       resourceType: "partnership_rep",
       resourceId: id,
+      entityId: id,
       metadata: { name },
       ...reqCtx,
     });
@@ -107,6 +108,7 @@ export async function DELETE(
       action: "delete",
       resourceType: "partnership_rep",
       resourceId: id,
+      entityId: id,
       metadata: { rep_id: partnership_rep_id },
       ...reqCtx,
     });

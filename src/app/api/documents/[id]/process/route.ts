@@ -188,6 +188,7 @@ export async function POST(
       action: "process",
       resourceType: "document",
       resourceId: id,
+      entityId: finalEntityId,
       metadata: { action_count: result.actions?.length ?? 0 },
       ...reqCtx,
     });

@@ -17,7 +17,7 @@ export async function POST(
     const { id } = await params;
     const admin = createAdminClient();
     const body = await request.json();
-    const { actions, action_indices } = body;
+    const { actions, action_indices, dismiss_all } = body;
 
     if (!Array.isArray(actions)) {
       return NextResponse.json({ error: "actions must be an array" }, { status: 400 });
@@ -56,9 +56,9 @@ export async function POST(
     const newIndices: number[] = Array.isArray(action_indices) ? action_indices : [];
     const allAppliedIndices = [...new Set([...previouslyAppliedIndices, ...newIndices])];
 
-    const allApplied = allActions.length > 0 && allActions.every(
+    const allApplied = dismiss_all || (allActions.length > 0 && allActions.every(
       (_, idx) => allAppliedIndices.includes(idx)
-    );
+    ));
 
     const previousResults = (existingExtraction.applied_results || []) as unknown[];
 
@@ -84,6 +84,7 @@ export async function POST(
       action: "apply_extraction",
       resourceType: "document",
       resourceId: id,
+      entityId: doc.entity_id,
       metadata: {
         applied: results.filter(r => r.success).length,
         failed: results.filter(r => !r.success).length,
