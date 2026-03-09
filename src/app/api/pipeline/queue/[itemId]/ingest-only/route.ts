@@ -57,7 +57,13 @@ export async function POST(
       action: "ingest",
       resourceType: "pipeline_item",
       resourceId: itemId,
-      metadata: { batch_id: item.batch_id },
+      entityId: item.ai_entity_id || item.staged_entity_id || null,
+      metadata: {
+        batch_id: item.batch_id,
+        document_name: item.ai_suggested_name || item.original_filename,
+        document_id: result.document?.id,
+        document_type: item.ai_document_type || item.staged_doc_type,
+      },
       ...reqCtx,
     });
 

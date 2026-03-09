@@ -157,6 +157,22 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
 
         actionsApplied = results.filter((r) => r.success).length;
         actionsFailed = results.filter((r) => !r.success).length;
+
+        // Mark actions as applied on the document so the entity page doesn't re-prompt
+        if (actionsApplied > 0) {
+          const currentExtraction = (doc.ai_extraction || {}) as Record<string, unknown>;
+          const allIndices = actions.map((_, i) => i);
+          await admin
+            .from("documents")
+            .update({
+              ai_extraction: {
+                ...currentExtraction,
+                applied: true,
+                applied_indices: allIndices,
+              },
+            })
+            .eq("id", doc.id);
+        }
       }
     }
 

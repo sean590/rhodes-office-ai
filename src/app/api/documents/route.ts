@@ -230,7 +230,8 @@ export async function POST(request: Request) {
       action: "upload",
       resourceType: "document",
       resourceId: doc.id,
-      metadata: { name, entity_id: entityId },
+      entityId: entityId || null,
+      metadata: { document_name: name, entity_id: entityId },
       ...reqCtx,
     });
 

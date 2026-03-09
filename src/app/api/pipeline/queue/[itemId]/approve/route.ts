@@ -195,6 +195,9 @@ export async function POST(
         batch_id: item.batch_id,
         new_entity_id: newEntityId,
         actions_applied: result.actions_applied,
+        document_name: item.ai_suggested_name || item.original_filename,
+        document_id: result.document?.id,
+        document_type: item.ai_document_type || item.staged_doc_type,
       },
       ...reqCtx,
     });

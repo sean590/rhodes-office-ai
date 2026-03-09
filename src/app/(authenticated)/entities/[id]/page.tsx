@@ -5017,8 +5017,14 @@ export default function EntityDetailPage() {
                   title = "Processed document with AI";
                   if (meta.action_count) detail = `${meta.action_count} changes proposed`;
                 } else if (a === "approve" && rt === "pipeline_item") {
-                  title = "Approved pipeline item";
+                  const dName = meta.document_name ? String(meta.document_name) : null;
+                  title = dName ? `Ingested document: ${dName}` : "Approved pipeline item";
                   if (meta.actions_applied) detail = `${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`;
+                  if (meta.document_type) detail = (detail ? detail + " · " : "") + String(meta.document_type).replace(/_/g, " ");
+                } else if (a === "ingest" && rt === "pipeline_item") {
+                  const dName = meta.document_name ? String(meta.document_name) : null;
+                  title = dName ? `Ingested document: ${dName}` : "Ingested document (no changes applied)";
+                  if (meta.document_type) detail = String(meta.document_type).replace(/_/g, " ");
                 } else if (a === "edit" && rt === "trust_details") {
                   title = "Updated trust details";
                   if (meta.fields_updated) detail = `Changed: ${(meta.fields_updated as string[]).join(", ")}`;
