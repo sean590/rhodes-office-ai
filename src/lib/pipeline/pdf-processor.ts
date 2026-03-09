@@ -6,17 +6,16 @@
 
 import "./pdf-polyfill"; // Must be before pdf-parse to stub DOMMatrix/Path2D/ImageData
 import { PDFDocument } from "pdf-lib";
-import { PDFParse } from "pdf-parse";
-import { createRequire } from "module";
 
-// Point pdfjs-dist worker to the correct absolute path so the dynamic
-// import() in fake-worker mode doesn't fail on Vercel with pnpm
-try {
-  const require = createRequire(import.meta.url);
-  const workerPath = require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs");
-  PDFParse.setWorker(workerPath);
-} catch {
-  // Fallback: let pdfjs use its default relative resolution
+// pdf-parse is loaded lazily to avoid eagerly initializing pdfjs-dist's
+// worker module, which fails on Vercel with pnpm due to missing worker files.
+let _PDFParse: typeof import("pdf-parse").PDFParse | null = null;
+async function getPDFParse() {
+  if (!_PDFParse) {
+    const mod = await import("pdf-parse");
+    _PDFParse = mod.PDFParse;
+  }
+  return _PDFParse;
 }
 
 // --- Page Selection Strategies ---
@@ -134,6 +133,7 @@ export async function analyzePdf(
  * Extract raw text from all pages of a PDF.
  */
 export async function extractFullText(buffer: Buffer): Promise<string> {
+  const PDFParse = await getPDFParse();
   const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
     const result = await parser.getText();

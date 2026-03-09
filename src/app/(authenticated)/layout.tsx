@@ -8,6 +8,7 @@ import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { ChatDrawerToggle } from "@/components/chat/chat-drawer-toggle";
 import { PageContextProvider } from "@/components/chat/page-context-provider";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { SessionGuard } from "@/components/session-guard";
 
 export default function AuthenticatedLayout({
   children,
@@ -21,6 +22,7 @@ export default function AuthenticatedLayout({
 
   return (
     <PageContextProvider>
+      <SessionGuard />
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
         <Header />
         <main style={{

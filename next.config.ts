@@ -3,6 +3,9 @@ import { withSentryConfig } from "@sentry/nextjs";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdf-parse", "pdfjs-dist"],
+  outputFileTracingIncludes: {
+    "/api/**": ["./node_modules/pdfjs-dist/**/*.mjs"],
+  },
   async headers() {
     return [
       {
