@@ -119,8 +119,8 @@ export async function analyzePdf(
   const pageCount = pdfDoc.getPageCount();
 
   let tier: "short" | "medium" | "long";
-  if (pageCount <= 50) tier = "short";
-  else if (pageCount <= 100) tier = "medium";
+  if (pageCount <= 100) tier = "short";
+  else if (pageCount <= 200) tier = "medium";
   else tier = "long";
 
   const strategy =
@@ -133,13 +133,18 @@ export async function analyzePdf(
  * Extract raw text from all pages of a PDF.
  */
 export async function extractFullText(buffer: Buffer): Promise<string> {
-  const PDFParse = await getPDFParse();
-  const parser = new PDFParse({ data: new Uint8Array(buffer) });
   try {
-    const result = await parser.getText();
-    return result.text;
-  } finally {
-    await parser.destroy().catch(() => {});
+    const PDFParse = await getPDFParse();
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    try {
+      const result = await parser.getText();
+      return result.text;
+    } finally {
+      await parser.destroy().catch(() => {});
+    }
+  } catch (err) {
+    console.error("[PDF] Text extraction failed, falling back to visual-only:", err instanceof Error ? err.message : err);
+    return ""; // Caller handles empty text gracefully
   }
 }
 
@@ -199,10 +204,22 @@ export async function buildPdfContent(
     // Extract and send full text
     if (strategy.include_full_text) {
       const fullText = await extractFullText(buffer);
-      content.push({
-        type: "text",
-        text: `## Full Document Text (${analysis.page_count} pages)\n\n${fullText}`,
-      });
+      if (fullText) {
+        content.push({
+          type: "text",
+          text: `## Full Document Text (${analysis.page_count} pages)\n\n${fullText}`,
+        });
+      } else {
+        // Text extraction failed — send whole PDF as visual fallback
+        content.push({
+          type: "document",
+          source: {
+            type: "base64",
+            media_type: "application/pdf",
+            data: buffer.toString("base64"),
+          },
+        });
+      }
     }
 
     // Send visual pages (as a split PDF)

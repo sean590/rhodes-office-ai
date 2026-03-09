@@ -3,8 +3,10 @@
  * pdfjs-dist v5 expects DOMMatrix, Path2D, and ImageData for rendering,
  * but we only use it for text extraction. These stubs prevent import crashes.
  *
- * Also disables the web worker which doesn't exist in serverless runtimes.
+ * Also pre-loads the pdfjs worker to avoid dynamic import() failures on
+ * Vercel with pnpm (symlinked node_modules break relative imports).
  */
+
 
 
 if (typeof globalThis.DOMMatrix === "undefined") {
