@@ -2,7 +2,10 @@
  * Minimal polyfills for pdfjs-dist in Node.js/serverless environments.
  * pdfjs-dist v5 expects DOMMatrix, Path2D, and ImageData for rendering,
  * but we only use it for text extraction. These stubs prevent import crashes.
+ *
+ * Also disables the web worker which doesn't exist in serverless runtimes.
  */
+
 
 if (typeof globalThis.DOMMatrix === "undefined") {
   // @ts-expect-error — minimal stub, not a full implementation

@@ -4393,6 +4393,7 @@ export default function EntityDetailPage() {
     ip_address: string | null;
   }>>([]);
   const [activityLoading, setActivityLoading] = useState(false);
+  const [expandedActivityIds, setExpandedActivityIds] = useState<Set<string>>(new Set());
 
   /* Fetch entity detail */
   const fetchEntity = useCallback(async () => {
@@ -5008,7 +5009,7 @@ export default function EntityDetailPage() {
                   const failed = meta.failed as number || 0;
                   title = `Applied AI extraction (${applied} change${applied !== 1 ? "s" : ""}${failed > 0 ? `, ${failed} failed` : ""})`;
                   if (Array.isArray(meta.changes) && meta.changes.length > 0) {
-                    detail = (meta.changes as string[]).join("; ");
+                    // detail handled as expandable list below
                   }
                 } else if (a === "dismiss_extraction") {
                   title = "Dismissed AI suggestions";
@@ -5059,31 +5060,52 @@ export default function EntityDetailPage() {
                   title = `${a} ${rt}`.replace(/_/g, " ");
                 }
 
+                const changes = Array.isArray(meta.changes) ? (meta.changes as string[]) : [];
+                const isExpandable = changes.length > 0;
+                const isExpanded = expandedActivityIds.has(entry.id);
+
                 return (
                   <div
                     key={entry.id}
+                    onClick={isExpandable ? () => setExpandedActivityIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(entry.id)) next.delete(entry.id);
+                      else next.add(entry.id);
+                      return next;
+                    }) : undefined}
                     style={{
                       padding: "12px 0",
                       borderBottom: "1px solid #e8e6df",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 12,
+                      cursor: isExpandable ? "pointer" : undefined,
                     }}
                   >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: "#1a1a1f", fontWeight: 500 }}>
-                        {title}
-                      </div>
-                      {detail && (
-                        <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2, lineHeight: 1.4 }}>
-                          {detail}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, color: "#1a1a1f", fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}>
+                          {isExpandable && (
+                            <span style={{ fontSize: 10, color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}>&#9654;</span>
+                          )}
+                          {title}
                         </div>
-                      )}
+                        {detail && (
+                          <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2, lineHeight: 1.4, paddingLeft: isExpandable ? 16 : 0 }}>
+                            {detail}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap", flexShrink: 0 }}>
+                        {timeStr}
+                      </div>
                     </div>
-                    <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap", flexShrink: 0 }}>
-                      {timeStr}
-                    </div>
+                    {isExpanded && (
+                      <div style={{ paddingLeft: 16, marginTop: 6 }}>
+                        {changes.map((c, i) => (
+                          <div key={i} style={{ fontSize: 12, color: "#6b6b76", padding: "2px 0", lineHeight: 1.4 }}>
+                            &bull; {c}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 );
               })}
