@@ -29,13 +29,14 @@ export async function GET(
 
     const { data, error } = await admin
       .from("entity_document_expectations")
-      .select("*, satisfied_doc:documents!satisfied_by(id, name, document_type, year, created_at)")
+      .select("*")
       .eq("entity_id", id)
       .order("document_category")
       .order("is_required", { ascending: false })
       .order("document_type");
 
     if (error) {
+      console.error("GET expectations error:", error.message);
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
@@ -69,8 +70,13 @@ export async function POST(
     const admin = createAdminClient();
 
     if (action === "refresh") {
-      await refreshEntityExpectations(id);
-      await recheckEntityExpectations(id);
+      try {
+        await refreshEntityExpectations(id);
+        await recheckEntityExpectations(id);
+      } catch (refreshErr) {
+        console.error("Expectations refresh error:", refreshErr);
+        return NextResponse.json({ error: String(refreshErr) }, { status: 500 });
+      }
       return NextResponse.json({ success: true });
     }
 

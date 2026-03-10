@@ -208,30 +208,36 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
     (existing || []).map((e: Record<string, unknown>) => [e.document_type as string, e])
   );
 
-  // 5. Upsert expectations
-  for (const exp of deduped) {
-    const prev = existingMap.get(exp.document_type);
-    // Don't overwrite user-dismissed items or manual items
-    if (prev && (prev.is_not_applicable || prev.source === "manual")) continue;
+  // 5. Upsert expectations (bulk)
+  const rows = deduped
+    .filter((exp) => {
+      const prev = existingMap.get(exp.document_type);
+      // Don't overwrite user-dismissed items or manual items
+      return !(prev && (prev.is_not_applicable || prev.source === "manual"));
+    })
+    .map((exp) => {
+      const prev = existingMap.get(exp.document_type);
+      return {
+        entity_id: entityId,
+        organization_id: entity.organization_id,
+        template_id: exp.template_id || null,
+        document_type: exp.document_type,
+        document_category: exp.document_category,
+        is_required: exp.is_required,
+        source: exp.source,
+        notes: exp.notes || (prev?.notes as string) || null,
+        is_satisfied: (prev?.is_satisfied as boolean) ?? false,
+        satisfied_by: (prev?.satisfied_by as string) ?? null,
+      };
+    });
 
-    await admin
+  if (rows.length > 0) {
+    const { error: upsertError } = await admin
       .from("entity_document_expectations")
-      .upsert(
-        {
-          entity_id: entityId,
-          organization_id: entity.organization_id,
-          template_id: exp.template_id || null,
-          document_type: exp.document_type,
-          document_category: exp.document_category,
-          is_required: exp.is_required,
-          source: exp.source,
-          notes: exp.notes || (prev?.notes as string) || null,
-          // Preserve satisfaction state if already set
-          is_satisfied: prev?.is_satisfied ?? false,
-          satisfied_by: prev?.satisfied_by ?? null,
-        },
-        { onConflict: "entity_id,document_type" }
-      );
+      .upsert(rows, { onConflict: "entity_id,document_type" });
+    if (upsertError) {
+      console.error("Expectations upsert error:", upsertError.message, { entityId, rowCount: rows.length });
+    }
   }
 }
 

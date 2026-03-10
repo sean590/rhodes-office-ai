@@ -3203,35 +3203,40 @@ function DocumentsTab({
     async function load() {
       try {
         const res = await fetch(`/api/entities/${entityId}/expectations`);
-        if (res.ok && !cancelled) {
+        if (cancelled) return;
+        if (res.ok) {
           const data = await res.json();
           setExpectations(data);
-          setExpectationsLoaded(true);
         }
       } catch { /* ignore */ }
+      if (!cancelled) setExpectationsLoaded(true);
     }
     load();
     return () => { cancelled = true; };
   }, [entityId, documents]); // re-fetch when documents change
 
   // Initialize expectations if empty (first time for this entity)
+  const [initAttempted, setInitAttempted] = useState(false);
   useEffect(() => {
-    if (expectationsLoaded && expectations.length === 0 && documents.length >= 0) {
-      fetch(`/api/entities/${entityId}/expectations`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refresh" }),
-      }).then((res) => {
-        if (res.ok) {
-          // Re-fetch after refresh
-          fetch(`/api/entities/${entityId}/expectations`)
-            .then((r) => r.json())
-            .then(setExpectations)
-            .catch(() => {});
-        }
-      }).catch(() => {});
-    }
-  }, [expectationsLoaded, expectations.length, entityId, documents.length]);
+    if (!expectationsLoaded || initAttempted || expectations.length > 0) return;
+    setInitAttempted(true);
+    fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "refresh" }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        console.error("Expectations refresh failed:", await res.text().catch(() => ""));
+        return;
+      }
+      // Re-fetch after refresh
+      const refetch = await fetch(`/api/entities/${entityId}/expectations`);
+      if (refetch.ok) {
+        const data = await refetch.json();
+        setExpectations(data);
+      }
+    }).catch((err) => console.error("Expectations init error:", err));
+  }, [expectationsLoaded, initAttempted, expectations.length, entityId]);
 
   const handleMarkNA = async (expectationId: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
