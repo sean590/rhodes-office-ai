@@ -8,6 +8,7 @@ import { headers } from "next/headers";
 import type { DocumentType } from "@/lib/types/enums";
 import { validateUploadedFile } from "@/lib/validations";
 import type { DocumentCategory } from "@/lib/types/entities";
+import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
 
 export async function GET(request: Request) {
   try {
@@ -220,6 +221,11 @@ export async function POST(request: Request) {
     if (dbError) {
       await admin.storage.from("documents").remove([filePath]);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
+    }
+
+    // Check document completeness expectations
+    if (entityId) {
+      await checkAndSatisfyExpectations(doc.id).catch(() => {});
     }
 
     // Audit log

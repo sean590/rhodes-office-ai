@@ -3182,6 +3182,75 @@ function DocumentsTab({
   const router = useRouter();
   const [showUpload, setShowUpload] = useState(false);
 
+  // Document completeness expectations
+  const [expectations, setExpectations] = useState<Array<{
+    id: string;
+    document_type: string;
+    document_category: string;
+    is_required: boolean;
+    is_satisfied: boolean;
+    is_not_applicable: boolean;
+    is_suggestion: boolean;
+    source: string;
+    notes: string | null;
+    satisfied_doc: { id: string; name: string; document_type: string; year: number | null; created_at: string } | null;
+  }>>([]);
+  const [expectationsLoaded, setExpectationsLoaded] = useState(false);
+
+  // Fetch expectations on mount and after refreshes
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(`/api/entities/${entityId}/expectations`);
+        if (res.ok && !cancelled) {
+          const data = await res.json();
+          setExpectations(data);
+          setExpectationsLoaded(true);
+        }
+      } catch { /* ignore */ }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [entityId, documents]); // re-fetch when documents change
+
+  // Initialize expectations if empty (first time for this entity)
+  useEffect(() => {
+    if (expectationsLoaded && expectations.length === 0 && documents.length >= 0) {
+      fetch(`/api/entities/${entityId}/expectations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh" }),
+      }).then((res) => {
+        if (res.ok) {
+          // Re-fetch after refresh
+          fetch(`/api/entities/${entityId}/expectations`)
+            .then((r) => r.json())
+            .then(setExpectations)
+            .catch(() => {});
+        }
+      }).catch(() => {});
+    }
+  }, [expectationsLoaded, expectations.length, entityId, documents.length]);
+
+  const handleMarkNA = async (expectationId: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_na", expectation_id: expectationId }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === expectationId ? { ...e, is_not_applicable: true } : e));
+  };
+
+  const handleMarkNeeded = async (expectationId: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_needed", expectation_id: expectationId }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === expectationId ? { ...e, is_not_applicable: false } : e));
+  };
+
   // Pipeline state
   const [pipelineBatchId, setPipelineBatchId] = useState<string | null>(null);
   const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
@@ -4015,8 +4084,34 @@ function DocumentsTab({
         </Card>
       )}
 
+      {/* Document completeness bar */}
+      {expectations.length > 0 && (() => {
+        const confirmed = expectations.filter((e) => !e.is_not_applicable && !e.is_suggestion);
+        const satisfied = confirmed.filter((e) => e.is_satisfied).length;
+        const total = confirmed.length;
+        const pct = total > 0 ? Math.round((satisfied / total) * 100) : 0;
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f" }}>
+              {satisfied} of {total} on file
+            </span>
+            <div style={{ flex: 1, height: 6, background: "#e8e6df", borderRadius: 3, overflow: "hidden" }}>
+              <div
+                style={{
+                  width: `${pct}%`,
+                  height: "100%",
+                  background: pct === 100 ? "#2d5a3d" : "#c47520",
+                  borderRadius: 3,
+                  transition: "width 0.3s",
+                }}
+              />
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Document list grouped by category */}
-      {documents.length === 0 ? (
+      {documents.length === 0 && expectations.filter((e) => !e.is_not_applicable && !e.is_suggestion && !e.is_satisfied).length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <DocIcon size={32} />
           <div style={{ fontSize: 14, color: "#6b6b76", marginTop: 12, fontWeight: 500 }}>
@@ -4029,8 +4124,16 @@ function DocumentsTab({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([catKey, cat]) => {
-            const catDocs = grouped[catKey];
-            if (!catDocs || catDocs.length === 0) return null;
+            const catDocs = grouped[catKey] || [];
+            const catExpectations = expectations.filter(
+              (e) => e.document_category === catKey && !e.is_not_applicable && !e.is_suggestion
+            );
+            const catMissing = catExpectations.filter((e) => !e.is_satisfied);
+            const catSatisfied = catExpectations.filter((e) => e.is_satisfied).length;
+            const catTotal = catExpectations.length;
+
+            // Show category if it has docs OR missing expectations
+            if (catDocs.length === 0 && catMissing.length === 0) return null;
             const collapsed = collapsedCats.has(catKey);
 
             return (
@@ -4050,18 +4153,33 @@ function DocumentsTab({
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <FolderIcon size={14} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>{cat.label}</span>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: "#9494a0",
-                        background: "#f0eee8",
-                        padding: "1px 7px",
-                        borderRadius: 10,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {catDocs.length}
-                    </span>
+                    {catTotal > 0 ? (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: catSatisfied === catTotal ? "#2d5a3d" : "#c47520",
+                          background: catSatisfied === catTotal ? "rgba(45,90,61,0.08)" : "rgba(196,117,32,0.08)",
+                          padding: "1px 7px",
+                          borderRadius: 10,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {catSatisfied}/{catTotal}
+                      </span>
+                    ) : (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          color: "#9494a0",
+                          background: "#f0eee8",
+                          padding: "1px 7px",
+                          borderRadius: 10,
+                          fontWeight: 600,
+                        }}
+                      >
+                        {catDocs.length}
+                      </span>
+                    )}
                   </div>
                   <DownIcon
                     size={14}
@@ -4261,6 +4379,100 @@ function DocumentsTab({
                         </div>
                       );
                     })}
+
+                    {/* Missing expectations in this category */}
+                    {catMissing.map((exp) => (
+                      <div
+                        key={exp.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 12,
+                          padding: "10px 18px",
+                          borderBottom: "1px solid #f8f7f4",
+                          fontSize: 13,
+                        }}
+                      >
+                        <span style={{ color: "#c47520", fontSize: 14, flexShrink: 0 }}>&#9675;</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontWeight: 500, color: "#6b6b76" }}>
+                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                          </span>
+                        </div>
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: exp.is_required ? "#c47520" : "#9494a0",
+                          background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(0,0,0,0.04)",
+                          padding: "2px 8px",
+                          borderRadius: 4,
+                        }}>
+                          {exp.is_required ? "Required" : "Recommended"}
+                        </span>
+                        {exp.source === "template" && (
+                          <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4 }}>
+                            Template
+                          </span>
+                        )}
+                        <button
+                          onClick={() => handleMarkNA(exp.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            fontSize: 11,
+                            color: "#9494a0",
+                            cursor: "pointer",
+                            padding: "2px 6px",
+                            fontFamily: "inherit",
+                          }}
+                          title="Mark as not applicable"
+                        >
+                          N/A
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* N/A items (collapsed by default) */}
+                    {(() => {
+                      const naItems = expectations.filter(
+                        (e) => e.document_category === catKey && e.is_not_applicable && !e.is_suggestion
+                      );
+                      if (naItems.length === 0) return null;
+                      return naItems.map((exp) => (
+                        <div
+                          key={exp.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 12,
+                            padding: "8px 18px",
+                            borderBottom: "1px solid #f8f7f4",
+                            fontSize: 13,
+                            opacity: 0.5,
+                          }}
+                        >
+                          <span style={{ color: "#9494a0", fontSize: 14, flexShrink: 0 }}>&#8212;</span>
+                          <span style={{ flex: 1, color: "#9494a0", textDecoration: "line-through" }}>
+                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                          </span>
+                          <button
+                            onClick={() => handleMarkNeeded(exp.id)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              fontSize: 11,
+                              color: "#9494a0",
+                              cursor: "pointer",
+                              textDecoration: "underline",
+                              padding: "2px 6px",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            Mark as needed
+                          </button>
+                        </div>
+                      ));
+                    })()}
                   </div>
                 )}
               </Card>

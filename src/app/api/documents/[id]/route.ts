@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { unsatisfyByDocument } from "@/lib/utils/document-expectations";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -108,6 +109,9 @@ export async function DELETE(
       }
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
+
+    // Un-satisfy any completeness expectations this doc was fulfilling
+    await unsatisfyByDocument(id).catch(() => {});
 
     // Audit log
     const reqHeaders = await headers();

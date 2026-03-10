@@ -98,6 +98,17 @@ export async function buildChatContext(orgId: string) {
   const documents = documentsRes.data || [];
   const complianceObligations = complianceRes.data || [];
 
+  // Fetch document completeness expectations
+  const expectationsRes = entityIds.length > 0
+    ? await supabase
+        .from("entity_document_expectations")
+        .select("entity_id, document_type, is_satisfied, is_not_applicable, is_suggestion, is_required")
+        .in("entity_id", entityIds)
+        .eq("is_not_applicable", false)
+        .eq("is_suggestion", false)
+    : { data: [], error: null };
+  const allExpectations = expectationsRes.data || [];
+
   // Build entity name lookup
   const entityNames: Record<string, string> = {};
   for (const e of entities) entityNames[e.id] = e.name;
@@ -170,6 +181,20 @@ When referencing documents, use the document name and include the year if availa
         if (ob.payment_amount) context += `, fee=$${(ob.payment_amount / 100).toFixed(2)}`;
         context += `\n`;
       }
+    }
+
+    // Document completeness
+    const entityExpectations = allExpectations.filter(e => e.entity_id === entity.id);
+    if (entityExpectations.length > 0) {
+      const satisfied = entityExpectations.filter(e => e.is_satisfied).length;
+      const total = entityExpectations.length;
+      const missing = entityExpectations.filter(e => !e.is_satisfied);
+      context += `- Document Completeness: ${satisfied}/${total} on file`;
+      if (missing.length > 0) {
+        const missingNames = missing.map(e => e.document_type.replace(/_/g, ' ')).join(', ');
+        context += ` (missing: ${missingNames})`;
+      }
+      context += '\n';
     }
 
     context += '\n';

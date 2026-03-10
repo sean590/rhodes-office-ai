@@ -8,6 +8,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
+import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export interface IngestOptions {
@@ -174,6 +175,11 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
             .eq("id", doc.id);
         }
       }
+    }
+
+    // Check document completeness expectations
+    if (doc.entity_id) {
+      await checkAndSatisfyExpectations(doc.id).catch(() => {});
     }
 
     // Update queue item

@@ -8,6 +8,7 @@ import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context"
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import type { DocumentType } from "@/lib/types/enums";
 import { validateUploadedFile } from "@/lib/validations";
+import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export async function GET(
@@ -240,6 +241,9 @@ export async function POST(
         console.error("Junction insert error:", junctionError);
       }
     }
+
+    // Check document completeness expectations
+    await checkAndSatisfyExpectations(doc.id).catch(() => {});
 
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
