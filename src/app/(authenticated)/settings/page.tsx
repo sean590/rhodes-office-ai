@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { MfaSection } from "@/components/settings/mfa-section";
+import { DOCUMENT_TYPE_LABELS, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
+import type { DocumentCategory } from "@/lib/types/entities";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -252,6 +254,38 @@ export default function SettingsPage() {
     action: string;
   }>({ resource_type: "", action: "" });
 
+  // Document template state
+  const [templates, setTemplates] = useState<Array<{
+    id: string;
+    document_type: string;
+    document_category: string;
+    is_required: boolean;
+    description: string | null;
+    applies_to_filter: Record<string, string[]>;
+    source: string;
+  }>>([]);
+  const [templateStats, setTemplateStats] = useState<Record<string, { applied: number; satisfied: number }>>({});
+  const [systemStats, setSystemStats] = useState<Record<string, { applied: number; satisfied: number }>>({});
+  const [systemOverrides, setSystemOverrides] = useState<Record<string, { is_disabled: boolean; is_required: boolean }>>({});
+  const [systemDefaults, setSystemDefaults] = useState<Array<{
+    document_type: string;
+    document_category: string;
+    is_required: boolean;
+    scope: string;
+    applies_to?: string;
+    notes?: string;
+  }>>([]);
+  const [entityCount, setEntityCount] = useState(0);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [updatingSystemDefault, setUpdatingSystemDefault] = useState<string | null>(null);
+  const [showAddTemplate, setShowAddTemplate] = useState(false);
+  const [newTplDocType, setNewTplDocType] = useState("");
+  const [newTplCategory, setNewTplCategory] = useState("formation");
+  const [newTplRequired, setNewTplRequired] = useState(true);
+  const [newTplDescription, setNewTplDescription] = useState("");
+  const [newTplFilter, setNewTplFilter] = useState<Record<string, string[]>>({});
+  const [savingTemplate, setSavingTemplate] = useState(false);
+
   // Fetch current user info
   const fetchCurrentUser = useCallback(async () => {
     try {
@@ -298,6 +332,22 @@ export default function SettingsPage() {
     }
   }, []);
 
+  // Fetch document templates
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/document-templates");
+      if (!res.ok) return;
+      const data = await res.json();
+      setTemplates(data.templates || []);
+      setTemplateStats(data.templateStats || {});
+      setSystemStats(data.systemStats || {});
+      setSystemOverrides(data.systemOverrides || {});
+      setSystemDefaults(data.systemDefaults || []);
+      setEntityCount(data.entityCount || 0);
+    } catch { /* non-critical */ }
+    setTemplatesLoaded(true);
+  }, []);
+
   // Fetch activity log (admin only)
   const fetchActivity = useCallback(async () => {
     setActivityLoading(true);
@@ -318,10 +368,10 @@ export default function SettingsPage() {
   }, [activityFilter]);
 
   useEffect(() => {
-    Promise.all([fetchCurrentUser(), fetchUsers()]).finally(() =>
+    Promise.all([fetchCurrentUser(), fetchUsers(), fetchTemplates()]).finally(() =>
       setLoading(false)
     );
-  }, [fetchCurrentUser, fetchUsers]);
+  }, [fetchCurrentUser, fetchUsers, fetchTemplates]);
 
   // Fetch pending invites once we know the org
   useEffect(() => {
@@ -690,6 +740,382 @@ export default function SettingsPage() {
           <MfaSection isMobile={isMobile} />
         </AccordionSection>
 
+        {/* Document Checklist */}
+        <AccordionSection
+          title="Document Checklist"
+          isMobile={isMobile}
+          subtitle="Manage expected documents for your entities"
+          defaultOpen={!isMobile}
+          headerRight={
+            !showAddTemplate ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowAddTemplate(true);
+                }}
+                style={{
+                  padding: isMobile ? "10px 16px" : "6px 14px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "#fff",
+                  background: "#2d5a3d",
+                  border: "none",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  minHeight: isMobile ? 44 : undefined,
+                }}
+              >
+                + New Template
+              </button>
+            ) : undefined
+          }
+        >
+          {/* Add template form */}
+          {showAddTemplate && (
+            <div style={{
+              background: "#fafaf7", borderRadius: 8, padding: 16, marginBottom: 16,
+              border: "1px solid #e8e6df",
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", marginBottom: 12 }}>
+                New Document Template
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                    Document Type
+                  </label>
+                  <input
+                    placeholder="e.g. Ridge Agreement"
+                    value={newTplDocType}
+                    onChange={(e) => setNewTplDocType(e.target.value)}
+                    style={{
+                      width: "100%", fontSize: 13, padding: "7px 10px", border: "1px solid #ddd9d0",
+                      borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                    Category
+                  </label>
+                  <select
+                    value={newTplCategory}
+                    onChange={(e) => setNewTplCategory(e.target.value)}
+                    style={{
+                      width: "100%", fontSize: 13, padding: "7px 10px", border: "1px solid #ddd9d0",
+                      borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit",
+                    }}
+                  >
+                    {DOCUMENT_CATEGORY_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                  Description (optional)
+                </label>
+                <input
+                  placeholder="e.g. Management agreement between entity and Ridge Capital"
+                  value={newTplDescription}
+                  onChange={(e) => setNewTplDescription(e.target.value)}
+                  style={{
+                    width: "100%", fontSize: 13, padding: "7px 10px", border: "1px solid #ddd9d0",
+                    borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 12 }}>
+                <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6, color: "#1a1a1f", cursor: "pointer" }}>
+                  <input type="checkbox" checked={newTplRequired} onChange={(e) => setNewTplRequired(e.target.checked)} />
+                  Required
+                </label>
+                <span style={{ fontSize: 12, color: "#9494a0" }}>
+                  Applies to: All entities
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <button
+                  onClick={() => { setShowAddTemplate(false); setNewTplDocType(""); setNewTplDescription(""); }}
+                  style={{
+                    padding: "6px 14px", fontSize: 12, fontWeight: 500, color: "#6b6b76",
+                    background: "#fff", border: "1px solid #ddd9d0", borderRadius: 6, cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={!newTplDocType.trim() || savingTemplate}
+                  onClick={async () => {
+                    setSavingTemplate(true);
+                    try {
+                      const res = await fetch("/api/document-templates", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          document_type: newTplDocType.trim(),
+                          document_category: newTplCategory,
+                          is_required: newTplRequired,
+                          description: newTplDescription.trim() || null,
+                          applies_to_filter: Object.keys(newTplFilter).length > 0 ? newTplFilter : {},
+                        }),
+                      });
+                      if (res.ok) {
+                        setShowAddTemplate(false);
+                        setNewTplDocType("");
+                        setNewTplDescription("");
+                        setNewTplFilter({});
+                        await fetchTemplates();
+                      } else {
+                        const err = await res.json();
+                        alert(err.error || "Failed to create template");
+                      }
+                    } catch { /* ignore */ }
+                    setSavingTemplate(false);
+                  }}
+                  style={{
+                    padding: "6px 14px", fontSize: 12, fontWeight: 600, color: "#fff",
+                    background: (!newTplDocType.trim() || savingTemplate) ? "#9494a0" : "#2d5a3d",
+                    border: "none", borderRadius: 6, cursor: (!newTplDocType.trim() || savingTemplate) ? "default" : "pointer",
+                  }}
+                >
+                  {savingTemplate ? "Creating..." : "Create Template"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* System defaults */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: "#1a1a1f", marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              System Defaults
+              <span style={{ fontSize: 11, fontWeight: 400, color: "#9494a0" }}>
+                Auto-generated based on entity type
+              </span>
+            </div>
+            {systemDefaults.map((def) => {
+              const override = systemOverrides[def.document_type];
+              const isDisabled = override?.is_disabled ?? false;
+              const isRequired = override?.is_required ?? def.is_required;
+              const stats = systemStats[def.document_type];
+              const isOwner = currentUser?.orgRole === "owner";
+              const isUpdating = updatingSystemDefault === def.document_type;
+              const scopeLabel = def.scope === "base" ? "All entities"
+                : def.scope === "type" ? (def.applies_to || "").replace(/_/g, " ")
+                : (def.applies_to || "").replace(/_/g, " ");
+
+              const handleToggle = async (field: "is_disabled" | "is_required", value: boolean) => {
+                setUpdatingSystemDefault(def.document_type);
+                try {
+                  await fetch("/api/document-templates", {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      document_type: def.document_type,
+                      is_disabled: field === "is_disabled" ? value : isDisabled,
+                      is_required: field === "is_required" ? value : isRequired,
+                    }),
+                  });
+                  setSystemOverrides((prev) => ({
+                    ...prev,
+                    [def.document_type]: {
+                      is_disabled: field === "is_disabled" ? value : isDisabled,
+                      is_required: field === "is_required" ? value : isRequired,
+                    },
+                  }));
+                } catch { /* ignore */ }
+                setUpdatingSystemDefault(null);
+              };
+
+              return (
+                <div key={def.document_type} style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  padding: "8px 0", borderBottom: "1px solid #f0eee8", fontSize: 13,
+                  opacity: isDisabled ? 0.45 : 1,
+                }}>
+                  {/* Enable/disable toggle (owner only) */}
+                  {isOwner ? (
+                    <button
+                      disabled={isUpdating}
+                      onClick={() => handleToggle("is_disabled", !isDisabled)}
+                      title={isDisabled ? "Enable this default" : "Disable this default"}
+                      style={{
+                        width: 18, height: 18, borderRadius: 4, flexShrink: 0, cursor: "pointer",
+                        border: isDisabled ? "1.5px solid #ddd9d0" : "none",
+                        background: isDisabled ? "transparent" : "#2d5a3d",
+                        display: "flex", alignItems: "center", justifyContent: "center", padding: 0,
+                      }}
+                    >
+                      {!isDisabled && (
+                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+                          <path d="M1 4l3 3 5-6" stroke="#fff" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </button>
+                  ) : (
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      background: isDisabled ? "#ddd9d0" : "#2d5a3d", flexShrink: 0,
+                    }} />
+                  )}
+
+                  <span style={{
+                    flex: 1, color: "#1a1a1f",
+                    textDecoration: isDisabled ? "line-through" : "none",
+                  }}>
+                    {DOCUMENT_TYPE_LABELS[def.document_type] || def.document_type.replace(/_/g, " ")}
+                  </span>
+
+                  {/* Scope label for non-base items */}
+                  {def.scope !== "base" && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                      color: "#7b4db5", background: "rgba(123,77,181,0.08)",
+                      textTransform: "capitalize",
+                    }}>
+                      {scopeLabel}
+                    </span>
+                  )}
+
+                  <span style={{
+                    fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                    color: "#6b6b76", background: "rgba(107,107,118,0.08)",
+                  }}>
+                    {DOCUMENT_CATEGORY_LABELS[def.document_category as DocumentCategory] || def.document_category}
+                  </span>
+
+                  {/* Required/Recommended toggle (owner only) */}
+                  {isOwner && !isDisabled ? (
+                    <button
+                      disabled={isUpdating}
+                      onClick={() => handleToggle("is_required", !isRequired)}
+                      style={{
+                        fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                        cursor: "pointer", border: "none",
+                        color: isRequired ? "#c47520" : "#6b6b76",
+                        background: isRequired ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                      }}
+                      title="Click to toggle required/recommended"
+                    >
+                      {isRequired ? "Required" : "Recommended"}
+                    </button>
+                  ) : (
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                      color: isRequired ? "#c47520" : "#6b6b76",
+                      background: isRequired ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                    }}>
+                      {isRequired ? "Required" : "Recommended"}
+                    </span>
+                  )}
+
+                  {stats && !isDisabled && (
+                    <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+                      {stats.satisfied}/{stats.applied}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Custom templates */}
+          <div>
+            <div style={{
+              fontSize: 12, fontWeight: 600, color: "#1a1a1f", marginBottom: 8,
+              display: "flex", alignItems: "center", gap: 8,
+            }}>
+              Custom Templates
+              {templates.length > 0 && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: "#9494a0" }}>
+                  ({templates.length})
+                </span>
+              )}
+            </div>
+            {templates.length === 0 ? (
+              <div style={{ fontSize: 13, color: "#9494a0", padding: "12px 0" }}>
+                No custom templates yet. Create one to require specific documents across your entities.
+              </div>
+            ) : (
+              templates.map((tpl) => {
+                const stats = templateStats[tpl.id];
+                const filterSummary = (() => {
+                  const parts: string[] = [];
+                  if (tpl.applies_to_filter?.entity_type?.length) {
+                    parts.push(tpl.applies_to_filter.entity_type.map((t: string) => t.replace(/_/g, " ")).join(", "));
+                  }
+                  if (tpl.applies_to_filter?.state?.length) {
+                    parts.push(tpl.applies_to_filter.state.join(", "));
+                  }
+                  return parts.length > 0 ? parts.join(" · ") : "All entities";
+                })();
+                return (
+                  <div key={tpl.id} style={{
+                    padding: "10px 0", borderBottom: "1px solid #f0eee8",
+                    display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+                  }}>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%", background: "#3366a8", flexShrink: 0,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: "#1a1a1f", fontWeight: 500 }}>
+                        {DOCUMENT_TYPE_LABELS[tpl.document_type] || tpl.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                      </div>
+                      {tpl.description && (
+                        <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>{tpl.description}</div>
+                      )}
+                    </div>
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                      color: "#6b6b76", background: "rgba(107,107,118,0.08)",
+                    }}>
+                      {DOCUMENT_CATEGORY_LABELS[tpl.document_category as DocumentCategory] || tpl.document_category}
+                    </span>
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                      color: tpl.is_required ? "#c47520" : "#6b6b76",
+                      background: tpl.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                    }}>
+                      {tpl.is_required ? "Required" : "Recommended"}
+                    </span>
+                    <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+                      {filterSummary}
+                    </span>
+                    {stats && (
+                      <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+                        {stats.satisfied}/{stats.applied}
+                      </span>
+                    )}
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Delete this template? Satisfied expectations will be kept as manual items.")) return;
+                        await fetch("/api/document-templates", {
+                          method: "DELETE",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ template_id: tpl.id }),
+                        });
+                        await fetchTemplates();
+                      }}
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 11, color: "#c73e3e", padding: "2px 4px", flexShrink: 0,
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </AccordionSection>
+
         {/* Card 2 — User Management (admin only) */}
         {isAdmin && (
           <AccordionSection
@@ -929,7 +1355,7 @@ export default function SettingsPage() {
                         }}
                       >
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          {isSelf ? (
+                          {isSelf || u.role === "owner" ? (
                             <>
                               <span
                                 style={{
@@ -942,11 +1368,13 @@ export default function SettingsPage() {
                                   color: ROLE_BADGE_STYLES[u.role]?.color || "#6b6b76",
                                 }}
                               >
-                                {ROLE_LABELS[u.role]}
+                                {ROLE_LABELS[u.role] || u.role}
                               </span>
-                              <span style={{ fontSize: 11, color: "#9494a0", fontStyle: "italic" }}>
-                                (you)
-                              </span>
+                              {isSelf && (
+                                <span style={{ fontSize: 11, color: "#9494a0", fontStyle: "italic" }}>
+                                  (you)
+                                </span>
+                              )}
                             </>
                           ) : (
                             <select
@@ -1122,7 +1550,7 @@ export default function SettingsPage() {
                               borderBottom: "1px solid #f0eeea",
                             }}
                           >
-                            {isSelf ? (
+                            {isSelf || u.role === "owner" ? (
                               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                                 <span
                                   style={{
@@ -1135,17 +1563,19 @@ export default function SettingsPage() {
                                     color: ROLE_BADGE_STYLES[u.role]?.color || "#6b6b76",
                                   }}
                                 >
-                                  {ROLE_LABELS[u.role]}
+                                  {ROLE_LABELS[u.role] || u.role}
                                 </span>
-                                <span
-                                  style={{
-                                    fontSize: 11,
-                                    color: "#9494a0",
-                                    fontStyle: "italic",
-                                  }}
-                                >
-                                  (you)
-                                </span>
+                                {isSelf && (
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      color: "#9494a0",
+                                      fontStyle: "italic",
+                                    }}
+                                  >
+                                    (you)
+                                  </span>
+                                )}
                               </div>
                             ) : (
                               <select

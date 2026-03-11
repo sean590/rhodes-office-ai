@@ -227,7 +227,7 @@ When referencing documents, use the document name and include the year if availa
       const entName = doc.entity_id ? entityNames[doc.entity_id] : null;
       const extraction = doc.ai_extraction as { summary?: string } | null;
       const summary = extraction?.summary;
-      context += `- ${doc.name}`;
+      context += `- [doc:${doc.id}] ${doc.name}`;
       if (doc.document_category) context += ` [${doc.document_category}]`;
       if (entName) context += ` — ${entName}`;
       if (doc.year) context += ` (${doc.year})`;
@@ -236,7 +236,17 @@ When referencing documents, use the document name and include the year if availa
     }
   }
 
-  context += `\nAnswer questions about entities, relationships, compliance, organizational structure, and documents. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.`;
+  context += `\nAnswer questions about entities, relationships, compliance, organizational structure, and documents. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.
+
+When answering questions about documents or referencing specific information from documents, ALWAYS cite your sources using this exact format:
+
+[Document Name](doc:DOCUMENT_UUID)
+
+For example:
+- The ownership split is defined in [Doherty Holdings Operating Agreement](doc:abc-123-def) (page 12, section 4.3)
+- According to the [2024 K-1 for Fund II](doc:xyz-789), the ordinary business income was $45,230
+
+Always include the document UUID from the [doc:UUID] prefix in the document list above. If you know the page number, include it as text after the link. When listing multiple documents, format each as a clickable reference.`;
 
   if (client) {
     try {

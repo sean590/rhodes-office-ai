@@ -131,6 +131,14 @@ export async function POST(
         return NextResponse.json({ error: "expectation_id required" }, { status: 400 });
       }
 
+      // Fetch the expectation details for audit
+      const { data: exp } = await admin
+        .from("entity_document_expectations")
+        .select("document_type")
+        .eq("id", expectation_id)
+        .eq("entity_id", id)
+        .single();
+
       await admin
         .from("entity_document_expectations")
         .update({
@@ -139,6 +147,18 @@ export async function POST(
         })
         .eq("id", expectation_id)
         .eq("entity_id", id);
+
+      const reqHeaders = await headers();
+      const reqCtx = getRequestContext(reqHeaders, orgId);
+      await logAuditEvent({
+        userId: user.id,
+        action: action === "mark_na" ? "mark_na" : "mark_needed",
+        resourceType: "document_expectation",
+        resourceId: expectation_id,
+        entityId: id,
+        metadata: { document_type: exp?.document_type },
+        ...reqCtx,
+      });
 
       return NextResponse.json({ success: true });
     }

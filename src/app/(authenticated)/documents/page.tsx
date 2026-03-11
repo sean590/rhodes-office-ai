@@ -71,6 +71,21 @@ export default function DocumentsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Missing expectations state
+  const [missingExpectations, setMissingExpectations] = useState<Array<{
+    entity_id: string;
+    entity_name: string;
+    missing_count: number;
+    missing: Array<{
+      id: string;
+      document_type: string;
+      document_category: string;
+      is_required: boolean;
+      source: string;
+    }>;
+  }>>([]);
+  const [missingLoaded, setMissingLoaded] = useState(false);
+
   // Pipeline upload state
   const [showUpload, setShowUpload] = useState(false);
   const [pipelineBatchId, setPipelineBatchId] = useState<string | null>(null);
@@ -113,6 +128,13 @@ export default function DocumentsPage() {
   useEffect(() => {
     const controller = new AbortController();
     fetchAll();
+    // Fetch missing expectations for the "Missing" filter
+    fetch("/api/expectations")
+      .then(async (res) => {
+        if (res.ok) setMissingExpectations(await res.json());
+        setMissingLoaded(true);
+      })
+      .catch(() => setMissingLoaded(true));
     return () => controller.abort();
   }, [fetchAll]);
 
@@ -271,12 +293,14 @@ export default function DocumentsPage() {
   };
 
   /* ---- Filter categories ---- */
+  const totalMissing = missingExpectations.reduce((sum, e) => sum + e.missing_count, 0);
   const filterCategories = [
     { key: "all", label: "All" },
     ...Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([key, cat]) => ({
       key,
       label: cat.label,
     })),
+    ...(totalMissing > 0 ? [{ key: "missing", label: `Missing (${totalMissing})` }] : []),
   ];
 
   /* ---- Expandable row state ---- */
@@ -637,6 +661,9 @@ export default function DocumentsPage() {
       >
         {filterCategories.map((cat) => {
           const isActive = categoryFilter === cat.key;
+          const isMissingChip = cat.key === "missing";
+          const activeColor = isMissingChip ? "#c47520" : "#2d5a3d";
+          const activeBg = isMissingChip ? "rgba(196,117,32,0.08)" : "rgba(45,90,61,0.08)";
           return (
             <button
               key={cat.key}
@@ -644,9 +671,9 @@ export default function DocumentsPage() {
               style={{
                 padding: "5px 12px",
                 borderRadius: 16,
-                border: `1px solid ${isActive ? "#2d5a3d" : "#ddd9d0"}`,
-                background: isActive ? "rgba(45,90,61,0.08)" : "#fff",
-                color: isActive ? "#2d5a3d" : "#6b6b76",
+                border: `1px solid ${isActive ? activeColor : "#ddd9d0"}`,
+                background: isActive ? activeBg : "#fff",
+                color: isActive ? activeColor : isMissingChip ? "#c47520" : "#6b6b76",
                 fontSize: 12,
                 fontWeight: 500,
                 cursor: "pointer",
@@ -703,8 +730,87 @@ export default function DocumentsPage() {
         )}
       </div>
 
-      {/* Documents table */}
-      {filtered.length === 0 ? (
+      {/* Missing expectations view */}
+      {categoryFilter === "missing" ? (
+        <div>
+          {missingExpectations.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "40px 0" }}>
+              <div style={{ fontSize: 14, color: "#2d5a3d", fontWeight: 500 }}>All caught up!</div>
+              <div style={{ fontSize: 12, color: "#9494a0", marginTop: 4 }}>
+                Every expected document is on file across all entities.
+              </div>
+            </div>
+          ) : (
+            missingExpectations.map((entity) => (
+              <div key={entity.entity_id} style={{ marginBottom: 24 }}>
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
+                }}>
+                  <button
+                    onClick={() => router.push(`/entities/${entity.entity_id}`)}
+                    style={{
+                      background: "none", border: "none", cursor: "pointer", padding: 0,
+                      fontSize: 14, fontWeight: 600, color: "#1a1a1f",
+                    }}
+                  >
+                    {entity.entity_name}
+                  </button>
+                  <span style={{
+                    fontSize: 11, fontWeight: 500, color: "#c47520",
+                    background: "rgba(196,117,32,0.08)", padding: "1px 8px", borderRadius: 10,
+                  }}>
+                    missing {entity.missing_count}
+                  </span>
+                </div>
+                <div style={{
+                  background: "#fff", border: "1px solid #e8e6df", borderRadius: 8,
+                  overflow: "hidden",
+                }}>
+                  {entity.missing.map((exp, idx) => (
+                    <div key={exp.id} style={{
+                      display: "flex", alignItems: "center", gap: 10,
+                      padding: "10px 14px",
+                      borderBottom: idx < entity.missing.length - 1 ? "1px solid #f0eee8" : "none",
+                      fontSize: 13,
+                    }}>
+                      <span style={{
+                        width: 14, height: 14, borderRadius: "50%",
+                        border: "1.5px solid #c47520", flexShrink: 0,
+                      }} />
+                      <span style={{ flex: 1, color: "#1a1a1f" }}>
+                        {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                        color: "#6b6b76", background: "rgba(107,107,118,0.08)",
+                      }}>
+                        {DOCUMENT_CATEGORY_LABELS[exp.document_category as DocumentCategory] || exp.document_category}
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                        color: exp.is_required ? "#c47520" : "#6b6b76",
+                        background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                      }}>
+                        {exp.is_required ? "Required" : "Recommended"}
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                        color: exp.source === "template" ? "#3366a8" : "#6b6b76",
+                        background: exp.source === "template" ? "rgba(51,102,168,0.08)" : "rgba(107,107,118,0.08)",
+                      }}>
+                        {exp.source === "template" ? "Template" : exp.source === "manual" ? "Manual" : "System"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      ) : (
+
+      /* Documents table */
+      filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
           <DocIcon size={32} />
           <div style={{ fontSize: 14, color: "#6b6b76", marginTop: 12, fontWeight: 500 }}>
@@ -1285,7 +1391,7 @@ export default function DocumentsPage() {
             })}
           </Card>
         )
-      )}
+      ))}
     </div>
   );
 }

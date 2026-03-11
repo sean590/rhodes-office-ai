@@ -24,13 +24,13 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = await createClient();
+    const admin = createAdminClient();
 
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "200", 10), 500);
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
-    const { data, error } = await supabase
+    const { data, error } = await admin
       .from("documents")
       .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
       .eq("entity_id", id)

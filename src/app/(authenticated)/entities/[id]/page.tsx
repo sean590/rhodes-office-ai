@@ -1102,6 +1102,361 @@ function CustomFieldRow({
   );
 }
 
+/* ---- Document Completeness Card (for Overview tab) ---- */
+interface Expectation {
+  id: string;
+  document_type: string;
+  document_category: string;
+  is_required: boolean;
+  is_satisfied: boolean;
+  is_not_applicable: boolean;
+  is_suggestion: boolean;
+  source: string;
+  notes: string | null;
+  satisfied_by: string | null;
+}
+
+function DocumentCompletenessCard({
+  entityId,
+  onNavigateDocs,
+}: {
+  entityId: string;
+  onNavigateDocs: () => void;
+}) {
+  const [expectations, setExpectations] = useState<Expectation[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [initAttempted, setInitAttempted] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newDocType, setNewDocType] = useState("");
+  const [newCategory, setNewCategory] = useState("formation");
+  const [newRequired, setNewRequired] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Fetch expectations
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/entities/${entityId}/expectations`)
+      .then(async (res) => {
+        if (cancelled) return;
+        if (res.ok) setExpectations(await res.json());
+        setLoaded(true);
+      })
+      .catch(() => { if (!cancelled) setLoaded(true); });
+    return () => { cancelled = true; };
+  }, [entityId]);
+
+  // Auto-init if empty
+  useEffect(() => {
+    if (!loaded || initAttempted || expectations.length > 0) return;
+    setInitAttempted(true);
+    fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "refresh" }),
+    }).then(async () => {
+      const res = await fetch(`/api/entities/${entityId}/expectations`);
+      if (res.ok) setExpectations(await res.json());
+    }).catch(() => {});
+  }, [loaded, initAttempted, expectations.length, entityId]);
+
+  const handleMarkNA = async (id: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_na", expectation_id: id }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === id ? { ...e, is_not_applicable: true } : e));
+  };
+
+  const handleMarkNeeded = async (id: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_needed", expectation_id: id }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === id ? { ...e, is_not_applicable: false } : e));
+  };
+
+  const handleAddCustom = async () => {
+    if (!newDocType.trim()) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}/expectations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add",
+          document_type: newDocType.trim().toLowerCase().replace(/\s+/g, "_"),
+          document_category: newCategory,
+          is_required: newRequired,
+        }),
+      });
+      if (res.ok) {
+        const newExp = await res.json();
+        setExpectations((prev) => [...prev, newExp]);
+        setAdding(false);
+        setNewDocType("");
+        setNewCategory("formation");
+        setNewRequired(true);
+      }
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  // Filter confirmed (non-suggestion, non-NA) expectations
+  const confirmed = expectations.filter((e) => !e.is_suggestion && !e.is_not_applicable);
+  const naItems = expectations.filter((e) => e.is_not_applicable);
+  const satisfied = confirmed.filter((e) => e.is_satisfied).length;
+  const total = confirmed.length;
+  const pct = total > 0 ? Math.round((satisfied / total) * 100) : 0;
+
+  // Group by category
+  const grouped: Record<string, Expectation[]> = {};
+  for (const exp of confirmed) {
+    const cat = exp.document_category || "other";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(exp);
+  }
+
+  const getTypeLabel = (slug: string) =>
+    DOCUMENT_TYPE_LABELS[slug] || slug.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const getCatLabel = (cat: string) =>
+    DOCUMENT_CATEGORY_LABELS[cat as keyof typeof DOCUMENT_CATEGORY_LABELS] || cat.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
+  const sourceBadge = (source: string) => {
+    const styles: Record<string, { color: string; bg: string; label: string }> = {
+      system: { color: "#6b6b76", bg: "rgba(107,107,118,0.08)", label: "System" },
+      template: { color: "#3366a8", bg: "rgba(51,102,168,0.08)", label: "Template" },
+      manual: { color: "#7b4db5", bg: "rgba(123,77,181,0.08)", label: "Manual" },
+    };
+    const s = styles[source] || styles.system;
+    return (
+      <span style={{ fontSize: 10, fontWeight: 500, color: s.color, background: s.bg, padding: "1px 6px", borderRadius: 4 }}>
+        {s.label}
+      </span>
+    );
+  };
+
+  if (!loaded) {
+    return (
+      <Card>
+        <SectionHeader>Document Completeness</SectionHeader>
+        <div style={{ padding: 20, textAlign: "center", color: "#9494a0", fontSize: 13 }}>Loading...</div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <SectionHeader>Document Completeness</SectionHeader>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {!adding && (
+            <Button size="sm" onClick={() => setAdding(true)} style={{ marginTop: -8 }}>
+              <PlusIcon size={10} />
+              Add Item
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Progress bar */}
+      {total > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: pct === 100 ? "#2d5a3d" : "#1a1a1f", whiteSpace: "nowrap" }}>
+            {satisfied}/{total}
+          </span>
+          <div style={{ flex: 1, height: 6, background: "#e8e6df", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{
+              width: `${pct}%`,
+              height: "100%",
+              background: pct === 100 ? "#2d5a3d" : pct >= 50 ? "#c47520" : "#c73e3e",
+              borderRadius: 3,
+              transition: "width 0.3s ease",
+            }} />
+          </div>
+        </div>
+      )}
+
+      {total === 0 && !adding && (
+        <div style={{ fontSize: 13, color: "#9494a0", textAlign: "center", padding: "12px 0" }}>
+          No expectations generated yet
+        </div>
+      )}
+
+      {/* Add custom item form */}
+      {adding && (
+        <div style={{ background: "#fafaf7", borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+            <input
+              placeholder="Document name (e.g. Ridge Agreement)"
+              value={newDocType}
+              onChange={(e) => setNewDocType(e.target.value)}
+              style={{
+                flex: 1, fontSize: 12, padding: "5px 10px", border: "1px solid #ddd9d0",
+                borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit",
+              }}
+            />
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <select
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              style={{
+                fontSize: 12, padding: "5px 10px", border: "1px solid #ddd9d0",
+                borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit",
+              }}
+            >
+              {DOCUMENT_CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, color: "#6b6b76", cursor: "pointer" }}>
+              <input type="checkbox" checked={newRequired} onChange={(e) => setNewRequired(e.target.checked)} />
+              Required
+            </label>
+            <div style={{ flex: 1 }} />
+            <Button size="sm" variant="primary" onClick={handleAddCustom} disabled={!newDocType.trim() || saving}>
+              Add
+            </Button>
+            <button
+              onClick={() => { setAdding(false); setNewDocType(""); }}
+              style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex" }}
+            >
+              <XIcon size={12} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Checklist by category */}
+      {Object.entries(grouped).map(([cat, items]) => {
+        const catSatisfied = items.filter((e) => e.is_satisfied).length;
+        const catTotal = items.length;
+        return (
+          <div key={cat} style={{ marginBottom: 12 }}>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 6, marginBottom: 6,
+              fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.06em",
+            }}>
+              {getCatLabel(cat)}
+              <span style={{
+                fontSize: 10, fontWeight: 600,
+                color: catSatisfied === catTotal ? "#2d5a3d" : "#c47520",
+              }}>
+                {catSatisfied}/{catTotal}
+              </span>
+            </div>
+            {items.map((exp) => (
+              <div
+                key={exp.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "5px 0",
+                  fontSize: 13,
+                  borderBottom: "1px solid #f0eee8",
+                }}
+              >
+                {/* Status indicator */}
+                <span style={{
+                  width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  background: exp.is_satisfied ? "#2d5a3d" : "transparent",
+                  border: exp.is_satisfied ? "none" : "1.5px solid #c47520",
+                }}>
+                  {exp.is_satisfied && <CheckIcon size={10} />}
+                </span>
+
+                {/* Label */}
+                <span style={{ flex: 1, color: "#1a1a1f", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {getTypeLabel(exp.document_type)}
+                </span>
+
+                {/* Source + Required badges */}
+                <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                  {sourceBadge(exp.source)}
+                  {!exp.is_satisfied && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                      color: exp.is_required ? "#c47520" : "#6b6b76",
+                      background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                    }}>
+                      {exp.is_required ? "Required" : "Recommended"}
+                    </span>
+                  )}
+                  {!exp.is_satisfied && (
+                    <button
+                      onClick={() => handleMarkNA(exp.id)}
+                      title="Mark as not applicable"
+                      style={{
+                        background: "none", border: "none", cursor: "pointer",
+                        fontSize: 10, color: "#9494a0", padding: "0 2px",
+                      }}
+                    >
+                      N/A
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {/* N/A items */}
+      {naItems.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{
+            fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase",
+            letterSpacing: "0.06em", marginBottom: 4,
+          }}>
+            Not Applicable ({naItems.length})
+          </div>
+          {naItems.map((exp) => (
+            <div
+              key={exp.id}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "4px 0", fontSize: 12, color: "#9494a0",
+              }}
+            >
+              <span style={{ textDecoration: "line-through", flex: 1 }}>
+                {getTypeLabel(exp.document_type)}
+              </span>
+              <button
+                onClick={() => handleMarkNeeded(exp.id)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  fontSize: 11, color: "#3366a8", padding: 0,
+                }}
+              >
+                Mark needed
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* View all link */}
+      {total > 0 && (
+        <button
+          onClick={onNavigateDocs}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 12, color: "#2d5a3d", fontWeight: 500, padding: "8px 0 0",
+            display: "block", width: "100%", textAlign: "center",
+          }}
+        >
+          View all in Documents tab →
+        </button>
+      )}
+    </Card>
+  );
+}
+
 /* ---- Relationships Summary Card (for Overview tab) ---- */
 function RelationshipsSummaryCard({
   relationships,
@@ -4983,7 +5338,7 @@ export default function EntityDetailPage() {
       {/* Overview Tab */}
       {activeTab === "overview" && (
         <>
-          {/* First row: Entity Information + Custom Fields */}
+          {/* First row: Entity Information + Document Completeness */}
           <div id="overview" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
             {/* Left: Entity Information */}
             <Card>
@@ -5074,11 +5429,10 @@ export default function EntityDetailPage() {
               )}
             </Card>
 
-            {/* Right: Custom Fields */}
-            <CustomFieldsCard
+            {/* Right: Document Completeness */}
+            <DocumentCompletenessCard
               entityId={entityId}
-              fields={entity.custom_fields}
-              onFieldsChange={handleCustomFieldsChange}
+              onNavigateDocs={() => setActiveTab("documents")}
             />
           </div>
 
@@ -5106,6 +5460,17 @@ export default function EntityDetailPage() {
                 onTrustDetailsChange={handleTrustDetailsChange}
                 picklist={picklist}
                 picklistLoading={picklistLoading}
+              />
+            </div>
+          )}
+
+          {/* Custom Fields (moved from top-right) */}
+          {(entity.custom_fields.length > 0 || true) && (
+            <div style={{ marginBottom: 20 }}>
+              <CustomFieldsCard
+                entityId={entityId}
+                fields={entity.custom_fields}
+                onFieldsChange={handleCustomFieldsChange}
               />
             </div>
           )}

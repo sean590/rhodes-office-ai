@@ -36,6 +36,45 @@ interface TemplateFilter {
 
 // --- System Default Expectations ---
 
+export interface SystemDefault {
+  document_type: string;
+  document_category: string;
+  is_required: boolean;
+  scope: "base" | "type" | "structure";
+  applies_to?: string; // entity type or legal structure value
+  notes?: string;
+}
+
+/**
+ * Full list of all system defaults (exported for settings UI).
+ */
+export const ALL_SYSTEM_DEFAULTS: SystemDefault[] = [
+  // Base (all entities)
+  { document_type: "operating_agreement", document_category: "formation", is_required: true, scope: "base" },
+  { document_type: "certificate_of_formation", document_category: "formation", is_required: true, scope: "base" },
+  { document_type: "ein_letter", document_category: "tax", is_required: true, scope: "base" },
+  { document_type: "registered_agent_appointment", document_category: "compliance", is_required: true, scope: "base" },
+  // Type-specific
+  { document_type: "trust_agreement", document_category: "formation", is_required: true, scope: "type", applies_to: "trust" },
+  { document_type: "ppm", document_category: "investor", is_required: false, scope: "type", applies_to: "investment_fund", notes: "Private Placement Memorandum or offering documents" },
+  { document_type: "subscription_agreement", document_category: "investor", is_required: false, scope: "type", applies_to: "investment_fund" },
+  { document_type: "certificate_of_insurance", document_category: "insurance", is_required: false, scope: "type", applies_to: "real_estate", notes: "Property insurance certificate" },
+  { document_type: "lease_agreement", document_category: "contracts", is_required: false, scope: "type", applies_to: "real_estate", notes: "If rental property" },
+  // Structure-specific
+  { document_type: "articles_of_incorporation", document_category: "formation", is_required: true, scope: "structure", applies_to: "corporation" },
+  { document_type: "bylaws", document_category: "governance", is_required: true, scope: "structure", applies_to: "corporation" },
+  { document_type: "partnership_agreement", document_category: "formation", is_required: true, scope: "structure", applies_to: "lp" },
+];
+
+/**
+ * Org-level override for a system default.
+ */
+export interface SystemDefaultOverride {
+  document_type: string;
+  is_disabled: boolean;
+  is_required: boolean;
+}
+
 /**
  * Base expectations that apply to ALL entity types.
  */
@@ -85,7 +124,12 @@ const STRUCTURE_EXPECTATIONS: Record<string, ExpectedDocument[]> = {
 export function generateSystemExpectations(
   entityType: string,
   legalStructure: string | null,
+  overrides?: SystemDefaultOverride[],
 ): ExpectedDocument[] {
+  const overrideMap = new Map(
+    (overrides || []).map((o) => [o.document_type, o])
+  );
+
   const expectations = [...BASE_EXPECTATIONS];
 
   // Trust entities: replace operating_agreement with trust_agreement
@@ -114,9 +158,17 @@ export function generateSystemExpectations(
   const structExtras = STRUCTURE_EXPECTATIONS[legalStructure || ""];
   if (structExtras) expectations.push(...structExtras);
 
+  // Apply org overrides: disable items or change required status
+  const filtered = expectations.filter((e) => {
+    const override = overrideMap.get(e.document_type);
+    if (override?.is_disabled) return false;
+    if (override) e.is_required = override.is_required;
+    return true;
+  });
+
   // Deduplicate by document_type
   const seen = new Set<string>();
-  return expectations.filter((e) => {
+  return filtered.filter((e) => {
     if (seen.has(e.document_type)) return false;
     seen.add(e.document_type);
     return true;
@@ -167,17 +219,28 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
     .eq("entity_id", entityId);
   const regStates = (registrations || []).map((r: { jurisdiction: string }) => r.jurisdiction);
 
-  // 1. Generate system defaults
-  const systemExpectations = generateSystemExpectations(entity.type, entity.legal_structure);
-
-  // 2. Fetch org templates
+  // 1. Fetch org templates (includes system overrides with source='system')
   const { data: templates } = await admin
     .from("document_expectation_templates")
     .select("*")
     .eq("organization_id", entity.organization_id);
 
+  // Extract system default overrides
+  const systemOverrides: SystemDefaultOverride[] = (templates || [])
+    .filter((t: Record<string, unknown>) => t.source === "system")
+    .map((t: Record<string, unknown>) => ({
+      document_type: t.document_type as string,
+      is_disabled: (t.applies_to_filter as Record<string, unknown>)?.disabled === true,
+      is_required: t.is_required as boolean,
+    }));
+
+  // 2. Generate system defaults with org overrides applied
+  const systemExpectations = generateSystemExpectations(entity.type, entity.legal_structure, systemOverrides);
+
+  // 3. Apply non-system templates
   const templateExpectations: ExpectedDocument[] = [];
   for (const tpl of templates || []) {
+    if ((tpl.source as string) === "system") continue; // already handled via overrides
     if (matchesFilter(entity as EntityInfo, tpl.applies_to_filter || {}, regStates)) {
       templateExpectations.push({
         document_type: tpl.document_type,
