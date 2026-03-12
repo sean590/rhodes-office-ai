@@ -1183,7 +1183,7 @@ function DocumentCompletenessCard({
 }) {
   const [expectations, setExpectations] = useState<Expectation[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [initAttempted, setInitAttempted] = useState(false);
+  const initAttemptedRef = useRef(false);
   const [adding, setAdding] = useState(false);
   const [newDocType, setNewDocType] = useState("");
   const [newCategory, setNewCategory] = useState("formation");
@@ -1208,8 +1208,8 @@ function DocumentCompletenessCard({
   // Auto-init if no confirmed (non-suggestion, non-NA) expectations
   const hasConfirmed = expectations.some((e) => !e.is_suggestion && !e.is_not_applicable);
   useEffect(() => {
-    if (!loaded || initAttempted || hasConfirmed) return;
-    setInitAttempted(true);
+    if (!loaded || initAttemptedRef.current || hasConfirmed) return;
+    initAttemptedRef.current = true;
     fetch(`/api/entities/${entityId}/expectations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1218,7 +1218,7 @@ function DocumentCompletenessCard({
       const res = await fetch(`/api/entities/${entityId}/expectations`);
       if (res.ok) setExpectations(await res.json());
     }).catch(() => {});
-  }, [loaded, initAttempted, hasConfirmed, entityId]);
+  }, [loaded, hasConfirmed, entityId]);
 
   const handleMarkNA = async (id: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
@@ -3741,11 +3741,11 @@ function DocumentsTab({
   }, [entityId, documents]); // re-fetch when documents change
 
   // Initialize expectations if no confirmed (non-suggestion, non-NA) items
-  const [initAttempted, setInitAttempted] = useState(false);
+  const initAttemptedRef2 = useRef(false);
   const hasConfirmedExpectations = expectations.some((e) => !e.is_suggestion && !e.is_not_applicable);
   useEffect(() => {
-    if (!expectationsLoaded || initAttempted || hasConfirmedExpectations) return;
-    setInitAttempted(true);
+    if (!expectationsLoaded || initAttemptedRef2.current || hasConfirmedExpectations) return;
+    initAttemptedRef2.current = true;
     fetch(`/api/entities/${entityId}/expectations`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3762,7 +3762,7 @@ function DocumentsTab({
         setExpectations(data);
       }
     }).catch((err) => console.error("Expectations init error:", err));
-  }, [expectationsLoaded, initAttempted, hasConfirmedExpectations, entityId]);
+  }, [expectationsLoaded, hasConfirmedExpectations, entityId]);
 
   const handleMarkNA = async (expectationId: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
