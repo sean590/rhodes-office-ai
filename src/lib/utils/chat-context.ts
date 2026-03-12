@@ -42,7 +42,7 @@ export async function buildChatContext(orgId: string) {
     managersRes,
     membersRes,
     trustDetailsRes,
-    trustRolesRes,
+    _trustRolesRes,
     capTableRes,
     partnershipRepsRes,
     entityRolesRes,

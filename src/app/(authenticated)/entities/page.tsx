@@ -2,7 +2,6 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { StatCard } from "@/components/ui/stat-card";
 import { SearchInput } from "@/components/ui/search-input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -130,11 +129,6 @@ export default function EntitiesPage() {
   const activeEntities = entities.filter((e) => e.status === "active");
   const filingAlerts = useMemo(
     () => entities.filter((e) => e.filing_status === "due_soon" || e.filing_status === "overdue"),
-    [entities],
-  );
-
-  const totalRelationships = useMemo(
-    () => entities.reduce((sum, e) => sum + (e.relationship_count ?? 0), 0),
     [entities],
   );
 

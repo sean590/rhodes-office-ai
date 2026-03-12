@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Card } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ArrowIcon, PlusIcon, XIcon, DocIcon, UploadIcon } from "@/components/ui/icons";
@@ -85,8 +84,6 @@ const FILTER_TYPES = [
   { value: "equity", label: "Equity" },
   { value: "loan", label: "Loan" },
 ];
-
-const FEE_TYPES = new Set(["profit_share", "fixed_fee", "management_fee", "performance_fee"]);
 
 const EMPTY_FORM = {
   type: "profit_share",
@@ -205,21 +202,6 @@ export default function RelationshipsPage() {
       return true;
     });
   }, [relationships, typeFilter, partyFilter]);
-
-  const totalAnnualFees = useMemo(() => {
-    return relationships
-      .filter((r) => FEE_TYPES.has(r.type))
-      .reduce((sum, r) => sum + (r.annual_estimate ?? 0), 0);
-  }, [relationships]);
-
-  const externalParties = useMemo(() => {
-    const names = new Set<string>();
-    for (const r of relationships) {
-      if (r.from_directory_id) names.add(r.from_name);
-      if (r.to_directory_id) names.add(r.to_name);
-    }
-    return names;
-  }, [relationships]);
 
   const allPartyNames = useMemo(() => {
     const names = new Set<string>();

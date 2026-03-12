@@ -8,7 +8,7 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: "sm" | "md";
 }
 
-export function Button({ children, variant = "secondary", size = "md", className, style, ...props }: ButtonProps) {
+export function Button({ children, variant = "secondary", size = "md", className: _className, style, ...props }: ButtonProps) {
   const isPrimary = variant === "primary";
   const isSmall = size === "sm";
   return (

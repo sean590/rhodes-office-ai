@@ -17,9 +17,7 @@ import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
-import { getFilingInfo } from "@/lib/utils/filing-status";
-import type { EntityType, TrustRoleType, Jurisdiction, CustomFieldType, InvestorType, DocumentType, LegalStructure } from "@/lib/types/enums";
-import type { DocumentCategory } from "@/lib/types/entities";
+import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure } from "@/lib/types/enums";
 import type {
   EntityDetail,
   EntityRegistration,
@@ -36,7 +34,6 @@ import type {
   ComplianceObligation,
 } from "@/lib/types/entities";
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
-import type { ObligationDisplayStatus } from "@/lib/utils/compliance-engine";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -3702,7 +3699,6 @@ function DocumentsTab({
   entityName: string;
   entityData: Record<string, unknown> | null;
 }) {
-  const router = useRouter();
   const [showUpload, setShowUpload] = useState(false);
 
   // Document completeness expectations
@@ -3893,16 +3889,6 @@ function DocumentsTab({
     outline: "none",
     width: "100%",
     boxSizing: "border-box" as const,
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#6b6b76",
-    marginBottom: 4,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
   };
 
   /* ---- Download ---- */

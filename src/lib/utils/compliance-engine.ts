@@ -124,7 +124,7 @@ export function generateComplianceObligations(
 export function calculateNextDueDate(
   formula: DueDateFormula,
   formedDate: string | null,
-  frequency: string
+  _frequency: string
 ): string | null {
   const now = new Date();
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES } from "@/lib/constants";
@@ -43,7 +43,7 @@ export function StagingReview({
   items,
   entities,
   showEntityColumn,
-  showEntityDiscovery,
+  showEntityDiscovery: _showEntityDiscovery,
   onProcess,
   onItemsChange,
 }: StagingReviewProps) {

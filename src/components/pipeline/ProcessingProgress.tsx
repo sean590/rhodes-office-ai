@@ -346,8 +346,6 @@ function QueueItemRow({
     : (item.staged_doc_type ? (DOCUMENT_TYPE_LABELS[item.staged_doc_type] || item.staged_doc_type) : "Unknown");
 
   const hasSummary = item.ai_summary && item.ai_summary.length > 0;
-  const summaryTruncated = item.ai_summary && item.ai_summary.length > 120;
-
   return (
     <>
       <div

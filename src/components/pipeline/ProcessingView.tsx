@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import type { QueueItem } from "@/lib/types/entities";
 import { SuccessSummary } from "./SuccessSummary";
 import { ApprovalCard } from "./ApprovalCard";

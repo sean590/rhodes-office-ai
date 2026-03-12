@@ -451,8 +451,6 @@ export default function SettingsPage() {
     applies_to?: string;
     notes?: string;
   }>>([]);
-  const [entityCount, setEntityCount] = useState(0);
-  const [templatesLoaded, setTemplatesLoaded] = useState(false);
   const [updatingSystemDefault, setUpdatingSystemDefault] = useState<string | null>(null);
   const [showAddTemplate, setShowAddTemplate] = useState(false);
   const [newTplDocType, setNewTplDocType] = useState("");
@@ -549,9 +547,7 @@ export default function SettingsPage() {
       setSystemStats(data.systemStats || {});
       setSystemOverrides(data.systemOverrides || {});
       setSystemDefaults(data.systemDefaults || []);
-      setEntityCount(data.entityCount || 0);
     } catch { /* non-critical */ }
-    setTemplatesLoaded(true);
   }, []);
 
   // Fetch detected patterns

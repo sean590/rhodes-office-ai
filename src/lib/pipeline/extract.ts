@@ -461,11 +461,9 @@ export async function extractDocument(
   }
 
   let userContent: unknown[];
-  let pdfAnalysis: { page_count: number; tier: string } | null = null;
 
   if (isPdf) {
     const analysis = await analyzePdf(buffer, docType);
-    pdfAnalysis = { page_count: analysis.page_count, tier: analysis.tier };
     userContent = await buildPdfContent(buffer, analysis, docName, docType, year);
   } else if (isImage) {
     const base64 = buffer.toString("base64");
