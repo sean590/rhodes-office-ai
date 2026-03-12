@@ -5,6 +5,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRuleById, calculateNextDueDateAfterCompletion } from "@/lib/utils/compliance-engine";
+import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,14 +29,19 @@ export interface ApplyOptions {
 export async function applyActions(
   actions: Array<{ action: string; data: Record<string, unknown> }>,
   options: ApplyOptions = {}
-): Promise<{ results: ApplyResult[]; firstCreatedEntityId: string | null }> {
+): Promise<{ results: ApplyResult[]; firstCreatedEntityId: string | null; createdEntityIds: string[] }> {
   const supabase = createAdminClient();
   const results: ApplyResult[] = [];
   let firstCreatedEntityId: string | null = null;
+  const createdEntityIds: string[] = [];
   const createdTrustDetailIds = new Map<string, string>();
+  // Map indexed placeholders (new_entity_0, new_entity_1, ...) to real entity IDs
+  const placeholderMap: Record<string, string> = {};
 
   const resolveEntityId = (value: unknown): string | null => {
     if (typeof value === "string" && UUID_REGEX.test(value)) return value;
+    // Check indexed placeholder (new_entity_0, new_entity_1, ...)
+    if (typeof value === "string" && placeholderMap[value]) return placeholderMap[value];
     return firstCreatedEntityId || options.existingEntityId || null;
   };
 
@@ -43,6 +49,18 @@ export async function applyActions(
     // Fix non-UUID entity_id placeholders
     if (item.data?.entity_id && !UUID_REGEX.test(item.data.entity_id as string)) {
       item.data.entity_id = resolveEntityId(item.data.entity_id);
+    }
+    // Fix non-UUID trust_detail_id placeholders (new_entity_N references)
+    if (item.data?.trust_detail_id && !UUID_REGEX.test(item.data.trust_detail_id as string)) {
+      const resolved = resolveEntityId(item.data.trust_detail_id);
+      // trust_detail_id placeholder actually refers to an entity_id — resolve via createdTrustDetailIds
+      if (resolved) {
+        item.data.trust_detail_id = createdTrustDetailIds.get(resolved) || null;
+        if (!item.data.trust_detail_id) {
+          // Set entity_id so add_trust_role can look it up
+          item.data.entity_id = resolved;
+        }
+      }
     }
 
     try {
@@ -90,6 +108,10 @@ export async function applyActions(
             }
           }
 
+          // Track all created entity IDs and indexed placeholders
+          placeholderMap[`new_entity_${createdEntityIds.length}`] = data.id;
+          placeholderMap["new_entity"] = placeholderMap["new_entity"] || data.id;
+          createdEntityIds.push(data.id);
           if (!firstCreatedEntityId) {
             firstCreatedEntityId = data.id;
           }
@@ -166,20 +188,86 @@ export async function applyActions(
         }
 
         case "add_member": {
+          const memberName = item.data.name as string;
+          const memberEntityId = item.data.entity_id as string;
+
+          // Resolve directory entry by name + aliases (with punctuation normalization)
+          let memberDirId = (item.data.directory_entry_id as string) || null;
+          if (!memberDirId) {
+            const { data: dirEntries } = await supabase
+              .from("directory_entries")
+              .select("id, name, aliases");
+            if (dirEntries) {
+              const match = findDirectoryMatch(memberName, dirEntries);
+              if (match) memberDirId = match.id;
+            }
+          }
+
           const { data, error } = await supabase
             .from("entity_members")
-            .insert({ entity_id: item.data.entity_id, name: item.data.name })
+            .insert({
+              entity_id: memberEntityId,
+              name: memberName,
+              directory_entry_id: memberDirId,
+            })
             .select()
             .single();
           if (error) throw error;
           results.push({ action: "add_member", success: true, data });
+
+          // Auto-create cap table entry if one doesn't exist for this person
+          const { data: capEntries } = await supabase
+            .from("cap_table_entries")
+            .select("id, investor_name, investor_directory_id")
+            .eq("entity_id", memberEntityId);
+
+          const normalizedMember = normalizeName(memberName);
+          const existingCap = (capEntries || []).find(
+            (c) => normalizeName(c.investor_name || "") === normalizedMember
+          );
+
+          if (!existingCap) {
+            await supabase
+              .from("cap_table_entries")
+              .insert({
+                entity_id: memberEntityId,
+                investor_name: memberName,
+                investor_type: "individual",
+                ownership_pct: 0,
+                capital_contributed: 0,
+                investor_directory_id: memberDirId,
+              });
+          } else if (memberDirId && !existingCap.investor_directory_id) {
+            await supabase
+              .from("cap_table_entries")
+              .update({ investor_directory_id: memberDirId })
+              .eq("id", existingCap.id);
+          }
+
           break;
         }
 
         case "add_manager": {
+          const managerName = item.data.name as string;
+          const managerEntityId = item.data.entity_id as string;
+
+          // Resolve directory entry by name + aliases
+          let managerDirId: string | null = null;
+          const { data: mgrDirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases");
+          if (mgrDirEntries) {
+            const match = findDirectoryMatch(managerName, mgrDirEntries);
+            if (match) managerDirId = match.id;
+          }
+
           const { data, error } = await supabase
             .from("entity_managers")
-            .insert({ entity_id: item.data.entity_id, name: item.data.name })
+            .insert({
+              entity_id: managerEntityId,
+              name: managerName,
+              directory_entry_id: managerDirId,
+            })
             .select()
             .single();
           if (error) throw error;
@@ -257,12 +345,24 @@ export async function applyActions(
           }
           if (!trustDetailId) throw new Error("Could not resolve trust_detail_id");
 
+          // Resolve directory entry by name + aliases
+          const trustRoleName = item.data.name as string;
+          let trustRoleDirId: string | null = null;
+          const { data: trDirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases");
+          if (trDirEntries) {
+            const match = findDirectoryMatch(trustRoleName, trDirEntries);
+            if (match) trustRoleDirId = match.id;
+          }
+
           const { data, error } = await supabase
             .from("trust_roles")
             .insert({
               trust_detail_id: trustDetailId,
               role: item.data.role,
-              name: item.data.name,
+              name: trustRoleName,
+              directory_entry_id: trustRoleDirId,
             })
             .select()
             .single();
@@ -318,38 +418,113 @@ export async function applyActions(
         }
 
         case "update_cap_table": {
+          const capEntityId = item.data.entity_id as string;
+          const investorName = item.data.investor_name as string;
+
           if (item.data.replaces_investor_name) {
             await supabase
               .from("cap_table_entries")
               .delete()
-              .eq("entity_id", item.data.entity_id)
+              .eq("entity_id", capEntityId)
               .eq("investor_name", item.data.replaces_investor_name);
           }
 
-          const { data, error } = await supabase
+          // Resolve directory entry by investor name + aliases (with punctuation normalization)
+          let capDirId: string | null = null;
+          const { data: capDirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases");
+          if (capDirEntries) {
+            const dirMatch = findDirectoryMatch(investorName, capDirEntries);
+            if (dirMatch) capDirId = dirMatch.id;
+          }
+
+          // Check for existing investor by normalized name to prevent duplicates
+          const { data: allCapForEntity } = await supabase
             .from("cap_table_entries")
-            .insert({
-              entity_id: item.data.entity_id,
-              investor_name: item.data.investor_name,
-              investor_type: item.data.investor_type || "other",
-              units: item.data.units ?? null,
-              ownership_pct: item.data.ownership_pct || 0,
-              capital_contributed: item.data.capital_contributed ?? 0,
-            })
-            .select()
-            .single();
-          if (error) throw error;
-          results.push({ action: "update_cap_table", success: true, data });
+            .select("id, investor_name, investor_directory_id")
+            .eq("entity_id", capEntityId);
+
+          const normalizedInvestor = normalizeName(investorName);
+          const existingInvestor = (allCapForEntity || []).find(
+            (c) => normalizeName(c.investor_name || "") === normalizedInvestor
+          );
+
+          if (existingInvestor) {
+            // Update existing entry instead of creating a duplicate
+            const capUpdate: Record<string, unknown> = {
+              investor_type: item.data.investor_type || undefined,
+              units: item.data.units ?? undefined,
+              ownership_pct: item.data.ownership_pct || undefined,
+              capital_contributed: item.data.capital_contributed ?? undefined,
+            };
+            // Link to directory if not already linked
+            if (capDirId && !existingInvestor.investor_directory_id) {
+              capUpdate.investor_directory_id = capDirId;
+            }
+            const { data, error } = await supabase
+              .from("cap_table_entries")
+              .update(capUpdate)
+              .eq("id", existingInvestor.id)
+              .select()
+              .single();
+            if (error) throw error;
+            results.push({ action: "update_cap_table", success: true, data });
+          } else {
+            const { data, error } = await supabase
+              .from("cap_table_entries")
+              .insert({
+                entity_id: capEntityId,
+                investor_name: investorName,
+                investor_type: item.data.investor_type || "other",
+                units: item.data.units ?? null,
+                ownership_pct: item.data.ownership_pct || 0,
+                capital_contributed: item.data.capital_contributed ?? 0,
+                investor_directory_id: capDirId,
+              })
+              .select()
+              .single();
+            if (error) throw error;
+            results.push({ action: "update_cap_table", success: true, data });
+          }
+
+          // Auto-create member if one doesn't exist for this investor
+          const { data: allMembers } = await supabase
+            .from("entity_members")
+            .select("id, name, directory_entry_id")
+            .eq("entity_id", capEntityId);
+
+          const existingMember = (allMembers || []).find(
+            (m) => normalizeName(m.name) === normalizedInvestor
+          );
+
+          if (!existingMember) {
+            await supabase
+              .from("entity_members")
+              .insert({
+                entity_id: capEntityId,
+                name: investorName,
+                directory_entry_id: capDirId,
+              });
+          } else if (capDirId && !existingMember.directory_entry_id) {
+            // Link existing member to directory if not already linked
+            await supabase
+              .from("entity_members")
+              .update({ directory_entry_id: capDirId })
+              .eq("id", existingMember.id);
+          }
+
           break;
         }
 
         case "create_directory_entry": {
-          // Skip if a directory entry with this name already exists
-          const { data: existing } = await supabase
+          // Skip if a directory entry with this name already exists (checking aliases too)
+          const dirEntryName = item.data.name as string;
+          const { data: allDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name")
-            .ilike("name", item.data.name as string)
-            .maybeSingle();
+            .select("id, name, aliases");
+
+          const existing = allDirEntries ? findDirectoryMatch(dirEntryName, allDirEntries) : null;
 
           if (existing) {
             results.push({ action: "create_directory_entry", success: true, data: existing });
@@ -399,10 +574,26 @@ export async function applyActions(
         }
 
         case "add_partnership_rep": {
+          const repName = item.data.name as string;
+
+          // Resolve directory entry by name + aliases
+          let repDirId: string | null = null;
+          const { data: repDirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases");
+          if (repDirEntries) {
+            const match = findDirectoryMatch(repName, repDirEntries);
+            if (match) repDirId = match.id;
+          }
+
           const { data, error } = await supabase
             .from("entity_partnership_reps")
             .upsert(
-              { entity_id: item.data.entity_id, name: item.data.name },
+              {
+                entity_id: item.data.entity_id,
+                name: repName,
+                directory_entry_id: repDirId,
+              },
               { onConflict: "entity_id,name" }
             )
             .select()
@@ -413,12 +604,25 @@ export async function applyActions(
         }
 
         case "add_role": {
+          const roleName = item.data.name as string;
+
+          // Resolve directory entry by name + aliases
+          let roleDirId: string | null = null;
+          const { data: roleDirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases");
+          if (roleDirEntries) {
+            const match = findDirectoryMatch(roleName, roleDirEntries);
+            if (match) roleDirId = match.id;
+          }
+
           const { data, error } = await supabase
             .from("entity_roles")
             .insert({
               entity_id: item.data.entity_id,
               role_title: item.data.role_title,
-              name: item.data.name,
+              name: roleName,
+              directory_entry_id: roleDirId,
             })
             .select()
             .single();
@@ -542,5 +746,5 @@ export async function applyActions(
     }
   }
 
-  return { results, firstCreatedEntityId };
+  return { results, firstCreatedEntityId, createdEntityIds };
 }

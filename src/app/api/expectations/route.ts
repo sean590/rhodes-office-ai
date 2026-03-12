@@ -31,7 +31,7 @@ export async function GET() {
 
     // Fetch entity names for grouping
     const entityIds = [...new Set((data || []).map((e: { entity_id: string }) => e.entity_id))];
-    let entityNames: Record<string, string> = {};
+    const entityNames: Record<string, string> = {};
 
     if (entityIds.length > 0) {
       const { data: entities } = await admin

@@ -19,17 +19,20 @@ export async function GET(request: Request) {
     const admin = createAdminClient();
 
     const url = new URL(request.url);
-    const limit = Math.min(parseInt(url.searchParams.get("limit") || "500", 10), 500);
+    const limit = Math.min(parseInt(url.searchParams.get("limit") || "30", 10), 500);
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
+    const paginated = url.searchParams.get("paginated") === "true";
 
     // Fetch documents with entity names (omit heavy ai_extraction JSONB for list view)
-    const { data: docs, error } = await admin
+    const query = admin
       .from("documents")
-      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name)")
+      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name)", { count: paginated ? "exact" : undefined })
       .eq("organization_id", orgId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
+
+    const { data: docs, error, count } = await query;
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -42,8 +45,14 @@ export async function GET(request: Request) {
       entities: undefined,
     }));
 
+    if (paginated) {
+      return NextResponse.json({ documents: result, total: count ?? result.length, limit, offset }, {
+        headers: { "Cache-Control": "private, no-cache" },
+      });
+    }
+
     return NextResponse.json(result, {
-      headers: { "Cache-Control": "private, max-age=30" },
+      headers: { "Cache-Control": "private, no-cache" },
     });
   } catch (err) {
     console.error("GET /api/documents error:", err);

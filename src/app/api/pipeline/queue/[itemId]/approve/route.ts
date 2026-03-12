@@ -52,8 +52,102 @@ export async function POST(
 
     let newEntityId: string | null = null;
 
+    // Handle multi_entity_creation: replace create_entity actions for entities that already exist
+    if (item.approval_reason === "multi_entity_creation" && Array.isArray(item.ai_proposed_actions)) {
+      const proposedEntities = (item.ai_proposed_entities || []) as Array<Record<string, unknown>>;
+      const actions = item.ai_proposed_actions as Array<{ action: string; data: Record<string, unknown> }>;
+
+      // Fuzzy name matching — handles "Gift Trust" vs "Trust", punctuation diffs
+      const fuzzyMatch = (a: string, b: string): boolean => {
+        const normalize = (s: string) => s.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").replace(/\s+/g, " ").trim();
+        const na = normalize(a);
+        const nb = normalize(b);
+        if (na === nb) return true;
+        const wordsA = new Set(na.split(" "));
+        const wordsB = new Set(nb.split(" "));
+        const intersection = [...wordsA].filter((w) => wordsB.has(w)).length;
+        const smaller = Math.min(wordsA.size, wordsB.size);
+        return smaller > 0 && intersection / smaller >= 0.8;
+      };
+
+      // Build a map of proposed entity names to existing entity IDs
+      const existingMap = new Map<string, string>();
+      if (proposedEntities.length > 0) {
+        const { data: orgEntities } = await admin
+          .from("entities")
+          .select("id, name")
+          .eq("organization_id", orgId);
+
+        for (const pe of proposedEntities) {
+          const peName = String(pe.name || "");
+          const match = (orgEntities || []).find((e) => fuzzyMatch(e.name, peName));
+          if (match) {
+            existingMap.set(peName.toLowerCase(), match.id);
+          }
+        }
+      }
+
+      // Replace create_entity actions with placeholder resolutions for existing entities
+      if (existingMap.size > 0) {
+        let createIdx = 0;
+        const placeholderToExisting = new Map<string, string>();
+        const filteredActions: typeof actions = [];
+
+        for (const action of actions) {
+          if (action.action === "create_entity") {
+            const name = String(action.data.name || "").toLowerCase();
+            const existingId = existingMap.get(name);
+            if (existingId) {
+              // Map the placeholder to existing entity ID — skip the create
+              placeholderToExisting.set(`new_entity_${createIdx}`, existingId);
+              placeholderToExisting.set("new_entity", placeholderToExisting.get("new_entity") || existingId);
+            } else {
+              filteredActions.push(action);
+            }
+            createIdx++;
+          } else {
+            filteredActions.push(action);
+          }
+        }
+
+        // Resolve placeholders in remaining actions
+        for (const action of filteredActions) {
+          for (const [key, value] of Object.entries(action.data)) {
+            if (typeof value === "string" && placeholderToExisting.has(value)) {
+              action.data[key] = placeholderToExisting.get(value)!;
+            }
+          }
+        }
+
+        item.ai_proposed_actions = filteredActions;
+
+        // Set the first existing entity as the primary entity if none set
+        if (!item.ai_entity_id && !item.staged_entity_id) {
+          const firstExisting = Array.from(existingMap.values())[0];
+          if (firstExisting) {
+            item.ai_entity_id = firstExisting;
+          }
+        }
+
+        // Store existing entity IDs for linking later (via ai_related_entities)
+        const existingRelated = (item.ai_related_entities || []) as Array<Record<string, unknown>>;
+        for (const [, existingId] of existingMap) {
+          if (existingId !== item.ai_entity_id && !existingRelated.some((r) => r.entity_id === existingId)) {
+            existingRelated.push({
+              entity_id: existingId,
+              role: "related",
+              confidence: "high",
+              reason: "Entity referenced in umbrella document",
+            });
+          }
+        }
+        item.ai_related_entities = existingRelated;
+      }
+    }
+
     // Handle new_entity approval: create the entity first
-    if (item.approval_reason === "new_entity" && item.ai_proposed_entity) {
+    // Skip if user already assigned an existing entity (user_corrected = true means PATCH was called)
+    if (item.approval_reason === "new_entity" && item.ai_proposed_entity && !item.user_corrected) {
       const proposed = item.ai_proposed_entity as Record<string, unknown>;
       const { data: newEntity, error: entityError } = await admin
         .from("entities")

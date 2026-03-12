@@ -4,12 +4,13 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
-import { StatCard } from "@/components/ui/stat-card";
+// StatCard available for future use
+// import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
-import { DocIcon, SearchIcon, XIcon, UploadIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
+import { DocIcon, SearchIcon, XIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
-import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
+import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import type { DocumentType } from "@/lib/types/enums";
@@ -70,6 +71,7 @@ export default function DocumentsPage() {
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(30);
 
   // Missing expectations state
   const [missingExpectations, setMissingExpectations] = useState<Array<{
@@ -84,7 +86,7 @@ export default function DocumentsPage() {
       source: string;
     }>;
   }>>([]);
-  const [missingLoaded, setMissingLoaded] = useState(false);
+  const [, setMissingLoaded] = useState(false);
 
   // Pipeline upload state
   const [showUpload, setShowUpload] = useState(false);
@@ -177,16 +179,15 @@ export default function DocumentsPage() {
     return result;
   }, [documents, categoryFilter, searchQuery]);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setVisibleCount(30);
+  }, [categoryFilter, searchQuery]);
+
+  const visibleDocs = filtered.slice(0, visibleCount);
+  const hasMore = visibleCount < filtered.length;
+
   /* ---- Stats ---- */
-  const aiProcessed = documents.filter((d) => d.ai_extracted).length;
-  const categoryCounts: Record<string, number> = {};
-  documents.forEach((d) => {
-    const cat = d.document_category || getDocCategory(d.document_type);
-    categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-  });
-  const topCategories = Object.entries(categoryCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
 
   /* ---- AI Process ---- */
   const handleProcess = async (docId: string) => {
@@ -283,12 +284,14 @@ export default function DocumentsPage() {
   /* ---- Delete ---- */
   const handleDelete = async (docId: string) => {
     if (!confirm("Delete this document?")) return;
+    // Optimistic removal from UI
+    setDocuments((prev) => prev.filter((d) => d.id !== docId));
     try {
       const res = await fetch(`/api/documents/${docId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Delete failed");
-      fetchAll();
     } catch (err) {
       console.error("Delete error:", err);
+      fetchAll(); // Revert on failure
     }
   };
 
@@ -326,29 +329,6 @@ export default function DocumentsPage() {
     } catch (err) {
       console.error("Rename error:", err);
     }
-  };
-
-  const inputStyle: React.CSSProperties = {
-    background: "#fafaf7",
-    border: "1px solid #ddd9d0",
-    borderRadius: 6,
-    padding: "6px 10px",
-    fontSize: 13,
-    fontFamily: "inherit",
-    color: "#1a1a1f",
-    outline: "none",
-    width: "100%",
-    boxSizing: "border-box" as const,
-  };
-
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#6b6b76",
-    marginBottom: 4,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
   };
 
   /* ---- Render ---- */
@@ -827,10 +807,11 @@ export default function DocumentsPage() {
           )}
         </div>
       ) : (
-        isMobile ? (
+        <>
+        {isMobile ? (
           /* ---- Mobile: Card layout ---- */
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {filtered.map((doc) => {
+            {visibleDocs.map((doc) => {
               const docCategory = doc.document_category || getDocCategory(doc.document_type);
               const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
               const typeLabel = DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type;
@@ -1123,7 +1104,7 @@ export default function DocumentsPage() {
             </div>
 
             {/* Table rows */}
-            {filtered.map((doc) => {
+            {visibleDocs.map((doc) => {
               const isExpanded = expandedDocId === doc.id;
               const docCategory = doc.document_category || getDocCategory(doc.document_type);
               const categoryLabel = DOCUMENT_CATEGORY_LABELS[docCategory as DocumentCategory] || docCategory;
@@ -1390,7 +1371,28 @@ export default function DocumentsPage() {
               );
             })}
           </Card>
-        )
+        )}
+
+        {/* Load more */}
+        {hasMore && (
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setVisibleCount((prev) => prev + 30)}
+            >
+              Load more ({filtered.length - visibleCount} remaining)
+            </Button>
+          </div>
+        )}
+        {!hasMore && filtered.length > 30 && (
+          <div style={{ textAlign: "center", padding: "12px 0" }}>
+            <span style={{ fontSize: 12, color: "#9494a0" }}>
+              Showing all {filtered.length} documents
+            </span>
+          </div>
+        )}
+        </>
       ))}
     </div>
   );

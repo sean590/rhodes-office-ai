@@ -38,13 +38,14 @@ function toEntityTypeScope(ls: LegalStructure | null): EntityTypeScope | null {
   if (!ls) return null;
   switch (ls) {
     case "llc":
-    case "series_llc":
       return "llc";
     case "corporation":
       return "corporation";
     case "lp":
       return "lp";
     case "trust":
+    case "grantor_trust":
+    case "non_grantor_trust":
       return "trust";
     case "gp":
     case "sole_prop":

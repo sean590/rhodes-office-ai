@@ -32,6 +32,7 @@ interface EntityListItem {
   members: { id: string; name: string; ref_entity_id: string | null }[];
   filing_status: "current" | "due_soon" | "overdue";
   relationship_count: number;
+  doc_completion: { total: number; satisfied: number };
 }
 
 /* ------------------------------------------------------------------ */
@@ -53,13 +54,6 @@ const FILING_STATUS_LABELS: Record<string, string> = {
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
 /* ------------------------------------------------------------------ */
-
-function getAllJurisdictions(entity: EntityListItem): string[] {
-  const codes = new Set<string>();
-  if (entity.formation_state) codes.add(entity.formation_state);
-  entity.registrations.forEach((r) => codes.add(r.jurisdiction));
-  return Array.from(codes);
-}
 
 /* Table styles (stable references — avoids re-creation on every render) */
 const thStyle: React.CSSProperties = {
@@ -134,12 +128,6 @@ export default function EntitiesPage() {
 
   /* Derived stats */
   const activeEntities = entities.filter((e) => e.status === "active");
-  const uniqueJurisdictions = useMemo(() => {
-    const codes = new Set<string>();
-    entities.forEach((e) => getAllJurisdictions(e).forEach((c) => codes.add(c)));
-    return codes.size;
-  }, [entities]);
-
   const filingAlerts = useMemo(
     () => entities.filter((e) => e.filing_status === "due_soon" || e.filing_status === "overdue"),
     [entities],
@@ -236,6 +224,9 @@ export default function EntitiesPage() {
               const typeLabel = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
               const filingColor = FILING_STATUS_COLORS[entity.filing_status] ?? "#9494a0";
               const filingLabel = FILING_STATUS_LABELS[entity.filing_status] ?? entity.filing_status;
+              const { total, satisfied } = entity.doc_completion ?? { total: 0, satisfied: 0 };
+              const pct = total > 0 ? Math.round((satisfied / total) * 100) : 0;
+              const docColor = total === 0 ? "#9494a0" : pct === 100 ? "#2d8a4e" : pct >= 50 ? "#a68b1a" : "#c73e3e";
 
               return (
                 <div
@@ -264,16 +255,36 @@ export default function EntitiesPage() {
                     </div>
                   )}
 
-                  {/* State + EIN */}
-                  <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, color: "#1a1a1f" }}>
-                    <span>
-                      {entity.formation_state
-                        ? getStateLabel(entity.formation_state as never)
-                        : "\u2014"}
-                    </span>
+                  {/* EIN + Doc completion */}
+                  <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 12, color: "#1a1a1f", alignItems: "center" }}>
                     <span style={{ fontFamily: "'DM Mono', monospace" }}>
                       {maskEin(entity.ein)}
                     </span>
+                    {total > 0 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <div
+                          style={{
+                            width: 36,
+                            height: 5,
+                            borderRadius: 3,
+                            background: "#e8e6df",
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${pct}%`,
+                              height: "100%",
+                              borderRadius: 3,
+                              background: docColor,
+                            }}
+                          />
+                        </div>
+                        <span style={{ fontSize: 11, color: docColor, fontWeight: 500 }}>
+                          {satisfied}/{total}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Filing status */}
@@ -302,16 +313,15 @@ export default function EntitiesPage() {
               <tr>
                 <th style={thStyle}>Entity Name</th>
                 <th style={thStyle}>Type</th>
-                <th style={thStyle}>Formed In</th>
-                <th style={thStyle}>Registered In</th>
                 <th style={thStyle}>EIN</th>
+                <th style={thStyle}>Docs</th>
                 <th style={thStyle}>Filing Status</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ padding: 32, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
+                  <td colSpan={5} style={{ padding: 32, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
                     {search ? "No entities match your search." : "No entities found."}
                   </td>
                 </tr>
@@ -321,7 +331,9 @@ export default function EntitiesPage() {
                   const typeLabel = ENTITY_TYPE_LABELS[entity.type] ?? entity.type;
                   const filingColor = FILING_STATUS_COLORS[entity.filing_status] ?? "#9494a0";
                   const filingLabel = FILING_STATUS_LABELS[entity.filing_status] ?? entity.filing_status;
-                  const jurisdictions = getAllJurisdictions(entity);
+                  const { total, satisfied } = entity.doc_completion ?? { total: 0, satisfied: 0 };
+                  const pct = total > 0 ? Math.round((satisfied / total) * 100) : 0;
+                  const docColor = total === 0 ? "#9494a0" : pct === 100 ? "#2d8a4e" : pct >= 50 ? "#a68b1a" : "#c73e3e";
 
                   return (
                     <tr
@@ -347,18 +359,6 @@ export default function EntitiesPage() {
                         <Badge label={typeLabel} color={typeColor.text} bg={typeColor.bg} />
                       </td>
 
-                      {/* Formed In */}
-                      <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
-                        {entity.formation_state
-                          ? getStateLabel(entity.formation_state as never)
-                          : "\u2014"}
-                      </td>
-
-                      {/* Registered In */}
-                      <td style={{ ...tdStyle, fontSize: 13, color: "#1a1a1f" }}>
-                        {jurisdictions.length > 0 ? jurisdictions.join(", ") : "\u2014"}
-                      </td>
-
                       {/* EIN (masked, mono font) */}
                       <td
                         style={{
@@ -369,6 +369,38 @@ export default function EntitiesPage() {
                         }}
                       >
                         {maskEin(entity.ein)}
+                      </td>
+
+                      {/* Document completion */}
+                      <td style={tdStyle}>
+                        {total === 0 ? (
+                          <span style={{ fontSize: 12, color: "#9494a0" }}>&mdash;</span>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div
+                              style={{
+                                width: 48,
+                                height: 6,
+                                borderRadius: 3,
+                                background: "#e8e6df",
+                                overflow: "hidden",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: `${pct}%`,
+                                  height: "100%",
+                                  borderRadius: 3,
+                                  background: docColor,
+                                  transition: "width 0.3s ease",
+                                }}
+                              />
+                            </div>
+                            <span style={{ fontSize: 12, color: docColor, fontWeight: 500, minWidth: 32 }}>
+                              {satisfied}/{total}
+                            </span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Filing status */}

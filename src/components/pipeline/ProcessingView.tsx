@@ -159,14 +159,35 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   };
 
   const assignEntity = async (itemId: string, entityId: string) => {
-    // Update the queue item's entity, then ingest
+    // Update the queue item's entity and clear new_entity signals so approve
+    // doesn't create the proposed entity
     await fetch(`/api/pipeline/queue/${itemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staged_entity_id: entityId }),
+      body: JSON.stringify({
+        staged_entity_id: entityId,
+        ai_entity_id: entityId,
+      }),
     });
     // Now approve (ingest with the assigned entity)
     await approveItem(itemId);
+  };
+
+  const reassignEntity = async (itemId: string, entityId: string) => {
+    // Just update the entity assignment without approving
+    await fetch(`/api/pipeline/queue/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ staged_entity_id: entityId, ai_entity_id: entityId }),
+    });
+  };
+
+  const updateRelatedEntities = async (itemId: string, relatedEntities: Array<{ entity_id: string; entity_name: string; role: string; confidence: string; reason: string }>) => {
+    await fetch(`/api/pipeline/queue/${itemId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ai_related_entities: relatedEntities }),
+    });
   };
 
   const retryItem = async (itemId: string) => {
@@ -210,9 +231,14 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
         <style>{`
           @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
           @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+          @keyframes spin { to { transform: rotate(360deg); } }
         `}</style>
         <div style={{ padding: "16px 20px" }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#1a1a1f", marginBottom: 12 }}>
+            <div style={{
+              width: 16, height: 16, border: "2px solid #e8e6df", borderTopColor: "#2d5a3d",
+              borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0,
+            }} />
             Processing {totalFiles} file{totalFiles !== 1 ? "s" : ""}...
           </div>
           {/* Progress bar */}
@@ -261,12 +287,18 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
                 }}>
                   {item.original_filename}
                 </span>
-                <span style={{ color: "#9494a0", fontSize: 11, whiteSpace: "nowrap" }}>
-                  {isExtracting
-                    ? "extracting..."
-                    : isDone
-                      ? (childCount > 0 ? `${childCount + 1} docs extracted` : "1 doc extracted")
-                      : "queued"}
+                <span style={{ color: "#9494a0", fontSize: 11, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
+                  {isExtracting ? (
+                    <>
+                      <div style={{
+                        width: 10, height: 10, border: "1.5px solid #e8e6df", borderTopColor: "#b08000",
+                        borderRadius: "50%", animation: "spin 0.8s linear infinite", flexShrink: 0,
+                      }} />
+                      extracting...
+                    </>
+                  ) : isDone
+                    ? (childCount > 0 ? `${childCount + 1} docs extracted` : "1 doc extracted")
+                    : "queued"}
                 </span>
               </div>
             );
@@ -339,6 +371,8 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
                 onApprove={approveItem}
                 onIngestOnly={ingestOnly}
                 onAssignEntity={assignEntity}
+                onReassignEntity={reassignEntity}
+                onUpdateRelatedEntities={updateRelatedEntities}
               />
             ))}
           </div>

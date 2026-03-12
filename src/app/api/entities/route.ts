@@ -41,7 +41,7 @@ export async function GET(request: Request) {
     const entityIds = entities.map((e) => e.id);
 
     // Fetch related data in parallel
-    const [registrationsRes, managersRes, membersRes, relationshipsFromRes, relationshipsToRes, complianceRes] =
+    const [registrationsRes, managersRes, membersRes, relationshipsFromRes, relationshipsToRes, complianceRes, expectationsRes] =
       await Promise.all([
         supabase
           .from("entity_registrations")
@@ -68,6 +68,11 @@ export async function GET(request: Request) {
           .select("entity_id, status, next_due_date")
           .in("entity_id", entityIds)
           .in("status", ["pending", "overdue", "completed"]),
+        supabase
+          .from("entity_document_expectations")
+          .select("entity_id, is_required, satisfied_by, is_not_applicable, is_suggestion")
+          .in("entity_id", entityIds)
+          .eq("is_suggestion", false),
       ]);
 
     if (registrationsRes.error) {
@@ -129,6 +134,17 @@ export async function GET(request: Request) {
       oblMap.set(o.entity_id, arr);
     }
 
+    // Build document completion stats per entity
+    const expectations = expectationsRes.data || [];
+    const expMap = new Map<string, { total: number; satisfied: number }>();
+    for (const exp of expectations) {
+      if (exp.is_not_applicable) continue;
+      const stats = expMap.get(exp.entity_id) || { total: 0, satisfied: 0 };
+      stats.total += 1;
+      if (exp.satisfied_by) stats.satisfied += 1;
+      expMap.set(exp.entity_id, stats);
+    }
+
     // Build enriched entity list
     const enriched = entities.map((entity) => {
       const entityRegistrations = regMap.get(entity.id) || [];
@@ -181,6 +197,8 @@ export async function GET(request: Request) {
         worstStatus = getWorstFilingStatus(filingStatuses);
       }
 
+      const docStats = expMap.get(entity.id) || { total: 0, satisfied: 0 };
+
       return {
         ...entity,
         registrations: entityRegistrations,
@@ -188,6 +206,7 @@ export async function GET(request: Request) {
         members: entityMembers,
         filing_status: worstStatus,
         relationship_count: relCount,
+        doc_completion: docStats,
       };
     });
 

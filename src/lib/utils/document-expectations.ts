@@ -40,30 +40,33 @@ export interface SystemDefault {
   document_type: string;
   document_category: string;
   is_required: boolean;
-  scope: "base" | "type" | "structure";
-  applies_to?: string; // entity type or legal structure value
+  applies_to: string[]; // list of entity types or legal structures this applies to (empty = all non-trust)
   notes?: string;
 }
 
 /**
  * Full list of all system defaults (exported for settings UI).
+ * Each document_type appears once with its list of applicable structures/types.
  */
 export const ALL_SYSTEM_DEFAULTS: SystemDefault[] = [
-  // Base (all entities)
-  { document_type: "operating_agreement", document_category: "formation", is_required: true, scope: "base" },
-  { document_type: "certificate_of_formation", document_category: "formation", is_required: true, scope: "base" },
-  { document_type: "ein_letter", document_category: "tax", is_required: true, scope: "base" },
-  { document_type: "registered_agent_appointment", document_category: "compliance", is_required: true, scope: "base" },
+  // Base — applies to LLC-family structures (not trusts, which have their own set)
+  { document_type: "operating_agreement", document_category: "formation", is_required: true, applies_to: ["llc", "gp"] },
+  { document_type: "certificate_of_formation", document_category: "formation", is_required: true, applies_to: ["llc", "corporation", "lp", "gp"] },
+  { document_type: "ein_letter", document_category: "tax", is_required: true, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
+  { document_type: "registered_agent_appointment", document_category: "compliance", is_required: true, applies_to: ["llc", "corporation", "lp", "gp"] },
+  { document_type: "certificate_of_good_standing", document_category: "compliance", is_required: false, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
+  { document_type: "federal_tax_return", document_category: "tax", is_required: false, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
+  // Trust-specific
+  { document_type: "trust_agreement", document_category: "formation", is_required: true, applies_to: ["grantor_trust", "non_grantor_trust"] },
   // Type-specific
-  { document_type: "trust_agreement", document_category: "formation", is_required: true, scope: "type", applies_to: "trust" },
-  { document_type: "ppm", document_category: "investor", is_required: false, scope: "type", applies_to: "investment_fund", notes: "Private Placement Memorandum or offering documents" },
-  { document_type: "subscription_agreement", document_category: "investor", is_required: false, scope: "type", applies_to: "investment_fund" },
-  { document_type: "certificate_of_insurance", document_category: "insurance", is_required: false, scope: "type", applies_to: "real_estate", notes: "Property insurance certificate" },
-  { document_type: "lease_agreement", document_category: "contracts", is_required: false, scope: "type", applies_to: "real_estate", notes: "If rental property" },
+  { document_type: "ppm", document_category: "investor", is_required: false, applies_to: ["investment_fund"], notes: "Private Placement Memorandum or offering documents" },
+  { document_type: "subscription_agreement", document_category: "investor", is_required: false, applies_to: ["investment_fund"] },
+  { document_type: "certificate_of_insurance", document_category: "insurance", is_required: false, applies_to: ["real_estate"], notes: "Property insurance certificate" },
+  { document_type: "lease_agreement", document_category: "contracts", is_required: false, applies_to: ["real_estate"], notes: "If rental property" },
   // Structure-specific
-  { document_type: "articles_of_incorporation", document_category: "formation", is_required: true, scope: "structure", applies_to: "corporation" },
-  { document_type: "bylaws", document_category: "governance", is_required: true, scope: "structure", applies_to: "corporation" },
-  { document_type: "partnership_agreement", document_category: "formation", is_required: true, scope: "structure", applies_to: "lp" },
+  { document_type: "articles_of_incorporation", document_category: "formation", is_required: true, applies_to: ["corporation"] },
+  { document_type: "bylaws", document_category: "governance", is_required: true, applies_to: ["corporation"] },
+  { document_type: "partnership_agreement", document_category: "formation", is_required: true, applies_to: ["lp"] },
 ];
 
 /**
@@ -113,6 +116,13 @@ const STRUCTURE_EXPECTATIONS: Record<string, ExpectedDocument[]> = {
   lp: [
     { document_type: "partnership_agreement", document_category: "formation", is_required: true, source: "system" },
   ],
+  grantor_trust: [
+    { document_type: "trust_agreement", document_category: "formation", is_required: true, source: "system" },
+  ],
+  non_grantor_trust: [
+    { document_type: "trust_agreement", document_category: "formation", is_required: true, source: "system" },
+    { document_type: "ein_letter", document_category: "tax", is_required: true, source: "system" },
+  ],
 };
 
 // --- Core Functions ---
@@ -130,24 +140,31 @@ export function generateSystemExpectations(
     (overrides || []).map((o) => [o.document_type, o])
   );
 
-  const expectations = [...BASE_EXPECTATIONS];
+  // Grantor trusts are pass-through: they don't need their own EIN, operating agreement,
+  // certificate of formation, or registered agent. Only trust agreement.
+  // Non-grantor trusts are separate tax entities: they need their own EIN + trust agreement
+  // but not operating agreement / cert of formation.
+  const isTrustStructure = legalStructure === "grantor_trust" || legalStructure === "non_grantor_trust" || legalStructure === "trust";
 
-  // Trust entities: replace operating_agreement with trust_agreement
-  if (entityType === "trust") {
-    const idx = expectations.findIndex((e) => e.document_type === "operating_agreement");
-    if (idx !== -1) expectations.splice(idx, 1);
-  }
+  let expectations: ExpectedDocument[];
 
-  // Corporation: replace operating_agreement with articles + bylaws
-  if (legalStructure === "corporation") {
-    const idx = expectations.findIndex((e) => e.document_type === "operating_agreement");
-    if (idx !== -1) expectations.splice(idx, 1);
-  }
+  if (isTrustStructure || entityType === "trust") {
+    // Trusts don't use base expectations — build from scratch via structure
+    expectations = [];
+  } else {
+    expectations = [...BASE_EXPECTATIONS];
 
-  // LP: replace operating_agreement with partnership_agreement
-  if (legalStructure === "lp") {
-    const idx = expectations.findIndex((e) => e.document_type === "operating_agreement");
-    if (idx !== -1) expectations.splice(idx, 1);
+    // Corporation: replace operating_agreement with articles + bylaws
+    if (legalStructure === "corporation") {
+      const idx = expectations.findIndex((e) => e.document_type === "operating_agreement");
+      if (idx !== -1) expectations.splice(idx, 1);
+    }
+
+    // LP: replace operating_agreement with partnership_agreement
+    if (legalStructure === "lp") {
+      const idx = expectations.findIndex((e) => e.document_type === "operating_agreement");
+      if (idx !== -1) expectations.splice(idx, 1);
+    }
   }
 
   // Add type-specific
@@ -237,20 +254,41 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
   // 2. Generate system defaults with org overrides applied
   const systemExpectations = generateSystemExpectations(entity.type, entity.legal_structure, systemOverrides);
 
+  // Build a set of doc types that system defaults explicitly exclude for this entity.
+  // If a system default has an applies_to list and this entity's structure/type isn't in it,
+  // that doc type is "system-excluded" — templates without an explicit legal_structure filter
+  // should not re-add it.
+  const systemExcludedTypes = new Set<string>();
+  for (const sd of ALL_SYSTEM_DEFAULTS) {
+    if (sd.applies_to.length > 0) {
+      const structureMatch = entity.legal_structure && sd.applies_to.includes(entity.legal_structure);
+      const typeMatch = sd.applies_to.includes(entity.type);
+      if (!structureMatch && !typeMatch) {
+        systemExcludedTypes.add(sd.document_type);
+      }
+    }
+  }
+
   // 3. Apply non-system templates
   const templateExpectations: ExpectedDocument[] = [];
   for (const tpl of templates || []) {
     if ((tpl.source as string) === "system") continue; // already handled via overrides
-    if (matchesFilter(entity as EntityInfo, tpl.applies_to_filter || {}, regStates)) {
-      templateExpectations.push({
-        document_type: tpl.document_type,
-        document_category: tpl.document_category,
-        is_required: tpl.is_required,
-        source: "template",
-        template_id: tpl.id,
-        notes: tpl.description,
-      });
-    }
+    const filter: TemplateFilter = tpl.applies_to_filter || {};
+    if (!matchesFilter(entity as EntityInfo, filter, regStates)) continue;
+
+    // If template has no legal_structure filter (i.e. "all entities") and the doc type
+    // is system-excluded for this entity, skip it — don't re-add what the system removed.
+    const hasExplicitStructureFilter = filter.legal_structure && filter.legal_structure.length > 0;
+    if (!hasExplicitStructureFilter && systemExcludedTypes.has(tpl.document_type)) continue;
+
+    templateExpectations.push({
+      document_type: tpl.document_type,
+      document_category: tpl.document_category,
+      is_required: tpl.is_required,
+      source: "template",
+      template_id: tpl.id,
+      notes: tpl.description,
+    });
   }
 
   // 3. Merge (system first, template overrides)
@@ -302,6 +340,29 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
       console.error("Expectations upsert error:", upsertError.message, { entityId, rowCount: rows.length });
     }
   }
+
+  // Remove stale system/template expectations that no longer apply
+  // (e.g., trust changed from non-grantor to grantor — remove EIN requirement)
+  const validDocTypes = new Set(deduped.map((e) => e.document_type));
+  const staleRows = (existing || []).filter((e: Record<string, unknown>) => {
+    const source = e.source as string;
+    const docType = e.document_type as string;
+    // Only remove system/template items that aren't in the new set
+    // Preserve manual, inferred, and user-dismissed items
+    if (source !== "system" && source !== "template") return false;
+    if (e.is_not_applicable) return false;
+    return !validDocTypes.has(docType);
+  });
+
+  if (staleRows.length > 0) {
+    const staleTypes = staleRows.map((r: Record<string, unknown>) => r.document_type as string);
+    await admin
+      .from("entity_document_expectations")
+      .delete()
+      .eq("entity_id", entityId)
+      .in("document_type", staleTypes)
+      .in("source", ["system", "template"]);
+  }
 }
 
 /**
@@ -322,7 +383,12 @@ export async function applyTemplate(templateId: string): Promise<number> {
     .from("entities")
     .select("id, type, legal_structure, organization_id")
     .eq("organization_id", template.organization_id)
-    .is("deleted_at", null);
+    .neq("status", "deleted");
+
+  // Check if this template's doc type is in system defaults with restricted applies_to
+  const systemDefault = ALL_SYSTEM_DEFAULTS.find((sd) => sd.document_type === template.document_type);
+  const filter: TemplateFilter = template.applies_to_filter || {};
+  const hasExplicitStructureFilter = filter.legal_structure && filter.legal_structure.length > 0;
 
   let applied = 0;
   for (const entity of entities || []) {
@@ -333,7 +399,15 @@ export async function applyTemplate(templateId: string): Promise<number> {
       .eq("entity_id", entity.id);
     const regStates = (regs || []).map((r: { jurisdiction: string }) => r.jurisdiction);
 
-    if (!matchesFilter(entity as EntityInfo, template.applies_to_filter || {}, regStates)) continue;
+    if (!matchesFilter(entity as EntityInfo, filter, regStates)) continue;
+
+    // If template has no explicit legal_structure filter and system default restricts this
+    // doc type to specific structures, skip entities that don't match those structures.
+    if (!hasExplicitStructureFilter && systemDefault && systemDefault.applies_to.length > 0) {
+      const structureMatch = entity.legal_structure && systemDefault.applies_to.includes(entity.legal_structure);
+      const typeMatch = systemDefault.applies_to.includes(entity.type);
+      if (!structureMatch && !typeMatch) continue;
+    }
 
     // Check if expectation already exists for this entity
     const { data: existing } = await admin
@@ -370,7 +444,8 @@ export async function applyTemplate(templateId: string): Promise<number> {
 // --- Satisfaction Logic ---
 
 /**
- * After a document is created/ingested, check if it satisfies any expectations for its entity.
+ * After a document is created/ingested, check if it satisfies any expectations
+ * for its primary entity AND any linked entities (via document_entity_links).
  */
 export async function checkAndSatisfyExpectations(documentId: string): Promise<void> {
   const admin = createAdminClient();
@@ -381,23 +456,45 @@ export async function checkAndSatisfyExpectations(documentId: string): Promise<v
     .eq("id", documentId)
     .single();
 
-  if (!doc || !doc.entity_id || doc.deleted_at) return;
+  if (!doc || doc.deleted_at) return;
 
-  // Find unsatisfied expectations matching this doc type or category
+  // Collect all entity IDs to check: primary + linked
+  const entityIds = new Set<string>();
+  if (doc.entity_id) entityIds.add(doc.entity_id);
+
+  const { data: links } = await admin
+    .from("document_entity_links")
+    .select("entity_id")
+    .eq("document_id", documentId);
+
+  for (const link of links || []) {
+    if (link.entity_id) entityIds.add(link.entity_id);
+  }
+
+  if (entityIds.size === 0) return;
+
+  // Find unsatisfied expectations for ALL linked entities
   const { data: expectations } = await admin
     .from("entity_document_expectations")
-    .select("id, document_type, document_category")
-    .eq("entity_id", doc.entity_id)
+    .select("id, entity_id, document_type, document_category")
+    .in("entity_id", Array.from(entityIds))
     .eq("is_satisfied", false)
     .eq("is_not_applicable", false);
 
+  // Track which entity has already had a type match (one satisfaction per entity)
+  const satisfiedByType = new Set<string>();
+
   for (const exp of expectations || []) {
-    // Exact document_type match
     const typeMatch = exp.document_type === doc.document_type;
-    // Broader category match for generic expectations
-    const categoryMatch = exp.document_category === doc.document_category && !typeMatch;
+    // Category-only match: only for generic expectations (document_type "other" or empty),
+    // NOT when the expectation has a specific document_type like "federal_tax_return"
+    const isGenericExpectation = !exp.document_type || exp.document_type === "other";
+    const categoryMatch = isGenericExpectation && exp.document_category === doc.document_category && !typeMatch;
 
     if (typeMatch || categoryMatch) {
+      // Skip if we already satisfied a type-match for this entity
+      if (satisfiedByType.has(exp.entity_id)) continue;
+
       await admin
         .from("entity_document_expectations")
         .update({
@@ -406,8 +503,8 @@ export async function checkAndSatisfyExpectations(documentId: string): Promise<v
           updated_at: new Date().toISOString(),
         })
         .eq("id", exp.id);
-      // Only satisfy one expectation per document (prefer exact match)
-      if (typeMatch) break;
+
+      if (typeMatch) satisfiedByType.add(exp.entity_id);
     }
   }
 }
@@ -429,7 +526,8 @@ export async function unsatisfyByDocument(documentId: string): Promise<void> {
 }
 
 /**
- * Recheck all expectations for an entity by scanning its current documents.
+ * Recheck all expectations for an entity by scanning its current documents
+ * (both directly assigned and linked via document_entity_links).
  */
 export async function recheckEntityExpectations(entityId: string): Promise<void> {
   const admin = createAdminClient();
@@ -445,15 +543,39 @@ export async function recheckEntityExpectations(entityId: string): Promise<void>
     .eq("entity_id", entityId)
     .eq("is_not_applicable", false);
 
-  // Fetch current documents for the entity
-  const { data: docs } = await admin
+  // Fetch direct documents
+  const { data: directDocs } = await admin
     .from("documents")
     .select("id, document_type, document_category")
     .eq("entity_id", entityId)
     .is("deleted_at", null);
 
-  // Check each document against expectations
-  for (const doc of docs || []) {
+  // Fetch linked documents via document_entity_links
+  const { data: links } = await admin
+    .from("document_entity_links")
+    .select("document_id")
+    .eq("entity_id", entityId);
+
+  const directIds = new Set((directDocs || []).map((d) => d.id));
+  const linkedDocIds = (links || [])
+    .map((l) => l.document_id)
+    .filter((id) => !directIds.has(id));
+
+  let linkedDocs: typeof directDocs = [];
+  if (linkedDocIds.length > 0) {
+    const { data: ld } = await admin
+      .from("documents")
+      .select("id, document_type, document_category")
+      .in("id", linkedDocIds)
+      .is("deleted_at", null);
+    linkedDocs = ld || [];
+  }
+
+  // Check all documents (direct + linked) against expectations
+  const allDocs = [...(directDocs || []), ...(linkedDocs || [])];
+  for (const doc of allDocs) {
+    // Inline satisfaction check (checkAndSatisfyExpectations queries links again,
+    // but for recheck that's fine since it's a one-time operation)
     await checkAndSatisfyExpectations(doc.id);
   }
 }

@@ -48,7 +48,15 @@ export async function POST(
 
     // Get entities for matching (only if no entity_id on batch)
     let entities: Array<{ id: string; name: string; short_name: string | null }> = [];
-    if (!batch.entity_id) {
+    let batchEntityName: string | null = null;
+    if (batch.entity_id) {
+      const { data } = await admin
+        .from("entities")
+        .select("name")
+        .eq("id", batch.entity_id)
+        .single();
+      batchEntityName = data?.name || null;
+    } else {
       const { data } = await admin
         .from("entities")
         .select("id, name, short_name")
@@ -90,7 +98,7 @@ export async function POST(
           .from("document_queue")
           .select("content_hash, original_filename")
           .in("content_hash", allHashes)
-          .not("status", "in", '("rejected","error")'),
+          .in("status", ["staged", "queued", "extracting", "extracted", "review_ready"]),
       ]);
 
       for (const doc of docDupes.data || []) {
@@ -122,7 +130,9 @@ export async function POST(
       }
 
       // Upload file to storage (org-scoped path)
-      const storagePath = `${orgId}/queue/${batchId}/${file.name}`;
+      // Sanitize: Supabase Storage rejects brackets and certain special chars in keys
+      const safeName = file.name.replace(/[\[\]#?*]/g, "_");
+      const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
       const { error: uploadError } = await admin.storage
         .from("documents")
         .upload(storagePath, buffer, {
@@ -142,6 +152,11 @@ export async function POST(
       // Try to match entity
       let entityId = batch.entity_id || null;
       let entityName: string | null = null;
+
+      // Resolve name for batch-scoped entity
+      if (entityId) {
+        entityName = batchEntityName;
+      }
 
       if (!entityId && classification.entity_hint) {
         const match = matchEntityByHint(classification.entity_hint, entities);

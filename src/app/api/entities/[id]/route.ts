@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validateShortName } from "@/lib/utils/document-naming";
+import { normalizeName } from "@/lib/utils/name-matching";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { updateEntitySchema } from "@/lib/validations";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { refreshEntityExpectations } from "@/lib/utils/document-expectations";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -256,7 +258,35 @@ export async function GET(
     });
 
     // Resolve investor names on cap table entries
-    const capEntries = capTableRes.data || [];
+    // Auto-dedup cap table entries (keep newest per normalized investor name)
+    const rawCapEntries = capTableRes.data || [];
+    const capByName = new Map<string, typeof rawCapEntries>();
+    for (const entry of rawCapEntries) {
+      const key = normalizeName(entry.investor_name || "");
+      const arr = capByName.get(key) || [];
+      arr.push(entry);
+      capByName.set(key, arr);
+    }
+    const duplicateIds: string[] = [];
+    for (const entries of capByName.values()) {
+      if (entries.length > 1) {
+        // Sort by created_at descending, keep the first (newest)
+        entries.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        for (let i = 1; i < entries.length; i++) {
+          duplicateIds.push(entries[i].id);
+        }
+      }
+    }
+    if (duplicateIds.length > 0) {
+      // Clean up duplicates in the background
+      supabase
+        .from("cap_table_entries")
+        .delete()
+        .in("id", duplicateIds)
+        .then(() => {});
+    }
+    const capEntries = rawCapEntries.filter((e) => !duplicateIds.includes(e.id));
+
     const capInvestorEntityIds = new Set<string>();
     const capInvestorDirIds = new Set<string>();
 
@@ -397,6 +427,13 @@ export async function PUT(
         );
       }
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+
+    // If legal_structure or type changed, refresh document expectations
+    if ("legal_structure" in updates || "type" in updates) {
+      refreshEntityExpectations(id).catch((err) =>
+        console.error("Failed to refresh expectations after entity update:", err)
+      );
     }
 
     // Audit log

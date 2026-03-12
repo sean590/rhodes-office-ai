@@ -7,6 +7,10 @@ import {
   refreshEntityExpectations,
   recheckEntityExpectations,
 } from "@/lib/utils/document-expectations";
+import {
+  confirmSuggestion,
+  dismissSuggestion,
+} from "@/lib/utils/inference-engine";
 
 /**
  * GET /api/entities/[id]/expectations
@@ -26,6 +30,26 @@ export async function GET(
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
     const admin = createAdminClient();
+
+    // Auto-recheck: if there are unsatisfied expectations and linked documents,
+    // re-scan to catch linked docs that may satisfy expectations
+    const { count: unsatisfiedCount } = await admin
+      .from("entity_document_expectations")
+      .select("id", { count: "exact", head: true })
+      .eq("entity_id", id)
+      .eq("is_satisfied", false)
+      .eq("is_not_applicable", false);
+
+    if (unsatisfiedCount && unsatisfiedCount > 0) {
+      const { count: linkCount } = await admin
+        .from("document_entity_links")
+        .select("document_id", { count: "exact", head: true })
+        .eq("entity_id", id);
+
+      if (linkCount && linkCount > 0) {
+        await recheckEntityExpectations(id);
+      }
+    }
 
     const { data, error } = await admin
       .from("entity_document_expectations")
@@ -123,6 +147,50 @@ export async function POST(
       });
 
       return NextResponse.json(data, { status: 201 });
+    }
+
+    if (action === "confirm_suggestion") {
+      const { expectation_id } = body;
+      if (!expectation_id) {
+        return NextResponse.json({ error: "expectation_id required" }, { status: 400 });
+      }
+
+      await confirmSuggestion(expectation_id);
+
+      const reqHeaders = await headers();
+      const reqCtx = getRequestContext(reqHeaders, orgId);
+      await logAuditEvent({
+        userId: user.id,
+        action: "confirm_suggestion",
+        resourceType: "document_expectation",
+        resourceId: expectation_id,
+        entityId: id,
+        ...reqCtx,
+      });
+
+      return NextResponse.json({ success: true });
+    }
+
+    if (action === "dismiss_suggestion") {
+      const { expectation_id } = body;
+      if (!expectation_id) {
+        return NextResponse.json({ error: "expectation_id required" }, { status: 400 });
+      }
+
+      await dismissSuggestion(expectation_id);
+
+      const reqHeaders = await headers();
+      const reqCtx = getRequestContext(reqHeaders, orgId);
+      await logAuditEvent({
+        userId: user.id,
+        action: "dismiss_suggestion",
+        resourceType: "document_expectation",
+        resourceId: expectation_id,
+        entityId: id,
+        ...reqCtx,
+      });
+
+      return NextResponse.json({ success: true });
     }
 
     if (action === "mark_na" || action === "mark_needed") {

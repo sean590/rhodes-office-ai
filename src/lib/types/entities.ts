@@ -181,6 +181,7 @@ export interface Document {
   source_document_id: string | null;
   k1_recipient: string | null;
   created_at: string;
+  link_role?: string | null;  // Set when doc is linked via document_entity_links (not direct entity_id)
 }
 
 // --- Pipeline types ---
@@ -230,6 +231,14 @@ export interface QueueItem {
   ai_proposed_actions: ProposedAction[] | null;
   ai_direction: string | null;
   ai_proposed_entity: Record<string, unknown> | null;
+  ai_proposed_entities: Array<Record<string, unknown>> | null;
+  ai_related_entities: Array<{
+    entity_id: string;
+    entity_name: string;
+    role: string;
+    confidence: string;
+    reason: string;
+  }> | null;
 
   // Composite
   is_composite: boolean;

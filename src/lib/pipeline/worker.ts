@@ -17,7 +17,12 @@ function routeAfterExtraction(
   item: Record<string, unknown>,
   result: ExtractionResult
 ): { route: "auto_ingest" | "review_ready"; reason?: string } {
-  // New entity proposed — needs user confirmation
+  // Multiple entities proposed (umbrella document) — needs user confirmation
+  if (result.proposed_entities && result.proposed_entities.length > 1) {
+    return { route: "review_ready", reason: "multi_entity_creation" };
+  }
+
+  // Single new entity proposed — needs user confirmation
   if (result.proposed_entity) {
     return { route: "review_ready", reason: "new_entity" };
   }
@@ -156,7 +161,9 @@ export async function processQueueItem(
         ai_proposed_actions: result.actions,
         ai_direction: result.direction,
         ai_proposed_entity: result.proposed_entity,
+        ai_proposed_entities: result.proposed_entities.length > 0 ? result.proposed_entities : null,
         ai_suggested_name: result.suggested_name,
+        ai_related_entities: result.related_entities.length > 0 ? result.related_entities : null,
         is_composite: result.is_composite,
         entity_match_confidence: result.entity_match_confidence,
         approval_reason: routing.reason || null,

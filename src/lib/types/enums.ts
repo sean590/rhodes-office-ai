@@ -1,5 +1,5 @@
 export type EntityType = 'holding_company' | 'investment_fund' | 'operating_company' | 'real_estate' | 'special_purpose' | 'management_company' | 'trust' | 'other';
-export type LegalStructure = 'llc' | 'corporation' | 'lp' | 'trust' | 'gp' | 'sole_prop' | 'series_llc' | 'other';
+export type LegalStructure = 'llc' | 'corporation' | 'lp' | 'trust' | 'grantor_trust' | 'non_grantor_trust' | 'gp' | 'sole_prop' | 'other';
 export type EntityStatus = 'active' | 'inactive' | 'dissolved' | 'suspended' | 'pending_formation' | 'converting';
 export type TrustType = 'revocable' | 'irrevocable';
 export type TrustRoleType = 'grantor' | 'trustee' | 'successor_trustee' | 'beneficiary' | 'contingent_beneficiary' | 'trust_protector' | 'enforcer' | 'investment_advisor' | 'distribution_advisor' | 'trust_counsel';

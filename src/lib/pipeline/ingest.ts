@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
+import { runEntityInference } from "@/lib/utils/inference-engine";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export interface IngestOptions {
@@ -143,7 +144,7 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
     if (applyMutations) {
       const actions = (item.ai_proposed_actions || []) as Array<{ action: string; data: Record<string, unknown> }>;
       if (actions.length > 0) {
-        const { results, firstCreatedEntityId } = await applyActions(actions, {
+        const { results, firstCreatedEntityId, createdEntityIds } = await applyActions(actions, {
           documentId: doc.id,
           existingEntityId: finalEntityId || undefined,
           orgId,
@@ -154,6 +155,21 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
             .from("documents")
             .update({ entity_id: firstCreatedEntityId })
             .eq("id", doc.id);
+        }
+
+        // Create entity links for ALL created entities (umbrella documents)
+        for (const createdId of createdEntityIds) {
+          const isPrimary = createdId === firstCreatedEntityId && !finalEntityId;
+          await admin.from("document_entity_links").upsert({
+            document_id: doc.id,
+            entity_id: createdId,
+            organization_id: orgId,
+            role: isPrimary ? "primary" : "related",
+            source: "ai",
+            confidence: 1.0,
+            ai_reason: "Entity created from this document",
+            created_by: userId,
+          }, { onConflict: "document_id,entity_id" }).then(() => {});
         }
 
         actionsApplied = results.filter((r) => r.success).length;
@@ -177,9 +193,47 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
       }
     }
 
-    // Check document completeness expectations
-    if (doc.entity_id) {
+    // Create document-entity links
+    // 1. Primary link
+    if (finalEntityId) {
+      await admin.from("document_entity_links").upsert({
+        document_id: doc.id,
+        entity_id: finalEntityId,
+        organization_id: orgId,
+        role: "primary",
+        source: "ai",
+        confidence: 1.0,
+        created_by: userId,
+      }, { onConflict: "document_id,entity_id" }).then(() => {});
+    }
+
+    // 2. Secondary links from AI extraction
+    const relatedEntities = (item.ai_related_entities || []) as Array<{
+      entity_id: string; role: string; confidence: string; reason: string;
+    }>;
+    for (const ref of relatedEntities) {
+      if (ref.entity_id && ref.entity_id !== finalEntityId) {
+        await admin.from("document_entity_links").upsert({
+          document_id: doc.id,
+          entity_id: ref.entity_id,
+          organization_id: orgId,
+          role: ref.role || "related",
+          source: "ai",
+          confidence: ref.confidence === "high" ? 0.9 : ref.confidence === "medium" ? 0.7 : 0.5,
+          ai_reason: ref.reason,
+          created_by: userId,
+        }, { onConflict: "document_id,entity_id" }).then(() => {});
+      }
+    }
+
+    // Check document completeness expectations (includes linked entities)
+    const hasLinkedEntities = doc.entity_id || relatedEntities.length > 0;
+    if (hasLinkedEntities) {
       await checkAndSatisfyExpectations(doc.id).catch(() => {});
+      // Run inference engine (non-blocking) for primary entity
+      if (doc.entity_id) {
+        runEntityInference(orgId, doc.entity_id).catch(() => {});
+      }
     }
 
     // Update queue item

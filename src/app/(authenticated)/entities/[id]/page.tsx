@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
-import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, SearchIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
+import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
@@ -17,7 +17,7 @@ import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
-import { calculateFilingStatus, getFilingInfo } from "@/lib/utils/filing-status";
+import { getFilingInfo } from "@/lib/utils/filing-status";
 import type { EntityType, TrustRoleType, Jurisdiction, CustomFieldType, InvestorType, DocumentType, LegalStructure } from "@/lib/types/enums";
 import type { DocumentCategory } from "@/lib/types/entities";
 import type {
@@ -99,6 +99,8 @@ const LEGAL_STRUCTURE_LABELS: Record<string, string> = {
   corporation: "Corporation",
   lp: "Limited Partnership",
   trust: "Trust",
+  grantor_trust: "Grantor Trust",
+  non_grantor_trust: "Non-Grantor Trust",
   gp: "General Partnership",
   sole_prop: "Sole Proprietorship",
   series_llc: "Series LLC",
@@ -161,19 +163,23 @@ function LegalStructureRow({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState<LegalStructure | "">(currentValue || "");
   const [saving, setSaving] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const structures: { value: LegalStructure; label: string }[] = [
     { value: "llc", label: "LLC" },
     { value: "corporation", label: "Corporation" },
     { value: "lp", label: "Limited Partnership" },
-    { value: "trust", label: "Trust" },
+    { value: "grantor_trust", label: "Grantor Trust" },
+    { value: "non_grantor_trust", label: "Non-Grantor Trust" },
     { value: "gp", label: "General Partnership" },
-    { value: "series_llc", label: "Series LLC" },
     { value: "other", label: "Other" },
   ];
 
-  async function handleSave() {
+  const isChanged = (value || null) !== (currentValue || null);
+
+  async function doSave() {
     setSaving(true);
+    setConfirming(false);
     try {
       const res = await fetch(`/api/entities/${entityId}`, {
         method: "PUT",
@@ -190,102 +196,152 @@ function LegalStructureRow({
     }
   }
 
+  function handleSave() {
+    if (isChanged) {
+      setConfirming(true);
+    } else {
+      setEditing(false);
+    }
+  }
+
   const displayLabel = currentValue
     ? (LEGAL_STRUCTURE_LABELS[currentValue] || currentValue)
     : "\u2014";
 
   return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-        padding: "10px 0",
-        borderBottom: "1px solid #f0eee8",
-        fontSize: 13,
-      }}
-    >
-      <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>Legal Structure</span>
-      {editing ? (
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <select
-            value={value}
-            onChange={(e) => setValue(e.target.value as LegalStructure | "")}
-            style={{
-              fontSize: 13,
-              padding: "4px 8px",
-              border: "1px solid #ddd9d0",
-              borderRadius: 6,
-              background: "#fff",
-              color: "#1a1a1f",
-              fontFamily: "inherit",
-            }}
-          >
-            <option value="">None</option>
-            {structures.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
+    <>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "10px 0",
+          borderBottom: "1px solid #f0eee8",
+          fontSize: 13,
+        }}
+      >
+        <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>Legal Structure</span>
+        {editing ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <select
+              value={value}
+              onChange={(e) => setValue(e.target.value as LegalStructure | "")}
+              style={{
+                fontSize: 13,
+                padding: "4px 8px",
+                border: "1px solid #ddd9d0",
+                borderRadius: 6,
+                background: "#fff",
+                color: "#1a1a1f",
+                fontFamily: "inherit",
+              }}
+            >
+              <option value="">None</option>
+              {structures.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                background: "#2d5a3d",
+                color: "#fff",
+                border: "none",
+                borderRadius: 4,
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {saving ? "..." : "Save"}
+            </button>
+            <button
+              onClick={() => { setEditing(false); setConfirming(false); setValue(currentValue || ""); }}
+              style={{
+                background: "none",
+                border: "1px solid #e8e6df",
+                borderRadius: 4,
+                padding: "4px 10px",
+                fontSize: 11,
+                fontWeight: 500,
+                color: "#6b6b76",
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
           <button
-            onClick={handleSave}
-            disabled={saving}
+            onClick={() => { setValue(currentValue || ""); setEditing(true); }}
             style={{
-              background: "#2d5a3d",
-              color: "#fff",
-              border: "none",
-              borderRadius: 4,
-              padding: "4px 10px",
-              fontSize: 11,
-              fontWeight: 600,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            {saving ? "..." : "Save"}
-          </button>
-          <button
-            onClick={() => { setEditing(false); setValue(currentValue || ""); }}
-            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
               background: "none",
-              border: "1px solid #e8e6df",
-              borderRadius: 4,
-              padding: "4px 10px",
-              fontSize: 11,
-              fontWeight: 500,
-              color: "#6b6b76",
+              border: currentValue ? "none" : "1px dashed #ddd9d0",
+              borderRadius: currentValue ? 0 : 6,
+              padding: currentValue ? 0 : "3px 10px",
               cursor: "pointer",
+              fontSize: 13,
               fontFamily: "inherit",
+              color: currentValue ? "#1a1a1f" : "#9494a0",
+              textAlign: "right",
             }}
+            title="Click to edit"
           >
-            Cancel
+            {currentValue ? displayLabel : "Set structure"}
+            <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: "#9494a0", flexShrink: 0 }}>
+              <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </button>
+        )}
+      </div>
+
+      {/* Confirmation dialog */}
+      {confirming && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 1000,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            background: "#fff", borderRadius: 12, padding: "24px 28px", maxWidth: 400,
+            boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+          }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f", marginBottom: 8 }}>
+              Change Legal Structure?
+            </div>
+            <div style={{ fontSize: 13, color: "#6b6b76", lineHeight: 1.5, marginBottom: 20 }}>
+              Changing from <strong>{LEGAL_STRUCTURE_LABELS[currentValue || ""] || "None"}</strong> to{" "}
+              <strong>{LEGAL_STRUCTURE_LABELS[value] || "None"}</strong> will
+              update this entity&#39;s Document Completeness tracking. Required documents
+              will be recalculated based on the new structure.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setConfirming(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={doSave}
+                disabled={saving}
+              >
+                {saving ? "Saving..." : "Confirm Change"}
+              </Button>
+            </div>
+          </div>
         </div>
-      ) : (
-        <button
-          onClick={() => { setValue(currentValue || ""); setEditing(true); }}
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            background: "none",
-            border: currentValue ? "none" : "1px dashed #ddd9d0",
-            borderRadius: currentValue ? 0 : 6,
-            padding: currentValue ? 0 : "3px 10px",
-            cursor: "pointer",
-            fontSize: 13,
-            fontFamily: "inherit",
-            color: currentValue ? "#1a1a1f" : "#9494a0",
-            textAlign: "right",
-          }}
-          title="Click to edit"
-        >
-          {currentValue ? displayLabel : "Set structure"}
-          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: "#9494a0", flexShrink: 0 }}>
-            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
       )}
-    </div>
+    </>
   );
 }
 
@@ -1114,6 +1170,8 @@ interface Expectation {
   source: string;
   notes: string | null;
   satisfied_by: string | null;
+  confidence: number | null;
+  inference_reason: string | null;
 }
 
 function DocumentCompletenessCard({
@@ -1131,6 +1189,8 @@ function DocumentCompletenessCard({
   const [newCategory, setNewCategory] = useState("formation");
   const [newRequired, setNewRequired] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   // Fetch expectations
   useEffect(() => {
@@ -1145,9 +1205,10 @@ function DocumentCompletenessCard({
     return () => { cancelled = true; };
   }, [entityId]);
 
-  // Auto-init if empty
+  // Auto-init if no confirmed (non-suggestion, non-NA) expectations
+  const hasConfirmed = expectations.some((e) => !e.is_suggestion && !e.is_not_applicable);
   useEffect(() => {
-    if (!loaded || initAttempted || expectations.length > 0) return;
+    if (!loaded || initAttempted || hasConfirmed) return;
     setInitAttempted(true);
     fetch(`/api/entities/${entityId}/expectations`, {
       method: "POST",
@@ -1157,7 +1218,7 @@ function DocumentCompletenessCard({
       const res = await fetch(`/api/entities/${entityId}/expectations`);
       if (res.ok) setExpectations(await res.json());
     }).catch(() => {});
-  }, [loaded, initAttempted, expectations.length, entityId]);
+  }, [loaded, initAttempted, hasConfirmed, entityId]);
 
   const handleMarkNA = async (id: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
@@ -1175,6 +1236,20 @@ function DocumentCompletenessCard({
       body: JSON.stringify({ action: "mark_needed", expectation_id: id }),
     });
     setExpectations((prev) => prev.map((e) => e.id === id ? { ...e, is_not_applicable: false } : e));
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await fetch(`/api/entities/${entityId}/expectations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refresh" }),
+      });
+      const res = await fetch(`/api/entities/${entityId}/expectations`);
+      if (res.ok) setExpectations(await res.json());
+    } catch { /* ignore */ }
+    setRefreshing(false);
   };
 
   const handleAddCustom = async () => {
@@ -1210,9 +1285,13 @@ function DocumentCompletenessCard({
   const total = confirmed.length;
   const pct = total > 0 ? Math.round((satisfied / total) * 100) : 0;
 
+  // In edit mode, show all items (including NA) grouped together
+  const allNonSuggestion = expectations.filter((e) => !e.is_suggestion);
+
   // Group by category
+  const itemsToGroup = editing ? allNonSuggestion : confirmed;
   const grouped: Record<string, Expectation[]> = {};
-  for (const exp of confirmed) {
+  for (const exp of itemsToGroup) {
     const cat = exp.document_category || "other";
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(exp);
@@ -1253,10 +1332,42 @@ function DocumentCompletenessCard({
         <SectionHeader>Document Completeness</SectionHeader>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           {!adding && (
-            <Button size="sm" onClick={() => setAdding(true)} style={{ marginTop: -8 }}>
-              <PlusIcon size={10} />
-              Add Item
-            </Button>
+            <>
+            {editing ? (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={() => setEditing(false)}
+                style={{ marginTop: -8, fontSize: 11, padding: "4px 10px" }}
+              >
+                Done
+              </Button>
+            ) : (
+              <>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={handleRefresh}
+                disabled={refreshing}
+                style={{ marginTop: -8, fontSize: 11, padding: "4px 8px" }}
+              >
+                {refreshing ? "..." : "Refresh"}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setEditing(true)}
+                style={{ marginTop: -8, fontSize: 11, padding: "4px 8px" }}
+              >
+                Edit
+              </Button>
+              <Button size="sm" onClick={() => setAdding(true)} style={{ marginTop: -8 }}>
+                <PlusIcon size={10} />
+                Add Item
+              </Button>
+              </>
+            )}
+            </>
           )}
         </div>
       </div>
@@ -1358,56 +1469,78 @@ function DocumentCompletenessCard({
                   padding: "5px 0",
                   fontSize: 13,
                   borderBottom: "1px solid #f0eee8",
+                  opacity: exp.is_not_applicable ? 0.5 : 1,
                 }}
               >
-                {/* Status indicator */}
-                <span style={{
-                  width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  background: exp.is_satisfied ? "#2d5a3d" : "transparent",
-                  border: exp.is_satisfied ? "none" : "1.5px solid #c47520",
-                }}>
-                  {exp.is_satisfied && <CheckIcon size={10} />}
-                </span>
-
-                {/* Label */}
-                <span style={{ flex: 1, color: "#1a1a1f", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {getTypeLabel(exp.document_type)}
-                </span>
-
-                {/* Source + Required badges */}
-                <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                  {sourceBadge(exp.source)}
-                  {!exp.is_satisfied && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
-                      color: exp.is_required ? "#c47520" : "#6b6b76",
-                      background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
-                    }}>
-                      {exp.is_required ? "Required" : "Recommended"}
-                    </span>
-                  )}
-                  {!exp.is_satisfied && (
+                {editing ? (
+                  /* Edit mode: toggle switch */
+                  <>
                     <button
-                      onClick={() => handleMarkNA(exp.id)}
-                      title="Mark as not applicable"
+                      onClick={() => exp.is_not_applicable ? handleMarkNeeded(exp.id) : handleMarkNA(exp.id)}
                       style={{
-                        background: "none", border: "none", cursor: "pointer",
-                        fontSize: 10, color: "#9494a0", padding: "0 2px",
+                        width: 32, height: 18, borderRadius: 9, border: "none", cursor: "pointer",
+                        background: exp.is_not_applicable ? "#ddd9d0" : "#2d5a3d",
+                        position: "relative", flexShrink: 0, transition: "background 0.2s",
                       }}
                     >
-                      N/A
+                      <span style={{
+                        position: "absolute", top: 2, width: 14, height: 14, borderRadius: "50%",
+                        background: "#fff", transition: "left 0.2s",
+                        left: exp.is_not_applicable ? 2 : 16,
+                      }} />
                     </button>
-                  )}
-                </div>
+                    <span style={{
+                      flex: 1, color: exp.is_not_applicable ? "#9494a0" : "#1a1a1f",
+                      textDecoration: exp.is_not_applicable ? "line-through" : "none",
+                      minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {getTypeLabel(exp.document_type)}
+                    </span>
+                    <span style={{ fontSize: 10, color: "#9494a0", flexShrink: 0 }}>
+                      {exp.is_not_applicable ? "N/A" : exp.is_required ? "Required" : "Recommended"}
+                    </span>
+                  </>
+                ) : (
+                  /* Normal mode */
+                  <>
+                    {/* Status indicator */}
+                    <span style={{
+                      width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      background: exp.is_satisfied ? "#2d5a3d" : "transparent",
+                      border: exp.is_satisfied ? "none" : "1.5px solid #c47520",
+                    }}>
+                      {exp.is_satisfied && <CheckIcon size={10} />}
+                    </span>
+
+                    {/* Label */}
+                    <span style={{ flex: 1, color: "#1a1a1f", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {getTypeLabel(exp.document_type)}
+                    </span>
+
+                    {/* Source + Required badges */}
+                    <div style={{ display: "flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
+                      {sourceBadge(exp.source)}
+                      {!exp.is_satisfied && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                          color: exp.is_required ? "#c47520" : "#6b6b76",
+                          background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+                        }}>
+                          {exp.is_required ? "Required" : "Recommended"}
+                        </span>
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>
         );
       })}
 
-      {/* N/A items */}
-      {naItems.length > 0 && (
+      {/* N/A items (hidden in edit mode since they're shown inline) */}
+      {!editing && naItems.length > 0 && (
         <div style={{ marginTop: 8 }}>
           <div style={{
             fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase",
@@ -2157,6 +2290,27 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
   const [addSaving, setAddSaving] = useState(false);
   const [showPicklist, setShowPicklist] = useState(false);
   const [picklistFilter, setPicklistFilter] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<{ created_directory_entries: number; linked_members_to_directory: number; linked_cap_to_directory: number; created_members_from_cap: number; created_cap_from_members: number } | null>(null);
+
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const res = await fetch(`/api/entities/${entityId}/sync-members`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        setSyncResult(data);
+        await onRefresh();
+        // Auto-dismiss after 5 seconds
+        setTimeout(() => setSyncResult(null), 5000);
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const inputStyle: React.CSSProperties = { background: "#fafaf7", border: "1px solid #ddd9d0", borderRadius: 6, padding: "5px 8px", fontSize: 12, fontFamily: "inherit", color: "#1a1a1f", outline: "none", width: "100%", boxSizing: "border-box" };
 
@@ -2368,11 +2522,25 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
       <Card style={{ marginTop: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <SectionHeader>Investors</SectionHeader>
-          <Button size="sm" onClick={() => setShowAdd(true)}>
-            <PlusIcon size={10} />
-            Add Investor
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
+              {syncing ? "Syncing..." : "Sync Members & Directory"}
+            </Button>
+            <Button size="sm" onClick={() => setShowAdd(true)}>
+              <PlusIcon size={10} />
+              Add Investor
+            </Button>
+          </div>
         </div>
+        {syncResult && (
+          <div style={{ background: "#edf7ef", border: "1px solid #c3e0cc", borderRadius: 8, padding: "8px 12px", marginBottom: 12, fontSize: 12, color: "#2d5a3d" }}>
+            Sync complete: {syncResult.created_directory_entries > 0 && `${syncResult.created_directory_entries} directory entries created, `}
+            {syncResult.linked_members_to_directory + syncResult.linked_cap_to_directory > 0 && `${syncResult.linked_members_to_directory + syncResult.linked_cap_to_directory} linked to directory, `}
+            {syncResult.created_members_from_cap > 0 && `${syncResult.created_members_from_cap} members created, `}
+            {syncResult.created_cap_from_members > 0 && `${syncResult.created_cap_from_members} cap entries created, `}
+            {syncResult.created_directory_entries + syncResult.linked_members_to_directory + syncResult.linked_cap_to_directory + syncResult.created_members_from_cap + syncResult.created_cap_from_members === 0 && "everything already in sync"}
+          </div>
+        )}
 
         {/* Add form */}
         {showAdd && (
@@ -3549,6 +3717,8 @@ function DocumentsTab({
     source: string;
     notes: string | null;
     satisfied_doc: { id: string; name: string; document_type: string; year: number | null; created_at: string } | null;
+    confidence: number | null;
+    inference_reason: string | null;
   }>>([]);
   const [expectationsLoaded, setExpectationsLoaded] = useState(false);
 
@@ -3570,10 +3740,11 @@ function DocumentsTab({
     return () => { cancelled = true; };
   }, [entityId, documents]); // re-fetch when documents change
 
-  // Initialize expectations if empty (first time for this entity)
+  // Initialize expectations if no confirmed (non-suggestion, non-NA) items
   const [initAttempted, setInitAttempted] = useState(false);
+  const hasConfirmedExpectations = expectations.some((e) => !e.is_suggestion && !e.is_not_applicable);
   useEffect(() => {
-    if (!expectationsLoaded || initAttempted || expectations.length > 0) return;
+    if (!expectationsLoaded || initAttempted || hasConfirmedExpectations) return;
     setInitAttempted(true);
     fetch(`/api/entities/${entityId}/expectations`, {
       method: "POST",
@@ -3591,7 +3762,7 @@ function DocumentsTab({
         setExpectations(data);
       }
     }).catch((err) => console.error("Expectations init error:", err));
-  }, [expectationsLoaded, initAttempted, expectations.length, entityId]);
+  }, [expectationsLoaded, initAttempted, hasConfirmedExpectations, entityId]);
 
   const handleMarkNA = async (expectationId: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
@@ -3609,6 +3780,24 @@ function DocumentsTab({
       body: JSON.stringify({ action: "mark_needed", expectation_id: expectationId }),
     });
     setExpectations((prev) => prev.map((e) => e.id === expectationId ? { ...e, is_not_applicable: false } : e));
+  };
+
+  const handleConfirmSuggestion = async (expectationId: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "confirm_suggestion", expectation_id: expectationId }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === expectationId ? { ...e, is_suggestion: false } : e));
+  };
+
+  const handleDismissSuggestion = async (expectationId: string) => {
+    await fetch(`/api/entities/${entityId}/expectations`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "dismiss_suggestion", expectation_id: expectationId }),
+    });
+    setExpectations((prev) => prev.map((e) => e.id === expectationId ? { ...e, is_not_applicable: true } : e));
   };
 
   // Pipeline state
@@ -4579,6 +4768,13 @@ function DocumentsTab({
                               </div>
                             </div>
 
+                            {/* Linked badge */}
+                            {doc.link_role && (
+                              <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                                Linked
+                              </span>
+                            )}
+
                             {/* Tags pill — doc type if not 'other' */}
                             {doc.document_type !== "other" && (
                               <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
@@ -4683,6 +4879,11 @@ function DocumentsTab({
 
                               {/* All tags */}
                               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                                {doc.link_role && (
+                                  <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                                    Linked ({doc.link_role})
+                                  </span>
+                                )}
                                 {doc.document_type !== "other" && (
                                   <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
                                     {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
@@ -4791,6 +4992,90 @@ function DocumentsTab({
                         </button>
                       </div>
                     ))}
+
+                    {/* AI Suggestions */}
+                    {(() => {
+                      const suggestions = expectations.filter(
+                        (e) => e.document_category === catKey && e.is_suggestion && !e.is_not_applicable
+                      );
+                      if (suggestions.length === 0) return null;
+                      return (
+                        <>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "8px 18px 4px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "#8b6914",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.5px",
+                            }}
+                          >
+                            <SparkleIcon size={11} />
+                            Suggestions
+                          </div>
+                          {suggestions.map((exp) => (
+                            <div
+                              key={exp.id}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 12,
+                                padding: "8px 18px",
+                                borderBottom: "1px solid #f8f7f4",
+                                fontSize: 13,
+                                background: "rgba(139,105,20,0.03)",
+                              }}
+                            >
+                              <span style={{ color: "#8b6914", fontSize: 14, flexShrink: 0 }}>&#9671;</span>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <span style={{ color: "#1a1a1f" }}>
+                                  {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                                </span>
+                                {exp.inference_reason && (
+                                  <div style={{ fontSize: 11, color: "#8b6914", marginTop: 2 }}>
+                                    {exp.inference_reason}
+                                  </div>
+                                )}
+                              </div>
+                              <button
+                                onClick={() => handleConfirmSuggestion(exp.id)}
+                                style={{
+                                  background: "rgba(45,90,61,0.08)",
+                                  border: "none",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  color: "#2d5a3d",
+                                  cursor: "pointer",
+                                  padding: "3px 10px",
+                                  borderRadius: 4,
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                Confirm
+                              </button>
+                              <button
+                                onClick={() => handleDismissSuggestion(exp.id)}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  fontSize: 11,
+                                  color: "#9494a0",
+                                  cursor: "pointer",
+                                  padding: "2px 6px",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                Dismiss
+                              </button>
+                            </div>
+                          ))}
+                        </>
+                      );
+                    })()}
 
                     {/* N/A items (collapsed by default) */}
                     {(() => {

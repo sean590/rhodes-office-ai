@@ -181,6 +181,15 @@ You MUST respond with valid JSON only — no markdown, no explanation. Return an
       "reason": "Why this change is being proposed",
       "confidence": "high" | "medium" | "low"
     }
+  ],
+  "related_entities": [
+    {
+      "entity_id": "uuid of another existing entity mentioned in this document",
+      "entity_name": "Name as it appears in document",
+      "role": "counterparty | beneficiary | guarantor | member | manager | investor | related",
+      "confidence": "high | medium | low",
+      "reason": "Why this entity is associated"
+    }
   ]
 }
 \`\`\`
@@ -227,7 +236,29 @@ For "entity_match_confidence":
 - For compliance filings: if entity has registration for that jurisdiction, use "update_registration". If not, use "add_registration".
 - For required franchise tax payments: if a matching compliance obligation exists, use "complete_obligation". Also use "update_registration" to set last_filing_date.
 - Do NOT propose actions for ELECTIVE/OPTIONAL tax payments (PTET, elective entity-level taxes).
-- Do NOT use "add_custom_field" for state entity IDs — use state_id on registrations.`;
+- Do NOT use "add_custom_field" for state entity IDs — use state_id on registrations.
+
+## Related Entities
+
+Documents often reference multiple entities. Beyond the primary entity this document belongs to, identify any OTHER existing entities mentioned in the document and their role.
+
+Return a "related_entities" array with entries for each additional entity referenced:
+- "entity_id": UUID of the matching existing entity
+- "entity_name": The name as it appears in the document
+- "role": One of "counterparty", "beneficiary", "guarantor", "member", "manager", "investor", "related"
+- "confidence": "high", "medium", or "low"
+- "reason": Brief explanation of why this entity is associated
+
+Common patterns:
+- Service agreements / contracts: the other party is a "counterparty"
+- Operating agreements naming entities as members: role is "member"
+- K-1s issued to another entity: the recipient entity is "beneficiary"
+- Loan documents with a guarantor entity: role is "guarantor"
+- Fund documents naming an entity as LP/investor: role is "investor"
+- Operating agreements naming an entity as manager: role is "manager"
+- Any entity mentioned but role unclear: use "related"
+
+Only include entities that exist in the provided entity list. Do not create proposed entities here — that's handled separately via the actions array.`;
 
   // Entity discovery section
   if (options?.entityDiscovery) {
@@ -249,7 +280,58 @@ This document is being processed with entity discovery ENABLED. If this document
 }
 \`\`\`
 
-Set entity_id to null when the document is about a proposed new entity.`;
+Set entity_id to null when the document is about a proposed new entity.
+
+### Multi-Entity Creation Documents
+
+Some legal instruments create or govern MULTIPLE separate entities within a single document. This is NOT the same as composite documents (multiple PDFs stapled together). This is ONE legal instrument that establishes multiple legal entities.
+
+Common patterns:
+- Trust instruments creating separate trusts per beneficiary (e.g., "Irrevocable Gift Trust" creating trusts fbo Child A, fbo Child B, fbo Child C — each is a separate trust entity with its own EIN and assets)
+- Series LLC operating agreements establishing multiple series
+- Family trust instruments with per-beneficiary sub-trusts
+- Partnership agreements establishing multiple fund vehicles
+
+Key signals:
+- "each trust named for a person created hereunder"
+- Separate distribution/default provisions per beneficiary or per series
+- "fbo [Name]" or "for the benefit of [Name]" naming conventions
+- "trusts created under this instrument" (plural)
+- Series designations (Series A, Series B) under a master agreement
+
+IMPORTANT: Before proposing new entities, CHECK THE EXISTING ENTITY LIST ABOVE carefully. If entities with matching or SIMILAR names already exist, do NOT propose creating them. Use FUZZY matching:
+- "Doherty 2025 Irrevocable Gift Trust fbo Sean Doherty Jr" MATCHES "Doherty 2025 Irrevocable Trust fbo Sean Doherty, Jr." — these are the SAME entity
+- Match on the beneficiary name (the "fbo [Name]" part) + entity type. Minor wording differences (e.g. "Gift Trust" vs "Trust", punctuation, suffixes like Jr/Jr.) do NOT make them different entities.
+- When in doubt, USE THE EXISTING ENTITY rather than creating a duplicate.
+
+If matching existing entities are found:
+- Set "entity_id" to the first matching existing entity's UUID
+- Include the other matching existing entities in "related_entities"
+- Use "update_trust_details" and "add_trust_role" actions with the EXISTING entity UUIDs
+- Do NOT include "create_entity" actions for entities that already exist
+- Do NOT include "proposed_entities" entries for entities that already exist
+- If the document contains a more precise or complete name than what's in the database (e.g. the DB has "Irrevocable Trust" but the document says "Irrevocable Gift Trust"), include an "update_entity" action to rename the existing entity to the correct legal name:
+  { "action": "update_entity", "data": { "entity_id": "<existing UUID>", "fields": { "name": "Correct Legal Name From Document" } }, "confidence": "high" }
+
+Only if the entities do NOT exist yet, then:
+1. Set "entity_id" to null (the document doesn't belong to just one entity)
+2. Include a SEPARATE "create_entity" action for EACH entity created by the document
+3. Include ALL created entities in "proposed_entities" (an ARRAY, not singular):
+
+\`\`\`json
+{
+  "entity_id": null,
+  "proposed_entities": [
+    { "name": "Trust fbo Child A", "type": "trust", "formation_state": "NV", "confidence": "high", "reason": "Section X creates separate trust for Child A" },
+    { "name": "Trust fbo Child B", "type": "trust", "formation_state": "NV", "confidence": "high", "reason": "Section X creates separate trust for Child B" }
+  ]
+}
+\`\`\`
+
+Do NOT treat this as a composite document — the entire PDF is one legal instrument.
+Each entity should have its own "create_entity" action AND a corresponding entry in "proposed_entities".
+Also include "update_trust_details" and "add_trust_role" actions for EACH entity.
+Use "new_entity_0", "new_entity_1", "new_entity_2" as entity_id placeholders (matching the order of create_entity actions).`;
   }
 
   // Composite detection section
@@ -296,6 +378,14 @@ For K-1 sub-documents, set "k1_recipient" to the partner/shareholder/beneficiary
 
 // --- Extraction Result ---
 
+export interface RelatedEntityRef {
+  entity_id: string;
+  entity_name: string;
+  role: 'counterparty' | 'beneficiary' | 'guarantor' | 'member' | 'manager' | 'investor' | 'related';
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
 export interface ExtractionResult {
   entity_id: string | null;
   entity_match_confidence: 'high' | 'medium' | 'low' | 'none';
@@ -309,11 +399,13 @@ export interface ExtractionResult {
   confidence: number | null;
   is_composite: boolean;
   sub_documents: SubDocument[];
-  proposed_entity: Record<string, unknown> | null;
+  proposed_entity: Record<string, unknown> | null;           // singular (backward compat)
+  proposed_entities: Array<Record<string, unknown>>;          // multi-entity creation documents
   is_new_document_type: boolean;
   new_type_label: string | null;
   new_type_category: string | null;
   tokens_used: number;
+  related_entities: RelatedEntityRef[];
 }
 
 export interface SubDocument {
@@ -486,10 +578,20 @@ export async function extractDocument(
       ? (parsed.sub_documents as SubDocument[])
       : [],
     proposed_entity: (parsed.proposed_entity as Record<string, unknown>) || null,
+    proposed_entities: Array.isArray(parsed.proposed_entities)
+      ? (parsed.proposed_entities as Array<Record<string, unknown>>)
+      : parsed.proposed_entity
+        ? [parsed.proposed_entity as Record<string, unknown>]
+        : [],
     is_new_document_type: !!parsed.is_new_document_type,
     new_type_label: (parsed.new_type_label as string) || null,
     new_type_category: (parsed.new_type_category as string) || null,
     tokens_used: tokensUsed,
+    related_entities: Array.isArray(parsed.related_entities)
+      ? (parsed.related_entities as RelatedEntityRef[]).filter(
+          (r) => r.entity_id && r.entity_id !== (parsed.entity_id as string)
+        )
+      : [],
   };
 
   return result;

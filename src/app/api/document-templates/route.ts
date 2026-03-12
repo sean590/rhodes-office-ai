@@ -32,11 +32,11 @@ export async function GET() {
       .from("entities")
       .select("id", { count: "exact", head: true })
       .eq("organization_id", orgId)
-      .is("deleted_at", null);
+      .neq("status", "deleted");
 
     // Fetch expectation stats per template
     const templateIds = (templates || []).map((t: { id: string }) => t.id);
-    let stats: Record<string, { applied: number; satisfied: number }> = {};
+    const stats: Record<string, { applied: number; satisfied: number }> = {};
 
     if (templateIds.length > 0) {
       const { data: expectations } = await admin
@@ -195,6 +195,84 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error("DELETE /api/document-templates error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+/**
+ * PUT /api/document-templates
+ * Update a custom template's filter or settings. Body: { template_id, applies_to_filter?, is_required? }
+ */
+export async function PUT(request: Request) {
+  try {
+    const ctx = await requireOrg();
+    if (isError(ctx)) return ctx;
+    const { orgId } = ctx;
+
+    const body = await request.json();
+    const { template_id, applies_to_filter, is_required } = body;
+
+    if (!template_id) {
+      return NextResponse.json({ error: "template_id required" }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (applies_to_filter !== undefined) updates.applies_to_filter = applies_to_filter;
+    if (is_required !== undefined) updates.is_required = is_required;
+
+    const { error } = await admin
+      .from("document_expectation_templates")
+      .update(updates)
+      .eq("id", template_id)
+      .eq("organization_id", orgId)
+      .neq("source", "system");
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // Re-apply template to matching entities (add to new matches, remove from non-matches)
+    await applyTemplate(template_id).catch(() => {});
+
+    // Remove expectations from entities that no longer match the filter
+    if (applies_to_filter) {
+      const { data: allExpectations } = await admin
+        .from("entity_document_expectations")
+        .select("id, entity_id")
+        .eq("template_id", template_id)
+        .eq("is_satisfied", false);
+
+      if (allExpectations && allExpectations.length > 0) {
+        const entityIds = [...new Set(allExpectations.map((e) => e.entity_id))];
+        const { data: entities } = await admin
+          .from("entities")
+          .select("id, type, legal_structure, organization_id")
+          .in("id", entityIds);
+
+        const { matchesFilter } = await import("@/lib/utils/document-expectations");
+        const nonMatchingIds: string[] = [];
+        for (const entity of entities || []) {
+          if (!matchesFilter(entity, applies_to_filter)) {
+            nonMatchingIds.push(entity.id);
+          }
+        }
+
+        if (nonMatchingIds.length > 0) {
+          await admin
+            .from("entity_document_expectations")
+            .delete()
+            .eq("template_id", template_id)
+            .eq("is_satisfied", false)
+            .in("entity_id", nonMatchingIds);
+        }
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("PUT /api/document-templates error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

@@ -19,7 +19,7 @@ export async function PATCH(
 
     const allowedFields = [
       'staged_doc_type', 'staged_entity_id', 'staged_entity_name',
-      'staged_year', 'staged_category',
+      'staged_year', 'staged_category', 'ai_entity_id', 'ai_related_entities',
     ];
 
     const updates: Record<string, unknown> = {};

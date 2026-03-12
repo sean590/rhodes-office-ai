@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
 
 export async function POST(
   request: Request,
@@ -26,12 +27,24 @@ export async function POST(
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
 
+    // Resolve directory entry by name + aliases (with punctuation normalization)
+    let resolvedDirId = directory_entry_id || null;
+    if (!resolvedDirId) {
+      const { data: dirEntries } = await supabase
+        .from("directory_entries")
+        .select("id, name, aliases");
+      if (dirEntries) {
+        const match = findDirectoryMatch(name, dirEntries);
+        if (match) resolvedDirId = match.id;
+      }
+    }
+
     const { data, error } = await supabase
       .from("entity_members")
       .insert({
         entity_id: id,
         name,
-        directory_entry_id: directory_entry_id || null,
+        directory_entry_id: resolvedDirId,
         ref_entity_id: ref_entity_id || null,
       })
       .select()
@@ -45,6 +58,35 @@ export async function POST(
         );
       }
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+
+    // Auto-create cap table entry if one doesn't exist for this person (normalized matching)
+    const { data: allCap } = await supabase
+      .from("cap_table_entries")
+      .select("id, investor_name, investor_directory_id")
+      .eq("entity_id", id);
+
+    const normalizedName = normalizeName(name);
+    const existingCap = (allCap || []).find(
+      (c) => normalizeName(c.investor_name || "") === normalizedName
+    );
+
+    if (!existingCap) {
+      await supabase
+        .from("cap_table_entries")
+        .insert({
+          entity_id: id,
+          investor_name: name,
+          investor_type: "individual",
+          ownership_pct: 0,
+          capital_contributed: 0,
+          investor_directory_id: resolvedDirId,
+        });
+    } else if (resolvedDirId && !existingCap.investor_directory_id) {
+      await supabase
+        .from("cap_table_entries")
+        .update({ investor_directory_id: resolvedDirId })
+        .eq("id", existingCap.id);
     }
 
     const reqHeaders = await headers();

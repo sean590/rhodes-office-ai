@@ -150,12 +150,14 @@ export default function EditEntityPage() {
       setError("Name is required.");
       return;
     }
-    if (shortName.trim()) {
-      const snValidation = validateShortName(shortName.trim());
-      if (!snValidation.valid) {
-        setError(snValidation.error!);
-        return;
-      }
+    if (!shortName.trim()) {
+      setError("Short Name is required.");
+      return;
+    }
+    const snValidation = validateShortName(shortName.trim());
+    if (!snValidation.valid) {
+      setError(snValidation.error!);
+      return;
     }
     if (!formationState) {
       setError("Formation State is required.");
@@ -171,7 +173,7 @@ export default function EditEntityPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          short_name: shortName.trim() || null,
+          short_name: shortName.trim(),
           type,
           ein: ein.trim() || null,
           formation_state: formationState,
@@ -267,7 +269,7 @@ export default function EditEntityPage() {
 
         {/* Short Name */}
         <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Short Name</label>
+          <label style={labelStyle}>Short Name *</label>
           <input
             type="text"
             value={shortName}

@@ -7,6 +7,20 @@ import { MfaSection } from "@/components/settings/mfa-section";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import type { DocumentCategory } from "@/lib/types/entities";
 
+const LEGAL_STRUCTURE_OPTIONS: { value: string; label: string }[] = [
+  { value: "llc", label: "LLC" },
+  { value: "corporation", label: "Corporation" },
+  { value: "lp", label: "LP" },
+  { value: "grantor_trust", label: "Grantor Trust" },
+  { value: "non_grantor_trust", label: "Non-Grantor Trust" },
+  { value: "gp", label: "GP" },
+  { value: "series_llc", label: "Series LLC" },
+];
+
+const STRUCTURE_LABEL_MAP: Record<string, string> = Object.fromEntries(
+  LEGAL_STRUCTURE_OPTIONS.map((s) => [s.value, s.label])
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -62,6 +76,168 @@ const PERMISSIONS = [
   { label: "Manage users", admin: true, editor: false, viewer: false },
   { label: "Manage settings", admin: true, editor: false, viewer: false },
 ];
+
+// ---------------------------------------------------------------------------
+// Template Row (custom template with inline editing)
+// ---------------------------------------------------------------------------
+
+function TemplateRow({ tpl, stats, onDelete, onUpdate }: {
+  tpl: { id: string; document_type: string; document_category: string; is_required: boolean; description: string | null; applies_to_filter: Record<string, string[]> };
+  stats?: { applied: number; satisfied: number };
+  onDelete: () => void;
+  onUpdate: () => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editFilter, setEditFilter] = useState<string[]>(tpl.applies_to_filter?.legal_structure || []);
+  const [saving, setSaving] = useState(false);
+
+  const filterSummary = (() => {
+    const parts: string[] = [];
+    if (tpl.applies_to_filter?.entity_type?.length) {
+      parts.push(tpl.applies_to_filter.entity_type.map((t: string) => t.replace(/_/g, " ")).join(", "));
+    }
+    if (tpl.applies_to_filter?.legal_structure?.length) {
+      parts.push(tpl.applies_to_filter.legal_structure.map((s: string) => STRUCTURE_LABEL_MAP[s] || s.replace(/_/g, " ")).join(", "));
+    }
+    if (tpl.applies_to_filter?.state?.length) {
+      parts.push(tpl.applies_to_filter.state.join(", "));
+    }
+    return parts.length > 0 ? parts.join(" · ") : "All entities";
+  })();
+
+  const handleSaveFilter = async () => {
+    setSaving(true);
+    try {
+      const newFilter = { ...tpl.applies_to_filter };
+      if (editFilter.length > 0) {
+        newFilter.legal_structure = editFilter;
+      } else {
+        delete newFilter.legal_structure;
+      }
+      await fetch("/api/document-templates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ template_id: tpl.id, applies_to_filter: newFilter }),
+      });
+      await onUpdate();
+      setExpanded(false);
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  return (
+    <div style={{ borderBottom: "1px solid #f0eee8" }}>
+      <div style={{
+        padding: "10px 0",
+        display: "flex", alignItems: "center", gap: 8, fontSize: 13,
+      }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: "50%", background: "#3366a8", flexShrink: 0,
+        }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: "#1a1a1f", fontWeight: 500 }}>
+            {DOCUMENT_TYPE_LABELS[tpl.document_type] || tpl.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+          </div>
+          {tpl.description && (
+            <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>{tpl.description}</div>
+          )}
+        </div>
+        <span style={{
+          fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+          color: "#6b6b76", background: "rgba(107,107,118,0.08)",
+        }}>
+          {DOCUMENT_CATEGORY_LABELS[tpl.document_category as DocumentCategory] || tpl.document_category}
+        </span>
+        <span style={{
+          fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+          color: tpl.is_required ? "#c47520" : "#6b6b76",
+          background: tpl.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
+        }}>
+          {tpl.is_required ? "Required" : "Recommended"}
+        </span>
+        <button
+          onClick={() => { setExpanded(!expanded); setEditFilter(tpl.applies_to_filter?.legal_structure || []); }}
+          style={{
+            fontSize: 11, color: "#3366a8", background: "none", border: "none",
+            cursor: "pointer", padding: "2px 4px", whiteSpace: "nowrap",
+          }}
+          title="Edit which legal structures this applies to"
+        >
+          {filterSummary}
+        </button>
+        {stats && (
+          <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+            {stats.satisfied}/{stats.applied}
+          </span>
+        )}
+        <button
+          onClick={onDelete}
+          style={{
+            background: "none", border: "none", cursor: "pointer",
+            fontSize: 11, color: "#c73e3e", padding: "2px 4px", flexShrink: 0,
+          }}
+        >
+          Delete
+        </button>
+      </div>
+      {expanded && (
+        <div style={{
+          padding: "8px 0 12px 16px",
+          borderTop: "1px solid #f5f4f0",
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+            Applies to Legal Structures
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+            {LEGAL_STRUCTURE_OPTIONS.map((s) => {
+              const selected = editFilter.includes(s.value);
+              return (
+                <button
+                  key={s.value}
+                  type="button"
+                  onClick={() => setEditFilter((prev) => selected ? prev.filter((v) => v !== s.value) : [...prev, s.value])}
+                  style={{
+                    fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 12,
+                    cursor: "pointer", border: "1px solid",
+                    borderColor: selected ? "#2d5a3d" : "#ddd9d0",
+                    background: selected ? "rgba(45,90,61,0.08)" : "#fff",
+                    color: selected ? "#2d5a3d" : "#6b6b76",
+                  }}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: "#9494a0", marginBottom: 8 }}>
+            {editFilter.length > 0 ? `Only: ${editFilter.map((v) => STRUCTURE_LABEL_MAP[v] || v).join(", ")}` : "Applies to all legal structures"}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={handleSaveFilter}
+              disabled={saving}
+              style={{
+                fontSize: 11, fontWeight: 600, padding: "4px 12px", borderRadius: 6,
+                background: "#2d5a3d", color: "#fff", border: "none", cursor: "pointer",
+              }}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+            <button
+              onClick={() => setExpanded(false)}
+              style={{
+                fontSize: 11, fontWeight: 500, padding: "4px 12px", borderRadius: 6,
+                background: "#fff", color: "#6b6b76", border: "1px solid #ddd9d0", cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Accordion Section (mobile collapsible)
@@ -286,6 +462,36 @@ export default function SettingsPage() {
   const [newTplFilter, setNewTplFilter] = useState<Record<string, string[]>>({});
   const [savingTemplate, setSavingTemplate] = useState(false);
 
+  // Detected patterns state
+  const [detectedPatterns, setDetectedPatterns] = useState<Array<{
+    id: string;
+    pattern_type: string;
+    document_type: string;
+    document_category: string;
+    description: string;
+    evidence: { entities_with?: string[]; entities_without?: string[] };
+    confidence: number;
+    entity_coverage: number;
+    times_confirmed: number;
+    times_dismissed: number;
+    promoted_to_template_id: string | null;
+  }>>([]);
+  const [patternEntityNames, setPatternEntityNames] = useState<Record<string, string>>({});
+  const [patternsLoaded, setPatternsLoaded] = useState(false);
+  const [runningInference, setRunningInference] = useState(false);
+  const [inferenceResult, setInferenceResult] = useState<{
+    patterns_found: number;
+    diagnostics: {
+      cross_entity: number;
+      annual_recurrence: number;
+      lifecycle: number;
+      service_provider: number;
+      suggestions_created: number;
+      entities_scanned: number;
+      documents_scanned: number;
+    };
+  } | null>(null);
+
   // Fetch current user info
   const fetchCurrentUser = useCallback(async () => {
     try {
@@ -348,6 +554,18 @@ export default function SettingsPage() {
     setTemplatesLoaded(true);
   }, []);
 
+  // Fetch detected patterns
+  const fetchPatterns = useCallback(async () => {
+    try {
+      const res = await fetch("/api/patterns");
+      if (!res.ok) return;
+      const data = await res.json();
+      setDetectedPatterns(data.patterns || []);
+      setPatternEntityNames(data.entityNames || {});
+    } catch { /* non-critical */ }
+    setPatternsLoaded(true);
+  }, []);
+
   // Fetch activity log (admin only)
   const fetchActivity = useCallback(async () => {
     setActivityLoading(true);
@@ -368,10 +586,10 @@ export default function SettingsPage() {
   }, [activityFilter]);
 
   useEffect(() => {
-    Promise.all([fetchCurrentUser(), fetchUsers(), fetchTemplates()]).finally(() =>
+    Promise.all([fetchCurrentUser(), fetchUsers(), fetchTemplates(), fetchPatterns()]).finally(() =>
       setLoading(false)
     );
-  }, [fetchCurrentUser, fetchUsers, fetchTemplates]);
+  }, [fetchCurrentUser, fetchUsers, fetchTemplates, fetchPatterns]);
 
   // Fetch pending invites once we know the org
   useEffect(() => {
@@ -833,9 +1051,47 @@ export default function SettingsPage() {
                   <input type="checkbox" checked={newTplRequired} onChange={(e) => setNewTplRequired(e.target.checked)} />
                   Required
                 </label>
-                <span style={{ fontSize: 12, color: "#9494a0" }}>
-                  Applies to: All entities
-                </span>
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                  Applies to Legal Structures
+                </label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {LEGAL_STRUCTURE_OPTIONS.map((s) => {
+                    const selected = newTplFilter.legal_structure?.includes(s.value) ?? false;
+                    return (
+                      <button
+                        key={s.value}
+                        type="button"
+                        onClick={() => {
+                          setNewTplFilter((prev) => {
+                            const current = prev.legal_structure || [];
+                            const next = selected
+                              ? current.filter((v) => v !== s.value)
+                              : [...current, s.value];
+                            if (next.length === 0) {
+                              const { legal_structure: _, ...rest } = prev;
+                              return rest;
+                            }
+                            return { ...prev, legal_structure: next };
+                          });
+                        }}
+                        style={{
+                          fontSize: 11, fontWeight: 500, padding: "3px 10px", borderRadius: 12,
+                          cursor: "pointer", border: "1px solid",
+                          borderColor: selected ? "#2d5a3d" : "#ddd9d0",
+                          background: selected ? "rgba(45,90,61,0.08)" : "#fff",
+                          color: selected ? "#2d5a3d" : "#6b6b76",
+                        }}
+                      >
+                        {s.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+                  {newTplFilter.legal_structure?.length ? `Only applies to: ${newTplFilter.legal_structure.map((v) => STRUCTURE_LABEL_MAP[v] || v).join(", ")}` : "Applies to all legal structures"}
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <button
@@ -906,9 +1162,11 @@ export default function SettingsPage() {
               const stats = systemStats[def.document_type];
               const isOwner = currentUser?.orgRole === "owner";
               const isUpdating = updatingSystemDefault === def.document_type;
-              const scopeLabel = def.scope === "base" ? "All entities"
-                : def.scope === "type" ? (def.applies_to || "").replace(/_/g, " ")
-                : (def.applies_to || "").replace(/_/g, " ");
+              const appliesTo = Array.isArray(def.applies_to) ? def.applies_to : [];
+              const scopeLabels = appliesTo.map((v: string) =>
+                STRUCTURE_LABEL_MAP[v] || v.replace(/_/g, " ")
+              );
+              const scopeLabel = scopeLabels.length === 0 ? "All entities" : scopeLabels.join(", ");
 
               const handleToggle = async (field: "is_disabled" | "is_required", value: boolean) => {
                 setUpdatingSystemDefault(def.document_type);
@@ -972,16 +1230,16 @@ export default function SettingsPage() {
                     {DOCUMENT_TYPE_LABELS[def.document_type] || def.document_type.replace(/_/g, " ")}
                   </span>
 
-                  {/* Scope label for non-base items */}
-                  {def.scope !== "base" && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
-                      color: "#7b4db5", background: "rgba(123,77,181,0.08)",
-                      textTransform: "capitalize",
-                    }}>
-                      {scopeLabel}
-                    </span>
-                  )}
+                  {/* Scope label — shows which structures/types this applies to */}
+                  <span style={{
+                    fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
+                    color: "#7b4db5", background: "rgba(123,77,181,0.08)",
+                    maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}
+                  title={scopeLabel}
+                  >
+                    {scopeLabel}
+                  </span>
 
                   <span style={{
                     fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
@@ -1043,78 +1301,218 @@ export default function SettingsPage() {
                 No custom templates yet. Create one to require specific documents across your entities.
               </div>
             ) : (
-              templates.map((tpl) => {
-                const stats = templateStats[tpl.id];
-                const filterSummary = (() => {
-                  const parts: string[] = [];
-                  if (tpl.applies_to_filter?.entity_type?.length) {
-                    parts.push(tpl.applies_to_filter.entity_type.map((t: string) => t.replace(/_/g, " ")).join(", "));
-                  }
-                  if (tpl.applies_to_filter?.state?.length) {
-                    parts.push(tpl.applies_to_filter.state.join(", "));
-                  }
-                  return parts.length > 0 ? parts.join(" · ") : "All entities";
-                })();
-                return (
-                  <div key={tpl.id} style={{
-                    padding: "10px 0", borderBottom: "1px solid #f0eee8",
-                    display: "flex", alignItems: "center", gap: 8, fontSize: 13,
-                  }}>
-                    <span style={{
-                      width: 8, height: 8, borderRadius: "50%", background: "#3366a8", flexShrink: 0,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ color: "#1a1a1f", fontWeight: 500 }}>
-                        {DOCUMENT_TYPE_LABELS[tpl.document_type] || tpl.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                      </div>
-                      {tpl.description && (
-                        <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>{tpl.description}</div>
-                      )}
-                    </div>
-                    <span style={{
-                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
-                      color: "#6b6b76", background: "rgba(107,107,118,0.08)",
-                    }}>
-                      {DOCUMENT_CATEGORY_LABELS[tpl.document_category as DocumentCategory] || tpl.document_category}
-                    </span>
-                    <span style={{
-                      fontSize: 10, fontWeight: 500, padding: "1px 6px", borderRadius: 4,
-                      color: tpl.is_required ? "#c47520" : "#6b6b76",
-                      background: tpl.is_required ? "rgba(196,117,32,0.08)" : "rgba(107,107,118,0.08)",
-                    }}>
-                      {tpl.is_required ? "Required" : "Recommended"}
-                    </span>
-                    <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
-                      {filterSummary}
-                    </span>
-                    {stats && (
-                      <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
-                        {stats.satisfied}/{stats.applied}
-                      </span>
-                    )}
-                    <button
-                      onClick={async () => {
-                        if (!confirm("Delete this template? Satisfied expectations will be kept as manual items.")) return;
-                        await fetch("/api/document-templates", {
-                          method: "DELETE",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ template_id: tpl.id }),
-                        });
-                        await fetchTemplates();
-                      }}
-                      style={{
-                        background: "none", border: "none", cursor: "pointer",
-                        fontSize: 11, color: "#c73e3e", padding: "2px 4px", flexShrink: 0,
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                );
-              })
+              templates.map((tpl) => (
+                <TemplateRow
+                  key={tpl.id}
+                  tpl={tpl}
+                  stats={templateStats[tpl.id]}
+                  onDelete={async () => {
+                    if (!confirm("Delete this template? Satisfied expectations will be kept as manual items.")) return;
+                    await fetch("/api/document-templates", {
+                      method: "DELETE",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ template_id: tpl.id }),
+                    });
+                    await fetchTemplates();
+                  }}
+                  onUpdate={fetchTemplates}
+                />
+              ))
             )}
           </div>
         </AccordionSection>
+
+        {/* Detected Patterns (Insights) */}
+        {patternsLoaded && (
+          <AccordionSection
+            title="Detected Patterns"
+            isMobile={isMobile}
+            subtitle="AI-detected document patterns across your entities"
+            defaultOpen={false}
+            headerRight={
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setRunningInference(true);
+                  setInferenceResult(null);
+                  try {
+                    const res = await fetch("/api/patterns", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "run" }),
+                    });
+                    if (res.ok) {
+                      const data = await res.json();
+                      setInferenceResult(data);
+                    }
+                    await fetchPatterns();
+                  } catch { /* ignore */ }
+                  setRunningInference(false);
+                }}
+                disabled={runningInference}
+                style={{
+                  background: runningInference ? "#e8e6df" : "rgba(45,90,61,0.08)",
+                  color: runningInference ? "#9494a0" : "#2d5a3d",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "6px 14px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: runningInference ? "default" : "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                {runningInference ? "Analyzing..." : "Run Analysis"}
+              </button>
+            }
+          >
+            {/* Running state */}
+            {runningInference && (
+              <div style={{ padding: "20px 16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                <div style={{
+                  width: 28, height: 28, border: "3px solid #e8e6df", borderTopColor: "#2d5a3d",
+                  borderRadius: "50%", animation: "spin 0.8s linear infinite",
+                }} />
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#1a1a1f" }}>
+                  Scanning documents and entities...
+                </div>
+                <div style={{ fontSize: 12, color: "#9494a0" }}>
+                  This may take a moment depending on the size of your organization.
+                </div>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+              </div>
+            )}
+
+            {/* Results summary after run */}
+            {!runningInference && inferenceResult && (
+              <div style={{
+                padding: "12px 16px", margin: "0 0 12px", background: "rgba(45,90,61,0.04)",
+                borderRadius: 8, border: "1px solid rgba(45,90,61,0.12)",
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#2d5a3d", marginBottom: 6 }}>
+                  Analysis Complete
+                </div>
+                <div style={{ fontSize: 12, color: "#6b6b76", lineHeight: 1.6 }}>
+                  Scanned {inferenceResult.diagnostics.entities_scanned} entities and {inferenceResult.diagnostics.documents_scanned} documents.
+                  {inferenceResult.patterns_found > 0 ? (
+                    <> Found <strong>{inferenceResult.patterns_found} pattern{inferenceResult.patterns_found !== 1 ? "s" : ""}</strong> and created {inferenceResult.diagnostics.suggestions_created} suggestion{inferenceResult.diagnostics.suggestions_created !== 1 ? "s" : ""}.</>
+                  ) : (
+                    <> No new patterns detected. As you upload more documents, Rhodes will identify trends across your entities.</>
+                  )}
+                </div>
+                {inferenceResult.patterns_found > 0 && (
+                  <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6 }}>
+                    Cross-entity: {inferenceResult.diagnostics.cross_entity} &middot; Annual: {inferenceResult.diagnostics.annual_recurrence} &middot; Lifecycle: {inferenceResult.diagnostics.lifecycle} &middot; Service provider: {inferenceResult.diagnostics.service_provider}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Empty state (only when no results banner showing) */}
+            {!runningInference && detectedPatterns.length === 0 && !inferenceResult && (
+              <div style={{ padding: 20, textAlign: "center", color: "#9494a0", fontSize: 13 }}>
+                No patterns detected yet. Click &quot;Run Analysis&quot; to scan your documents for patterns.
+              </div>
+            )}
+
+            {/* Pattern list */}
+            {!runningInference && detectedPatterns.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "0 0 8px" }}>
+                {detectedPatterns.map((p) => {
+                  const missingNames = (p.evidence.entities_without || [])
+                    .map((eid) => patternEntityNames[eid])
+                    .filter(Boolean);
+                  return (
+                    <div
+                      key={p.id}
+                      style={{
+                        padding: "12px 16px",
+                        borderRadius: 8,
+                        border: "1px solid #e8e6df",
+                        background: "#fafaf7",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>
+                            {(DOCUMENT_TYPE_LABELS as Record<string, string>)[p.document_type] || p.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                          </div>
+                          <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 6 }}>
+                            {p.description}
+                          </div>
+                          {missingNames.length > 0 && (
+                            <div style={{ fontSize: 11, color: "#c47520" }}>
+                              Missing from: {missingNames.join(", ")}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500 }}>
+                            {Math.round(p.confidence * 100)}%
+                          </span>
+                          {!p.promoted_to_template_id && currentUser?.orgRole === "owner" && (
+                            <>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm("Promote this pattern to an org-wide template? This will add it as a checklist item for all matching entities.")) return;
+                                  await fetch("/api/patterns", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ action: "promote", pattern_id: p.id }),
+                                  });
+                                  await Promise.all([fetchPatterns(), fetchTemplates()]);
+                                }}
+                                style={{
+                                  background: "rgba(45,90,61,0.08)",
+                                  color: "#2d5a3d",
+                                  border: "none",
+                                  borderRadius: 4,
+                                  padding: "3px 10px",
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                Create Template
+                              </button>
+                              <button
+                                onClick={async () => {
+                                  await fetch("/api/patterns", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ action: "dismiss", pattern_id: p.id }),
+                                  });
+                                  await fetchPatterns();
+                                }}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  fontSize: 11,
+                                  color: "#9494a0",
+                                  cursor: "pointer",
+                                  padding: "2px 6px",
+                                  fontFamily: "inherit",
+                                }}
+                              >
+                                Dismiss
+                              </button>
+                            </>
+                          )}
+                          {p.promoted_to_template_id && (
+                            <span style={{ fontSize: 11, color: "#2d5a3d", fontWeight: 500 }}>
+                              Promoted
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </AccordionSection>
+        )}
 
         {/* Card 2 — User Management (admin only) */}
         {isAdmin && (

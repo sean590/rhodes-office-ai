@@ -30,7 +30,8 @@ export async function GET(
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "200", 10), 500);
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
-    const { data, error } = await admin
+    // Fetch directly-assigned documents
+    const { data: directDocs, error } = await admin
       .from("documents")
       .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
       .eq("entity_id", id)
@@ -42,8 +43,42 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    return NextResponse.json(data || [], {
-      headers: { "Cache-Control": "private, max-age=30" },
+    // Fetch linked documents via document_entity_links (excluding primary/direct)
+    const directIds = new Set((directDocs || []).map((d) => d.id));
+    const { data: links } = await admin
+      .from("document_entity_links")
+      .select("document_id, role")
+      .eq("entity_id", id);
+
+    const linkedDocIds = (links || [])
+      .map((l) => l.document_id)
+      .filter((docId) => !directIds.has(docId));
+
+    let linkedDocs: typeof directDocs = [];
+    if (linkedDocIds.length > 0) {
+      const { data: ld } = await admin
+        .from("documents")
+        .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
+        .in("id", linkedDocIds)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false });
+      linkedDocs = ld || [];
+    }
+
+    // Build role lookup for linked docs
+    const linkRoleMap = new Map<string, string>();
+    for (const l of links || []) {
+      linkRoleMap.set(l.document_id, l.role);
+    }
+
+    // Merge: direct docs first, then linked docs with a `link_role` marker
+    const result = [
+      ...(directDocs || []).map((d) => ({ ...d, link_role: null as string | null })),
+      ...linkedDocs.map((d) => ({ ...d, link_role: linkRoleMap.get(d.id) || "related" })),
+    ];
+
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, no-cache" },
     });
   } catch (err) {
     console.error("GET /api/entities/[id]/documents error:", err);

@@ -29,9 +29,9 @@ const LEGAL_STRUCTURES: { value: LegalStructure; label: string }[] = [
   { value: "llc", label: "LLC" },
   { value: "corporation", label: "Corporation" },
   { value: "lp", label: "Limited Partnership" },
-  { value: "trust", label: "Trust" },
+  { value: "grantor_trust", label: "Grantor Trust" },
+  { value: "non_grantor_trust", label: "Non-Grantor Trust" },
   { value: "gp", label: "General Partnership" },
-  { value: "series_llc", label: "Series LLC" },
   { value: "other", label: "Other" },
 ];
 
@@ -264,7 +264,7 @@ export default function NewEntityPage() {
             onChange={(e) => {
               const newType = e.target.value as EntityType;
               setType(newType);
-              if (newType === "trust" && !legalStructure) setLegalStructure("trust");
+              if (newType === "trust" && !legalStructure) setLegalStructure("grantor_trust");
             }}
             style={selectStyle}
           >

@@ -236,6 +236,39 @@ When referencing documents, use the document name and include the year if availa
     }
   }
 
+  // Fetch inferred patterns and pending suggestions
+  const [patternsRes, suggestionsRes] = await Promise.all([
+    supabase.from("org_document_patterns").select("pattern_type, document_type, description, confidence, entity_coverage, is_active").eq("organization_id", orgId).eq("is_active", true).order("confidence", { ascending: false }),
+    entityIds.length > 0
+      ? supabase.from("entity_document_expectations").select("entity_id, document_type, confidence, inference_reason").in("entity_id", entityIds).eq("is_suggestion", true).eq("is_not_applicable", false)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  const patterns = patternsRes.data || [];
+  const suggestions = suggestionsRes.data || [];
+
+  if (patterns.length > 0) {
+    context += `\n## Inferred Patterns\n\n`;
+    for (const p of patterns) {
+      context += `- ${p.document_type.replace(/_/g, ' ')}: ${p.description} (${Math.round(p.confidence * 100)}% confidence)\n`;
+    }
+  }
+
+  if (suggestions.length > 0) {
+    context += `\n## Pending Suggestions\n\n`;
+    // Group by entity
+    const byEntity = new Map<string, typeof suggestions>();
+    for (const s of suggestions) {
+      const arr = byEntity.get(s.entity_id) || [];
+      arr.push(s);
+      byEntity.set(s.entity_id, arr);
+    }
+    for (const [eid, items] of byEntity) {
+      const eName = entityNames[eid] || 'Unknown';
+      context += `- ${eName}: ${items.map(i => `${i.document_type.replace(/_/g, ' ')} (${Math.round((i.confidence || 0) * 100)}%)`).join(', ')}\n`;
+    }
+  }
+
   context += `\nAnswer questions about entities, relationships, compliance, organizational structure, and documents. Be specific and reference entity names exactly as they appear. If you don't know something, say so rather than guessing. Format your responses with clear structure using markdown.
 
 When answering questions about documents or referencing specific information from documents, ALWAYS cite your sources using this exact format:
