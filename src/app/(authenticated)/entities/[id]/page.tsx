@@ -1174,12 +1174,18 @@ interface Expectation {
 function DocumentCompletenessCard({
   entityId,
   onNavigateDocs,
+  initialExpectations,
+  onExpectationsChanged,
 }: {
   entityId: string;
   onNavigateDocs: () => void;
+  initialExpectations?: Expectation[];
+  onExpectationsChanged?: () => void;
 }) {
-  const [expectations, setExpectations] = useState<Expectation[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [localExpectations, setExpectations] = useState<Expectation[] | null>(null);
+  // Use local state if we've mutated, otherwise use prop data
+  const expectations = localExpectations ?? initialExpectations ?? [];
+  const loaded = initialExpectations !== undefined;
   const initAttemptedRef = useRef(false);
   const [adding, setAdding] = useState(false);
   const [newDocType, setNewDocType] = useState("");
@@ -1188,19 +1194,6 @@ function DocumentCompletenessCard({
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [editing, setEditing] = useState(false);
-
-  // Fetch expectations
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/entities/${entityId}/expectations`)
-      .then(async (res) => {
-        if (cancelled) return;
-        if (res.ok) setExpectations(await res.json());
-        setLoaded(true);
-      })
-      .catch(() => { if (!cancelled) setLoaded(true); });
-    return () => { cancelled = true; };
-  }, [entityId]);
 
   // Auto-init if no confirmed (non-suggestion, non-NA) expectations
   const hasConfirmed = expectations.some((e) => !e.is_suggestion && !e.is_not_applicable);
@@ -1213,9 +1206,12 @@ function DocumentCompletenessCard({
       body: JSON.stringify({ action: "refresh" }),
     }).then(async () => {
       const res = await fetch(`/api/entities/${entityId}/expectations`);
-      if (res.ok) setExpectations(await res.json());
+      if (res.ok) {
+        setExpectations(await res.json());
+        onExpectationsChanged?.();
+      }
     }).catch(() => {});
-  }, [loaded, hasConfirmed, entityId]);
+  }, [loaded, hasConfirmed, entityId, onExpectationsChanged]);
 
   const handleMarkNA = async (id: string) => {
     await fetch(`/api/entities/${entityId}/expectations`, {
@@ -1223,7 +1219,7 @@ function DocumentCompletenessCard({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "mark_na", expectation_id: id }),
     });
-    setExpectations((prev) => prev.map((e) => e.id === id ? { ...e, is_not_applicable: true } : e));
+    setExpectations((prev) => (prev || []).map((e) => e.id === id ? { ...e, is_not_applicable: true } : e));
   };
 
   const handleMarkNeeded = async (id: string) => {
@@ -1232,7 +1228,7 @@ function DocumentCompletenessCard({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "mark_needed", expectation_id: id }),
     });
-    setExpectations((prev) => prev.map((e) => e.id === id ? { ...e, is_not_applicable: false } : e));
+    setExpectations((prev) => (prev || []).map((e) => e.id === id ? { ...e, is_not_applicable: false } : e));
   };
 
   const handleRefresh = async () => {
@@ -1265,7 +1261,7 @@ function DocumentCompletenessCard({
       });
       if (res.ok) {
         const newExp = await res.json();
-        setExpectations((prev) => [...prev, newExp]);
+        setExpectations((prev) => [...(prev || []), newExp]);
         setAdding(false);
         setNewDocType("");
         setNewCategory("formation");
@@ -3701,8 +3697,8 @@ function DocumentsTab({
 }) {
   const [showUpload, setShowUpload] = useState(false);
 
-  // Document completeness expectations
-  const [expectations, setExpectations] = useState<Array<{
+  // Document completeness expectations — loaded from entity data
+  const initialExpectations = (entityData?.expectations || []) as Array<{
     id: string;
     document_type: string;
     document_category: string;
@@ -3715,26 +3711,16 @@ function DocumentsTab({
     satisfied_doc: { id: string; name: string; document_type: string; year: number | null; created_at: string } | null;
     confidence: number | null;
     inference_reason: string | null;
-  }>>([]);
-  const [expectationsLoaded, setExpectationsLoaded] = useState(false);
+  }>;
+  const [expectations, setExpectations] = useState(initialExpectations);
+  const expectationsLoaded = true;
 
-  // Fetch expectations on mount and after refreshes
+  // Sync with entity data when it changes (e.g. after entity refresh)
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch(`/api/entities/${entityId}/expectations`);
-        if (cancelled) return;
-        if (res.ok) {
-          const data = await res.json();
-          setExpectations(data);
-        }
-      } catch { /* ignore */ }
-      if (!cancelled) setExpectationsLoaded(true);
+    if (initialExpectations.length > 0) {
+      setExpectations(initialExpectations);
     }
-    load();
-    return () => { cancelled = true; };
-  }, [entityId, documents]); // re-fetch when documents change
+  }, [entityData]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Initialize expectations if no confirmed (non-suggestion, non-NA) items
   const initAttemptedRef2 = useRef(false);
@@ -5704,6 +5690,7 @@ export default function EntityDetailPage() {
             <DocumentCompletenessCard
               entityId={entityId}
               onNavigateDocs={() => setActiveTab("documents")}
+              initialExpectations={entity?.expectations as Expectation[] | undefined}
             />
           </div>
 

@@ -79,6 +79,8 @@ export interface InferenceResult {
     annual_recurrence: number;
     lifecycle: number;
     service_provider: number;
+    state_compliance: number;
+    investor_needs: number;
     suggestions_created: number;
     entities_scanned: number;
     documents_scanned: number;
@@ -96,14 +98,16 @@ export async function runInferenceEngine(orgId: string): Promise<InferenceResult
 
   const allPatterns: InferredPattern[] = [];
 
-  const [crossEntity, recurrence, lifecycle, serviceProvider] = await Promise.all([
+  const [crossEntity, recurrence, lifecycle, serviceProvider, stateCompliance, investorNeeds] = await Promise.all([
     detectCrossEntityPatterns(orgId),
     detectAnnualRecurrences(orgId),
     detectLifecycleGaps(orgId),
     detectServiceProviderPatterns(orgId),
+    detectStateComplianceGaps(orgId),
+    detectInvestorNeeds(orgId),
   ]);
 
-  allPatterns.push(...crossEntity, ...recurrence, ...lifecycle, ...serviceProvider);
+  allPatterns.push(...crossEntity, ...recurrence, ...lifecycle, ...serviceProvider, ...stateCompliance, ...investorNeeds);
 
   // Store patterns and generate suggestions
   await storePatterns(orgId, allPatterns);
@@ -116,6 +120,8 @@ export async function runInferenceEngine(orgId: string): Promise<InferenceResult
       annual_recurrence: recurrence.length,
       lifecycle: lifecycle.length,
       service_provider: serviceProvider.length,
+      state_compliance: stateCompliance.length,
+      investor_needs: investorNeeds.length,
       suggestions_created: suggestionsCreated,
       entities_scanned: entRes.count || 0,
       documents_scanned: docRes.count || 0,
@@ -308,6 +314,19 @@ export async function detectAnnualRecurrences(orgId: string): Promise<InferredPa
 
   const entityMap = new Map((entities as EntityRow[]).map((e) => [e.id, e]));
 
+  // Fetch active termination signals for all entities
+  const { data: allSignals } = await admin
+    .from("entity_recurrence_signals")
+    .select("entity_id, document_types_affected, related_entity_id, effective_date, reason")
+    .eq("organization_id", orgId)
+    .eq("is_active", true);
+  const signalsByEntity = new Map<string, Array<{ document_types_affected: string[]; related_entity_id: string | null; effective_date: string | null; reason: string }>>();
+  for (const sig of allSignals || []) {
+    const arr = signalsByEntity.get(sig.entity_id) || [];
+    arr.push(sig);
+    signalsByEntity.set(sig.entity_id, arr);
+  }
+
   // For each entity+docType combo with 2+ years, check for gaps
   for (const [key, years] of entityDocYears) {
     if (years.size < 2) continue; // need at least 2 years to detect pattern
@@ -323,6 +342,19 @@ export async function detectAnnualRecurrences(orgId: string): Promise<InferredPa
       if (missingYear > currentYear) continue; // don't suggest future years
 
       if (dismissedSet.has(`${entityId}:${docType}`)) continue;
+
+      // Check termination signals — suppress if a signal covers this doc type
+      const entitySignals = signalsByEntity.get(entityId) || [];
+      const suppressingSignal = entitySignals.find((s) => {
+        if (!s.document_types_affected.includes(docType)) return false;
+        // If signal has an effective date, only suppress if it's before the missing year
+        if (s.effective_date) {
+          const effectiveYear = new Date(s.effective_date).getFullYear();
+          return effectiveYear <= maxYear;
+        }
+        return true;
+      });
+      if (suppressingSignal) continue; // Signal suppresses this expectation
 
       const entity = entityMap.get(entityId);
       if (!entity) continue;
@@ -576,6 +608,378 @@ export async function detectServiceProviderPatterns(orgId: string): Promise<Infe
   }
 
   return patterns;
+}
+
+/**
+ * State compliance: entities registered in certain states should have
+ * state-specific compliance documents.
+ *
+ * "3 CA-registered entities are missing Statement of Information filings."
+ */
+export async function detectStateComplianceGaps(orgId: string): Promise<InferredPattern[]> {
+  const admin = createAdminClient();
+  const patterns: InferredPattern[] = [];
+
+  // State-specific required documents
+  const stateRequirements: Array<{
+    state: string;
+    document_type: string;
+    document_category: string;
+    label: string;
+  }> = [
+    { state: "CA", document_type: "statement_of_information", document_category: "compliance", label: "Statement of Information" },
+    { state: "DE", document_type: "annual_franchise_tax", document_category: "tax", label: "Annual Franchise Tax" },
+    { state: "NY", document_type: "biennial_statement", document_category: "compliance", label: "Biennial Statement" },
+    { state: "TX", document_type: "franchise_tax_report", document_category: "tax", label: "Franchise Tax Report" },
+    { state: "FL", document_type: "annual_report", document_category: "compliance", label: "Annual Report" },
+    { state: "NV", document_type: "annual_list", document_category: "compliance", label: "Annual List of Officers" },
+  ];
+
+  // Fetch org entities first, then their registrations
+  const { data: orgEntities } = await admin
+    .from("entities")
+    .select("id")
+    .eq("organization_id", orgId);
+  if (!orgEntities || orgEntities.length === 0) return patterns;
+
+  const orgEntityIds = orgEntities.map((e: { id: string }) => e.id);
+
+  const { data: registrations } = await admin
+    .from("entity_registrations")
+    .select("entity_id, jurisdiction")
+    .in("entity_id", orgEntityIds);
+  if (!registrations || registrations.length === 0) return patterns;
+
+  const entityIds = [...new Set(registrations.map((r: { entity_id: string }) => r.entity_id))];
+
+  // Fetch entities for names
+  // Fetch documents
+  const { data: documents } = await admin
+    .from("documents")
+    .select("entity_id, document_type")
+    .in("entity_id", entityIds)
+    .is("deleted_at", null);
+  const entityDocs = new Map<string, Set<string>>();
+  for (const doc of documents || []) {
+    const set = entityDocs.get(doc.entity_id) || new Set();
+    set.add(doc.document_type);
+    entityDocs.set(doc.entity_id, set);
+  }
+
+  // Fetch dismissed
+  const { data: existingExp } = await admin
+    .from("entity_document_expectations")
+    .select("entity_id, document_type, is_not_applicable")
+    .in("entity_id", entityIds);
+  const dismissedSet = new Set(
+    (existingExp || [])
+      .filter((e: Record<string, unknown>) => e.is_not_applicable)
+      .map((e: Record<string, unknown>) => `${e.entity_id}:${e.document_type}`)
+  );
+
+  // Group registrations by state
+  const stateEntities = new Map<string, string[]>();
+  for (const reg of registrations) {
+    const arr = stateEntities.get(reg.jurisdiction) || [];
+    arr.push(reg.entity_id);
+    stateEntities.set(reg.jurisdiction, arr);
+  }
+
+  for (const req of stateRequirements) {
+    const entitiesInState = stateEntities.get(req.state);
+    if (!entitiesInState || entitiesInState.length === 0) continue;
+
+    const missing = entitiesInState.filter((eid) => {
+      const docs = entityDocs.get(eid) || new Set();
+      return !docs.has(req.document_type) && !dismissedSet.has(`${eid}:${req.document_type}`);
+    });
+
+    if (missing.length === 0) continue;
+
+    const entitiesWithDoc = entitiesInState.filter((eid) => {
+      const docs = entityDocs.get(eid) || new Set();
+      return docs.has(req.document_type);
+    });
+
+    patterns.push({
+      pattern_type: "state_compliance",
+      document_type: req.document_type,
+      document_category: req.document_category,
+      description: `${missing.length} ${req.state}-registered entit${missing.length === 1 ? "y is" : "ies are"} missing ${req.label}.`,
+      evidence: {
+        entities_with: entitiesWithDoc,
+        entities_without: missing,
+        state: req.state,
+      },
+      confidence: 0.85,
+      entity_coverage: entitiesWithDoc.length / entitiesInState.length,
+      target_entity_ids: missing,
+    });
+  }
+
+  return patterns;
+}
+
+/**
+ * Investor/stakeholder: entities with investors (cap table entries) should
+ * have investor-related documents (K-1s, distribution notices, etc.).
+ *
+ * "Entity X has 5 investors but no K-1s on file."
+ */
+export async function detectInvestorNeeds(orgId: string): Promise<InferredPattern[]> {
+  const admin = createAdminClient();
+  const patterns: InferredPattern[] = [];
+
+  // Fetch org entities first, then their cap table entries
+  const { data: orgEntities } = await admin
+    .from("entities")
+    .select("id")
+    .eq("organization_id", orgId);
+  if (!orgEntities || orgEntities.length === 0) return patterns;
+
+  const orgEntityIds = orgEntities.map((e: { id: string }) => e.id);
+
+  const { data: capEntries } = await admin
+    .from("cap_table_entries")
+    .select("entity_id, investor_name")
+    .in("entity_id", orgEntityIds);
+  if (!capEntries || capEntries.length === 0) return patterns;
+
+  // Group by entity
+  const entityInvestors = new Map<string, string[]>();
+  for (const entry of capEntries) {
+    const arr = entityInvestors.get(entry.entity_id) || [];
+    arr.push(entry.investor_name || "Unknown");
+    entityInvestors.set(entry.entity_id, arr);
+  }
+
+  const entityIds = [...entityInvestors.keys()];
+
+  // Fetch entities for names
+  const { data: entities } = await admin
+    .from("entities")
+    .select("id, name")
+    .in("id", entityIds);
+  const entityMap = new Map((entities || []).map((e: { id: string; name: string }) => [e.id, e.name]));
+
+  // Fetch documents
+  const { data: documents } = await admin
+    .from("documents")
+    .select("entity_id, document_type")
+    .in("entity_id", entityIds)
+    .is("deleted_at", null);
+  const entityDocs = new Map<string, Set<string>>();
+  for (const doc of documents || []) {
+    const set = entityDocs.get(doc.entity_id) || new Set();
+    set.add(doc.document_type);
+    entityDocs.set(doc.entity_id, set);
+  }
+
+  // Fetch dismissed
+  const { data: existingExp } = await admin
+    .from("entity_document_expectations")
+    .select("entity_id, document_type, is_not_applicable")
+    .in("entity_id", entityIds);
+  const dismissedSet = new Set(
+    (existingExp || [])
+      .filter((e: Record<string, unknown>) => e.is_not_applicable)
+      .map((e: Record<string, unknown>) => `${e.entity_id}:${e.document_type}`)
+  );
+
+  // Investor-related document types expected when entity has investors
+  const investorDocTypes = [
+    { type: "k1", category: "tax", label: "K-1" },
+    { type: "subscription_agreement", category: "investor", label: "Subscription Agreement" },
+  ];
+
+  for (const [entityId, investors] of entityInvestors) {
+    if (investors.length === 0) continue;
+    const docs = entityDocs.get(entityId) || new Set();
+    const entityName = entityMap.get(entityId) || "Unknown";
+
+    for (const docReq of investorDocTypes) {
+      if (docs.has(docReq.type)) continue;
+      if (dismissedSet.has(`${entityId}:${docReq.type}`)) continue;
+
+      patterns.push({
+        pattern_type: "investor_detection",
+        document_type: docReq.type,
+        document_category: docReq.category,
+        description: `${entityName} has ${investors.length} investor${investors.length !== 1 ? "s" : ""} but no ${docReq.label} on file.`,
+        evidence: {
+          entities_with: [],
+          entities_without: [entityId],
+        },
+        confidence: Math.min(0.85, 0.6 + investors.length * 0.05),
+        entity_coverage: 0,
+        target_entity_ids: [entityId],
+      });
+    }
+  }
+
+  return patterns;
+}
+
+// --- Termination Signal Utilities ---
+
+export interface EntityRecurrenceSignal {
+  id: string;
+  entity_id: string;
+  signal_type: string;
+  related_entity_name: string | null;
+  related_entity_id: string | null;
+  jurisdiction: string | null;
+  effective_date: string | null;
+  document_types_affected: string[];
+  source_document_id: string;
+  confidence: number;
+  reason: string;
+  is_active: boolean;
+}
+
+/**
+ * Store a termination signal detected from document extraction.
+ */
+export async function upsertRecurrenceSignal(
+  orgId: string,
+  documentId: string,
+  signal: {
+    signal_type: string;
+    entity_id: string;
+    related_entity_name: string | null;
+    related_entity_id: string | null;
+    jurisdiction: string | null;
+    effective_date: string | null;
+    document_types_affected: string[];
+    confidence: string;
+    reason: string;
+  },
+): Promise<void> {
+  const admin = createAdminClient();
+  const confidenceNum = signal.confidence === "high" ? 0.95 : signal.confidence === "medium" ? 0.7 : 0.4;
+
+  // Check for existing signal from same document
+  const { data: existing } = await admin
+    .from("entity_recurrence_signals")
+    .select("id")
+    .eq("source_document_id", documentId)
+    .eq("entity_id", signal.entity_id)
+    .eq("signal_type", signal.signal_type)
+    .maybeSingle();
+
+  if (existing) {
+    await admin
+      .from("entity_recurrence_signals")
+      .update({
+        related_entity_name: signal.related_entity_name,
+        related_entity_id: signal.related_entity_id,
+        jurisdiction: signal.jurisdiction,
+        effective_date: signal.effective_date,
+        document_types_affected: signal.document_types_affected,
+        confidence: confidenceNum,
+        reason: signal.reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id);
+  } else {
+    await admin
+      .from("entity_recurrence_signals")
+      .insert({
+        organization_id: orgId,
+        entity_id: signal.entity_id,
+        signal_type: signal.signal_type,
+        related_entity_name: signal.related_entity_name,
+        related_entity_id: signal.related_entity_id,
+        jurisdiction: signal.jurisdiction,
+        effective_date: signal.effective_date,
+        document_types_affected: signal.document_types_affected,
+        source_document_id: documentId,
+        confidence: confidenceNum,
+        reason: signal.reason,
+      });
+  }
+}
+
+/**
+ * Get active termination signals that would suppress expectations.
+ */
+export async function getActiveSignals(
+  orgId: string,
+  entityId: string,
+  documentType?: string,
+  relatedEntityId?: string,
+): Promise<EntityRecurrenceSignal[]> {
+  const admin = createAdminClient();
+
+  let query = admin
+    .from("entity_recurrence_signals")
+    .select("*")
+    .eq("organization_id", orgId)
+    .eq("entity_id", entityId)
+    .eq("is_active", true);
+
+  if (relatedEntityId) {
+    query = query.eq("related_entity_id", relatedEntityId);
+  }
+
+  const { data } = await query;
+  if (!data) return [];
+
+  // Filter by document type if specified
+  if (documentType) {
+    return data.filter((s: EntityRecurrenceSignal) =>
+      s.document_types_affected.includes(documentType)
+    );
+  }
+
+  return data as EntityRecurrenceSignal[];
+}
+
+/**
+ * Re-evaluate existing annual recurrence expectations after a new
+ * termination signal is detected. Marks suppressed expectations as N/A.
+ */
+export async function reevaluateRecurrenceExpectations(
+  orgId: string,
+  entityId: string,
+): Promise<number> {
+  const admin = createAdminClient();
+  let suppressed = 0;
+
+  // Get active signals for this entity
+  const signals = await getActiveSignals(orgId, entityId);
+  if (signals.length === 0) return 0;
+
+  // Get unsatisfied, non-NA expectations for this entity
+  const { data: expectations } = await admin
+    .from("entity_document_expectations")
+    .select("id, document_type, is_not_applicable, source")
+    .eq("entity_id", entityId)
+    .eq("is_not_applicable", false)
+    .eq("is_satisfied", false);
+
+  if (!expectations) return 0;
+
+  for (const exp of expectations) {
+    // Check if any signal suppresses this expectation
+    const matchingSignal = signals.find((s) =>
+      s.document_types_affected.includes(exp.document_type)
+    );
+
+    if (matchingSignal) {
+      await admin
+        .from("entity_document_expectations")
+        .update({
+          is_not_applicable: true,
+          inference_reason: `Suppressed: ${matchingSignal.reason}`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", exp.id);
+      suppressed++;
+    }
+  }
+
+  return suppressed;
 }
 
 // --- Storage & Suggestion Generation ---

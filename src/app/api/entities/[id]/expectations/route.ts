@@ -31,26 +31,6 @@ export async function GET(
 
     const admin = createAdminClient();
 
-    // Auto-recheck: if there are unsatisfied expectations and linked documents,
-    // re-scan to catch linked docs that may satisfy expectations
-    const { count: unsatisfiedCount } = await admin
-      .from("entity_document_expectations")
-      .select("id", { count: "exact", head: true })
-      .eq("entity_id", id)
-      .eq("is_satisfied", false)
-      .eq("is_not_applicable", false);
-
-    if (unsatisfiedCount && unsatisfiedCount > 0) {
-      const { count: linkCount } = await admin
-        .from("document_entity_links")
-        .select("document_id", { count: "exact", head: true })
-        .eq("entity_id", id);
-
-      if (linkCount && linkCount > 0) {
-        await recheckEntityExpectations(id);
-      }
-    }
-
     const { data, error } = await admin
       .from("entity_document_expectations")
       .select("*")

@@ -9,7 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
-import { runEntityInference } from "@/lib/utils/inference-engine";
+import { runEntityInference, upsertRecurrenceSignal, reevaluateRecurrenceExpectations } from "@/lib/utils/inference-engine";
 import type { DocumentCategory } from "@/lib/types/entities";
 
 export interface IngestOptions {
@@ -233,6 +233,28 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
       // Run inference engine (non-blocking) for primary entity
       if (doc.entity_id) {
         runEntityInference(orgId, doc.entity_id).catch(() => {});
+      }
+    }
+
+    // Process termination signals from extraction
+    const terminationSignals = (item.ai_extraction as Record<string, unknown>)?.termination_signals as Array<{
+      signal_type: string; entity_id: string; related_entity_name: string | null;
+      related_entity_id: string | null; jurisdiction: string | null;
+      effective_date: string | null; document_types_affected: string[];
+      confidence: string; reason: string;
+    }> | undefined;
+    if (terminationSignals && terminationSignals.length > 0) {
+      for (const signal of terminationSignals) {
+        await upsertRecurrenceSignal(orgId, doc.id, signal).catch((err) => {
+          console.error("Termination signal upsert error:", err);
+        });
+      }
+      // Re-evaluate existing expectations that might now be suppressed
+      const affectedEntityIds = new Set(terminationSignals.map((s) => s.entity_id));
+      for (const eid of affectedEntityIds) {
+        await reevaluateRecurrenceExpectations(orgId, eid).catch((err) => {
+          console.error("Reevaluate recurrence error:", err);
+        });
       }
     }
 

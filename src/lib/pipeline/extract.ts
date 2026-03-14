@@ -258,7 +258,42 @@ Common patterns:
 - Operating agreements naming an entity as manager: role is "manager"
 - Any entity mentioned but role unclear: use "related"
 
-Only include entities that exist in the provided entity list. Do not create proposed entities here — that's handled separately via the actions array.`;
+Only include entities that exist in the provided entity list. Do not create proposed entities here — that's handled separately via the actions array.
+
+## Termination Signal Detection
+
+When reading a document, look for signals that a recurring document series is ending or has ended. Include a "termination_signals" array in your response:
+
+\`\`\`json
+{
+  "termination_signals": [
+    {
+      "signal_type": "investment_wind_down | entity_dissolution | contract_termination | ownership_transfer",
+      "entity_id": "uuid of the entity affected",
+      "related_entity_name": "name of investment/counterparty if applicable",
+      "related_entity_id": "uuid if matched to existing entity, null otherwise",
+      "jurisdiction": "XX or null",
+      "effective_date": "YYYY-MM-DD or null",
+      "document_types_affected": ["k1", "distribution_notice"],
+      "confidence": "high | medium | low",
+      "reason": "Why this signals the end of a recurring document series"
+    }
+  ]
+}
+\`\`\`
+
+Signal types to detect:
+- **K-1s**: Check for "final K-1" checkbox/language, liquidating distributions, zero ending capital balance, or dissolution language. If present, emit an investment_wind_down signal.
+- **Distribution notices**: Check for "final distribution" or "liquidating distribution" language.
+- **Dissolution/termination documents**: Certificates of dissolution, articles of termination, withdrawal filings. Emit entity_dissolution with the relevant jurisdiction.
+- **Contracts/agreements**: Termination notices, non-renewal notices, expiration dates that have passed. Emit contract_termination.
+- **Sale/transfer documents**: Sale agreements, redemption agreements, assignment of interests. Emit ownership_transfer.
+
+Only emit termination_signals when you have clear evidence in the document content. A low capital balance alone is not sufficient — look for explicit final/termination language or zero balances combined with distribution activity.
+
+Set confidence to "high" when the document explicitly states finality (e.g., "Final K-1" checkbox marked, "Certificate of Dissolution" title). Set to "medium" when inferring from financial data (zero ending balance + liquidating distribution). Set to "low" when the signal is ambiguous.
+
+If no termination signals are detected, return an empty array: "termination_signals": [].`;
 
   // Entity discovery section
   if (options?.entityDiscovery) {
@@ -391,6 +426,18 @@ export interface RelatedEntityRef {
   reason: string;
 }
 
+export interface TerminationSignal {
+  signal_type: 'investment_wind_down' | 'entity_dissolution' | 'contract_termination' | 'ownership_transfer';
+  entity_id: string;
+  related_entity_name: string | null;
+  related_entity_id: string | null;
+  jurisdiction: string | null;
+  effective_date: string | null;
+  document_types_affected: string[];
+  confidence: 'high' | 'medium' | 'low';
+  reason: string;
+}
+
 export interface ExtractionResult {
   entity_id: string | null;
   entity_match_confidence: 'high' | 'medium' | 'low' | 'none';
@@ -411,6 +458,7 @@ export interface ExtractionResult {
   new_type_category: string | null;
   tokens_used: number;
   related_entities: RelatedEntityRef[];
+  termination_signals: TerminationSignal[];
 }
 
 export interface SubDocument {
@@ -594,6 +642,9 @@ export async function extractDocument(
       ? (parsed.related_entities as RelatedEntityRef[]).filter(
           (r) => r.entity_id && r.entity_id !== (parsed.entity_id as string)
         )
+      : [],
+    termination_signals: Array.isArray(parsed.termination_signals)
+      ? (parsed.termination_signals as TerminationSignal[])
       : [],
   };
 

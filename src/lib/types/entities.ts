@@ -26,6 +26,20 @@ export interface EntityListItem extends Entity {
   filing_status: FilingStatus;
 }
 
+export interface DocumentExpectation {
+  id: string;
+  document_type: string;
+  document_category: string;
+  is_required: boolean;
+  is_satisfied: boolean;
+  is_not_applicable: boolean;
+  is_suggestion: boolean;
+  source: string;
+  notes: string | null;
+  confidence: number | null;
+  inference_reason: string | null;
+}
+
 export interface EntityDetail extends Entity {
   registrations: EntityRegistration[];
   managers: EntityManager[];
@@ -38,6 +52,7 @@ export interface EntityDetail extends Entity {
   relationships: Relationship[];
   cap_table: CapTableEntry[];
   compliance_obligations: ComplianceObligation[];
+  expectations: DocumentExpectation[];
 }
 
 export interface EntityRegistration {

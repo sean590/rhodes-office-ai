@@ -236,16 +236,20 @@ When referencing documents, use the document name and include the year if availa
     }
   }
 
-  // Fetch inferred patterns and pending suggestions
-  const [patternsRes, suggestionsRes] = await Promise.all([
+  // Fetch inferred patterns, pending suggestions, and termination signals
+  const [patternsRes, suggestionsRes, signalsRes] = await Promise.all([
     supabase.from("org_document_patterns").select("pattern_type, document_type, description, confidence, entity_coverage, is_active").eq("organization_id", orgId).eq("is_active", true).order("confidence", { ascending: false }),
     entityIds.length > 0
       ? supabase.from("entity_document_expectations").select("entity_id, document_type, confidence, inference_reason").in("entity_id", entityIds).eq("is_suggestion", true).eq("is_not_applicable", false)
+      : Promise.resolve({ data: [], error: null }),
+    entityIds.length > 0
+      ? supabase.from("entity_recurrence_signals").select("entity_id, signal_type, related_entity_name, document_types_affected, effective_date, reason").in("entity_id", entityIds).eq("is_active", true)
       : Promise.resolve({ data: [], error: null }),
   ]);
 
   const patterns = patternsRes.data || [];
   const suggestions = suggestionsRes.data || [];
+  const signals = signalsRes.data || [];
 
   if (patterns.length > 0) {
     context += `\n## Inferred Patterns\n\n`;
@@ -266,6 +270,19 @@ When referencing documents, use the document name and include the year if availa
     for (const [eid, items] of byEntity) {
       const eName = entityNames[eid] || 'Unknown';
       context += `- ${eName}: ${items.map(i => `${i.document_type.replace(/_/g, ' ')} (${Math.round((i.confidence || 0) * 100)}%)`).join(', ')}\n`;
+    }
+  }
+
+  if (signals.length > 0) {
+    context += `\n## Termination Signals\n\nThese signals indicate that recurring document series have ended or are ending:\n\n`;
+    for (const s of signals) {
+      const eName = entityNames[s.entity_id] || 'Unknown';
+      const types = s.document_types_affected.map((t: string) => t.replace(/_/g, ' ')).join(', ');
+      context += `- ${eName}: ${s.signal_type.replace(/_/g, ' ')}`;
+      if (s.related_entity_name) context += ` (${s.related_entity_name})`;
+      context += ` — affects ${types}`;
+      if (s.effective_date) context += `, effective ${s.effective_date}`;
+      context += `. ${s.reason}\n`;
     }
   }
 

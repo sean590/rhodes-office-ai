@@ -60,32 +60,28 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   const [items, setItems] = useState<QueueItem[]>([]);
   const [summary, setSummary] = useState<BatchSummary | null>(null);
   const [phase, setPhase] = useState<"processing" | "results">("processing");
-  const [liveEntities, setLiveEntities] = useState(initialEntities);
+  const [fetchedEntities, setFetchedEntities] = useState<Array<{ id: string; name: string }>>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Keep liveEntities in sync with parent prop
-  useEffect(() => {
-    if (initialEntities.length > 0) {
-      setLiveEntities(initialEntities);
-    }
-  }, [initialEntities]);
-
-  // Auto-fetch entities if initial list is empty
-  useEffect(() => {
-    if (initialEntities.length === 0) {
-      refreshEntities();
-    }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Derive liveEntities: prefer parent prop, fall back to fetched
+  const liveEntities = initialEntities.length > 0 ? initialEntities : fetchedEntities;
 
   const refreshEntities = useCallback(async () => {
     try {
       const res = await fetch("/api/entities");
       if (res.ok) {
         const data = await res.json();
-        setLiveEntities(data.map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
+        setFetchedEntities(data.map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
       }
     } catch { /* ignore */ }
   }, []);
+
+  // Auto-fetch entities if initial list is empty
+  useEffect(() => {
+    if (initialEntities.length === 0) {
+      refreshEntities(); // eslint-disable-line react-hooks/set-state-in-effect -- data fetch on mount
+    }
+  }, [initialEntities.length, refreshEntities]);
 
   const fetchBatch = useCallback(async () => {
     try {
@@ -122,7 +118,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   }, [batchId, onDocumentsChanged]);
 
   useEffect(() => {
-    fetchBatch();
+    fetchBatch(); // eslint-disable-line react-hooks/set-state-in-effect -- initial fetch + polling
     pollRef.current = setInterval(fetchBatch, 2500);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);

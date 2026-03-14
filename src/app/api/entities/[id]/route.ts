@@ -50,6 +50,7 @@ export async function GET(
       partnershipRepsRes,
       entityRolesRes,
       complianceRes,
+      expectationsRes,
     ] = await Promise.all([
       supabase
         .from("entity_registrations")
@@ -110,6 +111,14 @@ export async function GET(
         .select("*")
         .eq("entity_id", id)
         .order("next_due_date", { ascending: true, nullsFirst: false }),
+      // Document completeness expectations
+      supabase
+        .from("entity_document_expectations")
+        .select("*")
+        .eq("entity_id", id)
+        .order("document_category")
+        .order("is_required", { ascending: false })
+        .order("document_type"),
     ]);
 
     // Check for errors
@@ -147,6 +156,9 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
     if (complianceRes.error) {
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+    if (expectationsRes.error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
@@ -352,6 +364,7 @@ export async function GET(
       partnership_reps: partnershipRepsRes.data || [],
       roles: entityRolesRes.data || [],
       compliance_obligations: complianceRes.data || [],
+      expectations: expectationsRes.data || [],
     };
 
     return NextResponse.json(result, {

@@ -152,7 +152,7 @@ export async function processQueueItem(
       .from("document_queue")
       .update({
         status: routing.route === "auto_ingest" ? "extracted" : "review_ready",
-        ai_extraction: { actions: result.actions, summary: result.summary },
+        ai_extraction: { actions: result.actions, summary: result.summary, termination_signals: result.termination_signals },
         ai_summary: result.summary,
         ai_document_type: result.document_type,
         ai_document_category: result.document_category,
