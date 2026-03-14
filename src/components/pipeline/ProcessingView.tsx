@@ -65,8 +65,17 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
 
   // Keep liveEntities in sync with parent prop
   useEffect(() => {
-    setLiveEntities(initialEntities);
+    if (initialEntities.length > 0) {
+      setLiveEntities(initialEntities);
+    }
   }, [initialEntities]);
+
+  // Auto-fetch entities if initial list is empty
+  useEffect(() => {
+    if (initialEntities.length === 0) {
+      refreshEntities();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshEntities = useCallback(async () => {
     try {

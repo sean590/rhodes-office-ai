@@ -370,7 +370,12 @@ Common composite patterns:
 - K-1 bundles: multiple K-1s for different partners in one PDF
 - Annual compliance packages: annual report + certificate of good standing + registered agent docs
 
-For K-1 sub-documents, set "k1_recipient" to the partner/shareholder/beneficiary name.`;
+For K-1 sub-documents:
+- Set "k1_recipient" to the partner/shareholder/beneficiary name
+- IMPORTANT: Match the K-1 recipient against the EXISTING ENTITY LIST above. If a recipient matches an existing entity (by name or fuzzy match), set "entity_id" to that entity's UUID. The K-1 document should be associated with the RECIPIENT entity, not the filing entity.
+- If the recipient doesn't match any existing entity, set "entity_id" to null
+
+For ALL sub-documents: set "entity_id" by matching the relevant entity from the EXISTING ENTITY LIST. For the main return, this is the filing entity. For K-1s, this is the recipient entity. For state returns, this is the filing entity. Never leave "entity_id" null if the entity exists in the list above.`;
   }
 
   return prompt;

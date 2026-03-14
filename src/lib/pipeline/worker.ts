@@ -140,7 +140,8 @@ export async function processQueueItem(
 
     // 8. Handle composite results — create child queue items
     if (result.is_composite && result.sub_documents.length > 0) {
-      await handleCompositeResult(admin, item, result.sub_documents, batchOrgId);
+      const entityList = (dbContext.entities as Array<{ id: string; name: string; short_name: string | null }>) || [];
+      await handleCompositeResult(admin, item, result.sub_documents, batchOrgId, entityList);
     }
 
     // 9. Route: auto-ingest or review queue
@@ -244,9 +245,51 @@ async function handleCompositeResult(
   admin: ReturnType<typeof createAdminClient>,
   parentItem: Record<string, unknown>,
   subDocuments: SubDocument[],
-  batchOrgId: string
+  batchOrgId: string,
+  entityList: Array<{ id: string; name: string; short_name: string | null }>
 ): Promise<void> {
+  // Resolve the parent/filing entity for linking K-1s back to the issuer
+  const parentEntityId = (parentItem.ai_entity_id || parentItem.staged_entity_id) as string | null;
+
   await Promise.all(subDocuments.map(async (sub) => {
+    // If no entity_id but has k1_recipient, try to match recipient to an existing entity
+    if (!sub.entity_id && sub.k1_recipient) {
+      const recipientLower = sub.k1_recipient.toLowerCase().replace(/[.,]/g, "").trim();
+      const match = entityList.find((e) => {
+        const nameLower = e.name.toLowerCase().replace(/[.,]/g, "").trim();
+        const shortLower = (e.short_name || "").toLowerCase().replace(/[.,]/g, "").trim();
+        return nameLower === recipientLower || shortLower === recipientLower
+          || nameLower.includes(recipientLower) || recipientLower.includes(nameLower);
+      });
+      if (match) {
+        sub.entity_id = match.id;
+      }
+    }
+
+    // For K-1s, link back to the issuing/filing entity as a related entity
+    let relatedEntities: Array<Record<string, unknown>> = [];
+    if (sub.k1_recipient && parentEntityId && parentEntityId !== sub.entity_id) {
+      const parentEntity = entityList.find((e) => e.id === parentEntityId);
+      relatedEntities = [{
+        entity_id: parentEntityId,
+        entity_name: parentEntity?.name || "Filing Entity",
+        role: "related",
+        confidence: "high",
+        reason: "K-1 issued by this entity",
+      }];
+    }
+    // For non-K-1 sub-documents (state returns, etc.), if entity_id differs from parent, link to parent
+    if (!sub.k1_recipient && parentEntityId && sub.entity_id && sub.entity_id !== parentEntityId) {
+      const parentEntity = entityList.find((e) => e.id === parentEntityId);
+      relatedEntities = [{
+        entity_id: parentEntityId,
+        entity_name: parentEntity?.name || "Filing Entity",
+        role: "related",
+        confidence: "high",
+        reason: "Sub-document from composite filing",
+      }];
+    }
+
     // Determine routing for each child
     const hasActions = sub.actions && sub.actions.length > 0;
     const hasEntity = !!sub.entity_id;
@@ -277,6 +320,7 @@ async function handleCompositeResult(
       ai_suggested_name: sub.suggested_name,
       ai_summary: sub.summary,
       ai_proposed_actions: sub.actions,
+      ai_related_entities: relatedEntities.length > 0 ? relatedEntities : null,
       ai_extraction: { actions: sub.actions, summary: sub.summary },
       entity_match_confidence: sub.entity_id ? "high" : "none",
       approval_reason: childReason,
