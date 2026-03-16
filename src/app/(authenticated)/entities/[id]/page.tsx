@@ -15,7 +15,7 @@ import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
-import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
+import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS, groupTaxDocuments } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
 import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure } from "@/lib/types/enums";
 import type {
@@ -3799,6 +3799,78 @@ function DocumentsTab({
 
   // Collapsible category state
   const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set());
+  const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set());
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Set<string>>(new Set());
+
+  // Multi-select delete state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+
+  const toggleYear = (catKey: string, year: number | null) => {
+    const key = `${catKey}_${year}`;
+    setCollapsedYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleBucket = (catKey: string, year: number | null, bucketKey: string) => {
+    const key = `${catKey}_${year}_${bucketKey}`;
+    setCollapsedBuckets((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleDocSelection = (docId: string) => {
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) next.delete(docId); else next.add(docId);
+      return next;
+    });
+  };
+
+  const toggleGroupSelection = (docIds: string[]) => {
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = docIds.every((id) => next.has(id));
+      if (allSelected) {
+        docIds.forEach((id) => next.delete(id));
+      } else {
+        docIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedDocIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    const count = selectedDocIds.size;
+    if (count === 0) return;
+    if (!confirm(`Delete ${count} document${count > 1 ? "s" : ""}? This cannot be undone.`)) return;
+    try {
+      const ids = Array.from(selectedDocIds);
+      const results = await Promise.allSettled(
+        ids.map((id) => fetch(`/api/documents/${id}`, { method: "DELETE" }))
+      );
+      const failures = results.filter(
+        (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+      );
+      if (failures.length > 0) {
+        console.error(`${failures.length} of ${count} deletes failed`);
+      }
+      exitSelectMode();
+      onRefresh();
+    } catch (err) {
+      console.error("Bulk delete error:", err);
+    }
+  };
 
   // Track dismissed documents so auto-open doesn't re-open them
   const [dismissedDocIds, setDismissedDocIds] = useState<Set<string>>(new Set());
@@ -4109,8 +4181,26 @@ function DocumentsTab({
   return (
     <div>
       {/* Upload toggle */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-        {!showUpload && (
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, alignItems: "center", marginBottom: 16 }}>
+        {!showUpload && documents.length > 0 && (
+          <button
+            onClick={selectMode ? exitSelectMode : () => setSelectMode(true)}
+            style={{
+              background: "none",
+              border: `1px solid ${selectMode ? "#c73e3e" : "#e8e6df"}`,
+              borderRadius: 6,
+              padding: "8px 16px",
+              fontSize: 13,
+              fontWeight: 500,
+              color: selectMode ? "#c73e3e" : "#666",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {selectMode ? "Cancel" : "Select"}
+          </button>
+        )}
+        {!showUpload && !selectMode && (
           <Button variant="primary" onClick={async () => {
             setShowUpload(true);
             // Create a pipeline batch for this entity
@@ -4643,7 +4733,7 @@ function DocumentsTab({
           </div>
         </div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative" }}>
           {Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([catKey, cat]) => {
             const catDocs = grouped[catKey] || [];
             const catExpectations = expectations.filter(
@@ -4656,6 +4746,176 @@ function DocumentsTab({
             // Show category if it has docs OR missing expectations
             if (catDocs.length === 0 && catMissing.length === 0) return null;
             const collapsed = collapsedCats.has(catKey);
+            const allCatDocIds = catDocs.map((d) => d.id);
+            const allCatSelected = allCatDocIds.length > 0 && allCatDocIds.every((id) => selectedDocIds.has(id));
+            const someCatSelected = allCatDocIds.some((id) => selectedDocIds.has(id));
+
+            // Tax sub-grouping
+            const isTax = catKey === "tax";
+            const taxGrouped = isTax ? groupTaxDocuments(catDocs) : null;
+            // Sort years descending, null last
+            const sortedYears = taxGrouped
+              ? Array.from(taxGrouped.keys()).sort((a, b) => {
+                  if (a === null) return 1;
+                  if (b === null) return -1;
+                  return b - a;
+                })
+              : [];
+
+            /* ---- Render a single document row ---- */
+            const renderDocRow = (doc: DocRecord, indent?: number) => {
+              const isExpanded = expandedDocId === doc.id && !selectMode;
+              const extraction = doc.ai_extraction as { summary?: string; actions?: unknown[] } | null;
+              const paddingLeft = indent ? indent : 18;
+
+              return (
+                <div key={doc.id}>
+                  {/* Compact row */}
+                  <div
+                    onClick={() => {
+                      if (selectMode) {
+                        toggleDocSelection(doc.id);
+                      } else {
+                        setExpandedDocId(isExpanded ? null : doc.id);
+                      }
+                    }}
+                    style={{
+                      display: isExpanded ? "none" : "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: `10px 18px 10px ${paddingLeft}px`,
+                      borderBottom: "1px solid #f8f7f4",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+                  >
+                    {selectMode && (
+                      <input
+                        type="checkbox"
+                        checked={selectedDocIds.has(doc.id)}
+                        onChange={() => toggleDocSelection(doc.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ cursor: "pointer", accentColor: "#2d5a3d", flexShrink: 0 }}
+                      />
+                    )}
+                    <DocIcon size={16} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, color: "#1a1a1f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {doc.name}
+                      </div>
+                    </div>
+
+                    {doc.link_role && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        Linked
+                      </span>
+                    )}
+
+                    {doc.document_type !== "other" && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
+                      </span>
+                    )}
+
+                    {doc.year && !isTax && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        {doc.year}
+                      </span>
+                    )}
+
+                    {doc.ai_extracted && (
+                      <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
+                        <SparkleIcon size={12} />
+                      </span>
+                    )}
+
+                    <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+                      {formatRelativeDate(doc.created_at)}
+                    </span>
+
+                    <span style={{ fontSize: 11, color: "#9494a0", minWidth: 50, textAlign: "right" }}>
+                      {formatFileSize(doc.file_size)}
+                    </span>
+
+                    {!selectMode && (
+                      <div style={{ color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                        <DownIcon size={12} />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isExpanded && !selectMode && (
+                    <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid #e8e6df", background: "#fafaf7", position: "relative" }}>
+                      <button
+                        onClick={() => setExpandedDocId(null)}
+                        style={{ position: "absolute", top: 12, right: 18, background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 4, display: "flex", alignItems: "center", transition: "color 0.1s" }}
+                        onMouseEnter={(e) => (e.currentTarget.style.color = "#1a1a1f")}
+                        onMouseLeave={(e) => (e.currentTarget.style.color = "#9494a0")}
+                        title="Collapse"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                      </button>
+                      <div style={{ marginBottom: 10 }}>
+                        {editingDocId === doc.id ? (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <input
+                              autoFocus
+                              value={editingName}
+                              onChange={(e) => setEditingName(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") handleRename(doc.id);
+                                if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
+                              }}
+                              style={{
+                                flex: 1, fontSize: 14, fontWeight: 600, color: "#1a1a1f",
+                                background: "#fff", border: "1px solid #ddd9d0", borderRadius: 6,
+                                padding: "4px 8px", fontFamily: "inherit", outline: "none",
+                              }}
+                            />
+                            <button onClick={() => handleRename(doc.id)} style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Save</button>
+                            <button onClick={() => { setEditingDocId(null); setEditingName(""); }} style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}>Cancel</button>
+                          </div>
+                        ) : (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }} title="Rename" style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}>
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                        {doc.link_role && <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "3px 10px", borderRadius: 4 }}>Linked ({doc.link_role})</span>}
+                        {doc.document_type !== "other" && <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>{DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}</span>}
+                        {doc.year && <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>{doc.year}</span>}
+                      </div>
+                      {extraction?.summary && (
+                        <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#4a4a52", lineHeight: 1.5, marginBottom: 12 }}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>AI Summary</div>
+                          {extraction.summary}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
+                        <span>Size: {formatFileSize(doc.file_size)}</span>
+                        <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => handleProcess(doc.id)} disabled={processingId === doc.id} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: processingId === doc.id ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#c47520", fontWeight: 500, fontFamily: "inherit" }}>
+                          <SparkleIcon size={12} />
+                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
+                        </button>
+                        <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
+                        <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            };
 
             return (
               <Card key={catKey} style={{ padding: 0 }}>
@@ -4672,6 +4932,16 @@ function DocumentsTab({
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {selectMode && catDocs.length > 0 && (
+                      <input
+                        type="checkbox"
+                        checked={allCatSelected}
+                        ref={(el) => { if (el) el.indeterminate = someCatSelected && !allCatSelected; }}
+                        onChange={(e) => { e.stopPropagation(); toggleGroupSelection(allCatDocIds); }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ cursor: "pointer", accentColor: "#2d5a3d" }}
+                      />
+                    )}
                     <FolderIcon size={14} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>{cat.label}</span>
                     {catTotal > 0 ? (
@@ -4702,218 +4972,13 @@ function DocumentsTab({
                       </span>
                     )}
                   </div>
-                  <DownIcon
-                    size={14}
-                    className=""
-                  />
+                  <DownIcon size={14} className="" />
                 </div>
 
                 {/* Documents in this category */}
                 {!collapsed && (
                   <div>
-                    {catDocs.map((doc) => {
-                      const isExpanded = expandedDocId === doc.id;
-                      const extraction = doc.ai_extraction as { summary?: string; actions?: unknown[] } | null;
-
-                      return (
-                        <div key={doc.id}>
-                          {/* Compact row — hidden when expanded */}
-                          <div
-                            onClick={() => setExpandedDocId(isExpanded ? null : doc.id)}
-                            style={{
-                              display: isExpanded ? "none" : "flex",
-                              alignItems: "center",
-                              gap: 12,
-                              padding: "10px 18px",
-                              borderBottom: "1px solid #f8f7f4",
-                              fontSize: 13,
-                              cursor: "pointer",
-                              transition: "background 0.1s",
-                            }}
-                            onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
-                            onMouseLeave={(e) => (e.currentTarget.style.background = "")}
-                          >
-                            <DocIcon size={16} />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontWeight: 500, color: "#1a1a1f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {doc.name}
-                              </div>
-                            </div>
-
-                            {/* Linked badge */}
-                            {doc.link_role && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                                Linked
-                              </span>
-                            )}
-
-                            {/* Tags pill — doc type if not 'other' */}
-                            {doc.document_type !== "other" && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                                {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
-                              </span>
-                            )}
-
-                            {/* Year pill */}
-                            {doc.year && (
-                              <span style={{ fontSize: 10, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                                {doc.year}
-                              </span>
-                            )}
-
-                            {/* AI status */}
-                            {doc.ai_extracted && (
-                              <span title="AI Processed" style={{ color: "#2d5a3d", flexShrink: 0 }}>
-                                <SparkleIcon size={12} />
-                              </span>
-                            )}
-
-                            {/* Uploaded */}
-                            <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
-                              {formatRelativeDate(doc.created_at)}
-                            </span>
-
-                            {/* Size */}
-                            <span style={{ fontSize: 11, color: "#9494a0", minWidth: 50, textAlign: "right" }}>
-                              {formatFileSize(doc.file_size)}
-                            </span>
-
-                            {/* Expand indicator */}
-                            <div style={{ color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
-                              <DownIcon size={12} />
-                            </div>
-                          </div>
-
-                          {/* Expanded detail */}
-                          {isExpanded && (
-                            <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid #e8e6df", background: "#fafaf7", position: "relative" }}>
-                              {/* Collapse button */}
-                              <button
-                                onClick={() => setExpandedDocId(null)}
-                                style={{ position: "absolute", top: 12, right: 18, background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 4, display: "flex", alignItems: "center", transition: "color 0.1s" }}
-                                onMouseEnter={(e) => (e.currentTarget.style.color = "#1a1a1f")}
-                                onMouseLeave={(e) => (e.currentTarget.style.color = "#9494a0")}
-                                title="Collapse"
-                              >
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
-                              </button>
-                              {/* Document name — inline rename */}
-                              <div style={{ marginBottom: 10 }}>
-                                {editingDocId === doc.id ? (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                    <input
-                                      autoFocus
-                                      value={editingName}
-                                      onChange={(e) => setEditingName(e.target.value)}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "Enter") handleRename(doc.id);
-                                        if (e.key === "Escape") { setEditingDocId(null); setEditingName(""); }
-                                      }}
-                                      style={{
-                                        flex: 1,
-                                        fontSize: 14,
-                                        fontWeight: 600,
-                                        color: "#1a1a1f",
-                                        background: "#fff",
-                                        border: "1px solid #ddd9d0",
-                                        borderRadius: 6,
-                                        padding: "4px 8px",
-                                        fontFamily: "inherit",
-                                        outline: "none",
-                                      }}
-                                    />
-                                    <button
-                                      onClick={() => handleRename(doc.id)}
-                                      style={{ background: "#2d5a3d", color: "#fff", border: "none", borderRadius: 5, padding: "4px 10px", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}
-                                    >
-                                      Save
-                                    </button>
-                                    <button
-                                      onClick={() => { setEditingDocId(null); setEditingName(""); }}
-                                      style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 5, padding: "4px 10px", fontSize: 12, color: "#6b6b76", cursor: "pointer", fontFamily: "inherit" }}
-                                    >
-                                      Cancel
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                                    <span style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>{doc.name}</span>
-                                    <button
-                                      onClick={(e) => { e.stopPropagation(); setEditingDocId(doc.id); setEditingName(doc.name); }}
-                                      title="Rename"
-                                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 2, display: "flex", alignItems: "center" }}
-                                    >
-                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* All tags */}
-                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                                {doc.link_role && (
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "3px 10px", borderRadius: 4 }}>
-                                    Linked ({doc.link_role})
-                                  </span>
-                                )}
-                                {doc.document_type !== "other" && (
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
-                                    {DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}
-                                  </span>
-                                )}
-                                {doc.year && (
-                                  <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
-                                    {doc.year}
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* AI Summary */}
-                              {extraction?.summary && (
-                                <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#4a4a52", lineHeight: 1.5, marginBottom: 12 }}>
-                                  <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                                    AI Summary
-                                  </div>
-                                  {extraction.summary}
-                                </div>
-                              )}
-
-                              {/* Details */}
-                              <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
-                                <span>Size: {formatFileSize(doc.file_size)}</span>
-                                <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
-                              </div>
-
-                              {/* Action buttons */}
-                              <div style={{ display: "flex", gap: 8 }}>
-                                <button
-                                  onClick={() => handleProcess(doc.id)}
-                                  disabled={processingId === doc.id}
-                                  style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: processingId === doc.id ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#c47520", fontWeight: 500, fontFamily: "inherit" }}
-                                >
-                                  <SparkleIcon size={12} />
-                                  {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
-                                </button>
-                                <button
-                                  onClick={() => handleDownload(doc.id)}
-                                  style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}
-                                >
-                                  Download
-                                </button>
-                                <button
-                                  onClick={() => handleDelete(doc.id)}
-                                  style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {/* Missing expectations in this category */}
+                    {/* Missing expectations at the top */}
                     {catMissing.map((exp) => (
                       <div
                         key={exp.id}
@@ -4964,6 +5029,104 @@ function DocumentsTab({
                         </button>
                       </div>
                     ))}
+
+                    {/* Tax: year → bucket sub-grouping */}
+                    {isTax && taxGrouped ? (
+                      sortedYears.map((year) => {
+                        const buckets = taxGrouped.get(year) || [];
+                        const yearKey = `tax_${year}`;
+                        const yearCollapsed = collapsedYears.has(yearKey);
+                        const yearDocIds = buckets.flatMap((b) => b.docs.map((d) => d.id));
+                        const allYearSelected = yearDocIds.length > 0 && yearDocIds.every((id) => selectedDocIds.has(id));
+                        const someYearSelected = yearDocIds.some((id) => selectedDocIds.has(id));
+
+                        return (
+                          <div key={yearKey}>
+                            {/* Year header */}
+                            <div
+                              onClick={() => toggleYear("tax", year)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                padding: "10px 18px 6px",
+                                cursor: "pointer",
+                                borderBottom: "1px solid #f5f4f0",
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                {selectMode && (
+                                  <input
+                                    type="checkbox"
+                                    checked={allYearSelected}
+                                    ref={(el) => { if (el) el.indeterminate = someYearSelected && !allYearSelected; }}
+                                    onChange={() => toggleGroupSelection(yearDocIds)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    style={{ cursor: "pointer", accentColor: "#2d5a3d" }}
+                                  />
+                                )}
+                                <span style={{ fontSize: 14, fontWeight: 700, color: "#1a1a1f" }}>
+                                  {year ?? "No Year"}
+                                </span>
+                                <span style={{ fontSize: 11, color: "#9494a0" }}>
+                                  ({yearDocIds.length})
+                                </span>
+                              </div>
+                              <DownIcon size={12} />
+                            </div>
+
+                            {/* Buckets within year */}
+                            {!yearCollapsed && buckets.map((bucket) => {
+                              const bKey = `tax_${year}_${bucket.bucketKey}`;
+                              const bucketCollapsed = collapsedBuckets.has(bKey);
+                              const bucketDocIds = bucket.docs.map((d) => d.id);
+                              const allBucketSelected = bucketDocIds.length > 0 && bucketDocIds.every((id) => selectedDocIds.has(id));
+                              const someBucketSelected = bucketDocIds.some((id) => selectedDocIds.has(id));
+
+                              return (
+                                <div key={bKey}>
+                                  {/* Bucket header */}
+                                  <div
+                                    onClick={() => toggleBucket("tax", year, bucket.bucketKey)}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: 8,
+                                      padding: "8px 18px 4px 32px",
+                                      cursor: "pointer",
+                                    }}
+                                  >
+                                    {selectMode && (
+                                      <input
+                                        type="checkbox"
+                                        checked={allBucketSelected}
+                                        ref={(el) => { if (el) el.indeterminate = someBucketSelected && !allBucketSelected; }}
+                                        onChange={() => toggleGroupSelection(bucketDocIds)}
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{ cursor: "pointer", accentColor: "#2d5a3d" }}
+                                      />
+                                    )}
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: "#666" }}>
+                                      {bucket.bucketLabel}
+                                    </span>
+                                    <span style={{ fontSize: 11, color: "#999" }}>
+                                      ({bucket.docs.length})
+                                    </span>
+                                    <DownIcon size={10} />
+                                  </div>
+
+                                  {/* Documents within bucket */}
+                                  {!bucketCollapsed && bucket.docs.map((doc) => renderDocRow(doc, 46))}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })
+                    ) : (
+                      /* Non-Tax: flat list */
+                      catDocs.map((doc) => renderDocRow(doc))
+                    )}
 
                     {/* AI Suggestions */}
                     {(() => {
@@ -5095,6 +5258,43 @@ function DocumentsTab({
               </Card>
             );
           })}
+
+          {/* Floating action bar for multi-select delete */}
+          {selectMode && selectedDocIds.size > 0 && (
+            <div style={{
+              position: "sticky",
+              bottom: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 18px",
+              background: "#fff",
+              borderTop: "1px solid #e8e6df",
+              boxShadow: "0 -2px 8px rgba(0,0,0,0.06)",
+              borderRadius: "0 0 12px 12px",
+              zIndex: 10,
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
+                {selectedDocIds.size} selected
+              </span>
+              <button
+                onClick={handleBulkDelete}
+                style={{
+                  background: "#c73e3e",
+                  color: "white",
+                  border: "none",
+                  borderRadius: 6,
+                  padding: "8px 16px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Delete Selected
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

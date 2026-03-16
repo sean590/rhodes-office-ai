@@ -130,8 +130,8 @@ export async function POST(
       }
 
       // Upload file to storage (org-scoped path)
-      // Sanitize: Supabase Storage rejects brackets and certain special chars in keys
-      const safeName = file.name.replace(/[\[\]#?*]/g, "_");
+      // Sanitize: Supabase Storage rejects brackets, parens, and certain special chars in keys
+      const safeName = file.name.replace(/[\[\]()#?*]/g, "_");
       const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
       const { error: uploadError } = await admin.storage
         .from("documents")
