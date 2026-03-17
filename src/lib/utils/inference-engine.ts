@@ -1064,6 +1064,23 @@ async function generateSuggestions(orgId: string, patterns: InferredPattern[]): 
 
   const highConfidence = patterns.filter((p) => p.confidence >= SUGGESTION_THRESHOLD);
 
+  // Collect all target entity IDs so we can fetch names in one query
+  const allEntityIds = new Set<string>();
+  for (const pattern of highConfidence) {
+    for (const eid of pattern.target_entity_ids) allEntityIds.add(eid);
+  }
+
+  const entityNameMap = new Map<string, string>();
+  if (allEntityIds.size > 0) {
+    const { data: entities } = await admin
+      .from("entities")
+      .select("id, name")
+      .in("id", [...allEntityIds]);
+    for (const e of entities || []) {
+      entityNameMap.set(e.id, e.name);
+    }
+  }
+
   for (const pattern of highConfidence) {
     for (const entityId of pattern.target_entity_ids) {
       // Check if expectation already exists (any source)
@@ -1077,13 +1094,17 @@ async function generateSuggestions(orgId: string, patterns: InferredPattern[]): 
       // Skip if already exists as confirmed expectation or dismissed
       if (existing && (!existing.is_suggestion || existing.is_not_applicable)) continue;
 
+      // Build entity-specific description instead of using the org-wide pattern description
+      const entityName = entityNameMap.get(entityId) || "This entity";
+      const reason = buildEntityReason(pattern, entityName);
+
       // Update or insert suggestion
       if (existing) {
         await admin
           .from("entity_document_expectations")
           .update({
             confidence: pattern.confidence,
-            inference_reason: pattern.description,
+            inference_reason: reason,
             updated_at: new Date().toISOString(),
           })
           .eq("id", existing.id);
@@ -1099,7 +1120,7 @@ async function generateSuggestions(orgId: string, patterns: InferredPattern[]): 
             source: "inferred",
             is_suggestion: true,
             confidence: pattern.confidence,
-            inference_reason: pattern.description,
+            inference_reason: reason,
           });
         created++;
       }
@@ -1107,6 +1128,33 @@ async function generateSuggestions(orgId: string, patterns: InferredPattern[]): 
   }
 
   return created;
+}
+
+/**
+ * Build an entity-specific reason string from an org-wide pattern.
+ */
+function buildEntityReason(pattern: InferredPattern, entityName: string): string {
+  switch (pattern.pattern_type) {
+    case "cross_entity":
+      return `Most similar entities have this document on file. ${entityName} appears to be missing it.`;
+    case "state_compliance": {
+      const state = pattern.evidence.state || "this state";
+      const docLabel = pattern.document_type.replace(/_/g, " ");
+      return `${entityName} is registered in ${state} but has no ${docLabel} on file.`;
+    }
+    case "lifecycle":
+      // Lifecycle descriptions are already entity-specific
+      return pattern.description;
+    case "annual_recurrence": {
+      const missingYear = pattern.evidence.missing_year;
+      const docLabel = pattern.document_type.replace(/_/g, " ");
+      return missingYear
+        ? `${entityName} has this document for other years but is missing the ${missingYear} ${docLabel}.`
+        : `${entityName} appears to be missing a recent ${docLabel}.`;
+    }
+    default:
+      return `${entityName} may need this document based on organizational patterns.`;
+  }
 }
 
 // --- Feedback Handlers ---
@@ -1134,23 +1182,20 @@ export async function confirmSuggestion(expectationId: string): Promise<void> {
     })
     .eq("id", expectationId);
 
-  // Increment pattern confirmation count
+  // Track the confirmation on the pattern for analytics, but do NOT
+  // adjust org-wide confidence — per-entity actions stay per-entity.
   const { data: pattern } = await admin
     .from("org_document_patterns")
-    .select("id, times_confirmed, confidence")
+    .select("id, times_confirmed")
     .eq("organization_id", exp.organization_id)
     .eq("document_type", exp.document_type)
     .maybeSingle();
 
   if (pattern) {
-    // Confirming a suggestion boosts the pattern's confidence slightly
-    const newConfirmed = (pattern.times_confirmed || 0) + 1;
-    const confidenceBoost = Math.min(1.0, (pattern.confidence || 0) + 0.03);
     await admin
       .from("org_document_patterns")
       .update({
-        times_confirmed: newConfirmed,
-        confidence: confidenceBoost,
+        times_confirmed: (pattern.times_confirmed || 0) + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", pattern.id);
@@ -1170,6 +1215,7 @@ export async function dismissSuggestion(expectationId: string): Promise<void> {
     .single();
   if (!exp) return;
 
+  // Mark this specific entity's suggestion as not applicable
   await admin
     .from("entity_document_expectations")
     .update({
@@ -1178,23 +1224,21 @@ export async function dismissSuggestion(expectationId: string): Promise<void> {
     })
     .eq("id", expectationId);
 
-  // Increment dismiss count on pattern
+  // Track the dismiss on the pattern for analytics, but do NOT reduce
+  // org-wide confidence — dismissing for one entity shouldn't suppress
+  // valid suggestions for other entities.
   const { data: pattern } = await admin
     .from("org_document_patterns")
-    .select("id, times_dismissed, confidence")
+    .select("id, times_dismissed")
     .eq("organization_id", exp.organization_id)
     .eq("document_type", exp.document_type)
     .maybeSingle();
 
   if (pattern) {
-    // Dismissing a suggestion lowers the pattern's confidence
-    const newDismissed = (pattern.times_dismissed || 0) + 1;
-    const confidencePenalty = Math.max(0.1, (pattern.confidence || 0) - 0.05);
     await admin
       .from("org_document_patterns")
       .update({
-        times_dismissed: newDismissed,
-        confidence: confidencePenalty,
+        times_dismissed: (pattern.times_dismissed || 0) + 1,
         updated_at: new Date().toISOString(),
       })
       .eq("id", pattern.id);
