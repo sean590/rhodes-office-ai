@@ -191,3 +191,31 @@ export function validateUploadedFile(file: File): { valid: true } | { valid: fal
   }
   return { valid: true };
 }
+
+export function validateFileMetadata(name: string, size: number, type: string): { valid: true } | { valid: false; error: string } {
+  if (size > MAX_FILE_SIZE) {
+    return { valid: false, error: `File "${name}" exceeds the 50MB size limit` };
+  }
+  if (type && !ALLOWED_MIME_TYPES.has(type)) {
+    return { valid: false, error: `File type "${type}" is not allowed` };
+  }
+  return { valid: true };
+}
+
+export const presignRequestSchema = z.object({
+  files: z.array(z.object({
+    name: z.string().min(1).max(500),
+    size: z.number().int().positive().max(50 * 1024 * 1024),
+    type: z.string().max(200),
+  })).min(1).max(100),
+});
+
+export const registerUploadSchema = z.object({
+  files: z.array(z.object({
+    originalName: z.string().min(1).max(500),
+    storagePath: z.string().min(1).max(1000),
+    size: z.number().int().positive(),
+    type: z.string().max(200),
+    contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  })).min(1).max(100),
+});

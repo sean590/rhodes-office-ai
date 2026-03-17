@@ -4,16 +4,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pipeline/classify";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
-import { validateUploadedFile } from "@/lib/validations";
+import { registerUploadSchema } from "@/lib/validations";
 
-export const maxDuration = 180;
-
-async function computeHash(buffer: ArrayBuffer): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  return Array.from(new Uint8Array(hashBuffer))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
+export const maxDuration = 60;
 
 export async function POST(
   request: Request,
@@ -39,11 +32,21 @@ export async function POST(
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
 
-    const formData = await request.formData();
-    const files = formData.getAll("files") as File[];
+    // Accept JSON metadata (files already uploaded directly to Supabase Storage)
+    const body = await request.json();
+    const parsed = registerUploadSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
+    }
 
-    if (files.length === 0) {
-      return NextResponse.json({ error: "No files provided" }, { status: 400 });
+    const files = parsed.data.files;
+    const expectedPrefix = `${orgId}/queue/${batchId}/`;
+
+    // Validate all storage paths belong to this org/batch
+    for (const file of files) {
+      if (!file.storagePath.startsWith(expectedPrefix)) {
+        return NextResponse.json({ error: "Invalid storage path" }, { status: 400 });
+      }
     }
 
     // Get entities for matching (only if no entity_id on batch)
@@ -68,21 +71,8 @@ export async function POST(
     const uploaded: Array<Record<string, unknown>> = [];
     const duplicates: Array<{ filename: string; reason: string }> = [];
 
-    // Pre-compute hashes and validate all files
-    const validFiles: Array<{ file: File; buffer: ArrayBuffer; hash: string }> = [];
-    for (const file of files) {
-      const fileCheck = validateUploadedFile(file);
-      if (!fileCheck.valid) {
-        duplicates.push({ filename: file.name, reason: fileCheck.error });
-        continue;
-      }
-      const buffer = await file.arrayBuffer();
-      const hash = await computeHash(buffer);
-      validFiles.push({ file, buffer, hash });
-    }
-
-    // Batch duplicate checks — 2 queries instead of 2N
-    const allHashes = validFiles.map((f) => f.hash);
+    // Batch duplicate checks
+    const allHashes = files.map((f) => f.contentHash);
     const duplicateDocHashes = new Map<string, string>();
     const duplicateQueueHashes = new Map<string, string>();
 
@@ -109,12 +99,14 @@ export async function POST(
       }
     }
 
-    for (const { file, buffer, hash: contentHash } of validFiles) {
-      // Check against batch duplicate results
+    for (const file of files) {
+      const contentHash = file.contentHash;
+
+      // Check duplicates
       const existingDocName = duplicateDocHashes.get(contentHash);
       if (existingDocName) {
         duplicates.push({
-          filename: file.name,
+          filename: file.originalName,
           reason: `Duplicate of existing document "${existingDocName}"`,
         });
         continue;
@@ -123,38 +115,19 @@ export async function POST(
       const existingQueueName = duplicateQueueHashes.get(contentHash);
       if (existingQueueName) {
         duplicates.push({
-          filename: file.name,
+          filename: file.originalName,
           reason: `Duplicate of queued file "${existingQueueName}"`,
         });
         continue;
       }
 
-      // Upload file to storage (org-scoped path)
-      // Sanitize: Supabase Storage rejects many special chars in keys (brackets, parens, %, #, etc.)
-      // Only allow alphanumeric, hyphens, underscores, dots, and spaces
-      const safeName = file.name.replace(/[^a-zA-Z0-9\-_. ]/g, "_");
-      const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
-      const { error: uploadError } = await admin.storage
-        .from("documents")
-        .upload(storagePath, buffer, {
-          contentType: file.type || "application/octet-stream",
-          upsert: true,
-        });
-
-      if (uploadError) {
-        console.error(`Upload error for ${file.name}:`, uploadError);
-        duplicates.push({ filename: file.name, reason: `Upload failed: ${uploadError.message}` });
-        continue;
-      }
-
       // Classify by filename
-      const classification = classifyByFilename(file.name);
+      const classification = classifyByFilename(file.originalName);
 
       // Try to match entity
       let entityId = batch.entity_id || null;
       let entityName: string | null = null;
 
-      // Resolve name for batch-scoped entity
       if (entityId) {
         entityName = batchEntityName;
       }
@@ -168,7 +141,7 @@ export async function POST(
       }
 
       // Determine direction
-      const direction = classification.direction || guessDirection(file.name, classification.document_type);
+      const direction = classification.direction || guessDirection(file.originalName, classification.document_type);
 
       // Create queue item
       const { data: queueItem, error: queueError } = await admin
@@ -176,8 +149,8 @@ export async function POST(
         .insert({
           batch_id: batchId,
           status: 'staged',
-          original_filename: file.name,
-          file_path: storagePath,
+          original_filename: file.originalName,
+          file_path: file.storagePath,
           file_size: file.size,
           mime_type: file.type || null,
           content_hash: contentHash,
@@ -195,14 +168,14 @@ export async function POST(
         .single();
 
       if (queueError) {
-        console.error(`Queue insert error for ${file.name}:`, queueError);
+        console.error(`Queue insert error for ${file.originalName}:`, queueError);
         continue;
       }
 
       uploaded.push(queueItem);
     }
 
-    // Update batch stats — query actual counts to avoid overwrite on multi-upload
+    // Update batch stats
     const { count: totalCount } = await admin
       .from("document_queue")
       .select("id", { count: "exact", head: true })
@@ -235,7 +208,7 @@ export async function POST(
         file_count: files.length,
         uploaded_count: uploaded.length,
         duplicate_count: duplicates.length,
-        filenames: files.map((f) => f.name),
+        filenames: files.map((f) => f.originalName),
       },
       ...reqCtx,
     });

@@ -20,6 +20,14 @@ export interface UploadedItem {
   staging_confidence: string | null;
 }
 
+async function computeHash(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function UploadDropZone({ batchId, defaultEntityId: _defaultEntityId, onFilesUploaded }: UploadDropZoneProps) {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -35,28 +43,110 @@ export function UploadDropZone({ batchId, defaultEntityId: _defaultEntityId, onF
     setUploading(true);
     setError(null);
     setDuplicates([]);
-    setUploadProgress(`Uploading ${fileArray.length} file${fileArray.length !== 1 ? "s" : ""}...`);
+    setUploadProgress("Preparing upload...");
 
     try {
-      const formData = new FormData();
-      for (const file of fileArray) {
-        formData.append("files", file);
-      }
-
-      const res = await fetch(`/api/pipeline/batches/${batchId}/upload`, {
+      // Phase 1: Get signed upload URLs from the server
+      const presignRes = await fetch(`/api/pipeline/batches/${batchId}/presign`, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          files: fileArray.map((f) => ({ name: f.name, size: f.size, type: f.type })),
+        }),
       });
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Upload failed (${res.status})`);
+      if (!presignRes.ok) {
+        const data = await presignRes.json().catch(() => ({}));
+        throw new Error(data.error || `Failed to prepare upload (${presignRes.status})`);
       }
 
-      const result = await res.json();
+      const presignData = await presignRes.json();
+      const rejectedFiles: Array<{ filename: string; reason: string }> = presignData.rejected || [];
 
-      if (result.duplicates?.length > 0) {
-        setDuplicates(result.duplicates);
+      if (presignData.urls.length === 0) {
+        if (rejectedFiles.length > 0) {
+          setDuplicates(rejectedFiles);
+          setUploadProgress(null);
+          setUploading(false);
+          return;
+        }
+        throw new Error("No files could be prepared for upload");
+      }
+
+      // Build a map from originalName to File for lookup
+      const fileMap = new Map<string, File>();
+      for (const f of fileArray) {
+        fileMap.set(f.name, f);
+      }
+
+      // Phase 2: Upload files directly to Supabase Storage + compute hashes
+      const uploadedFiles: Array<{
+        originalName: string;
+        storagePath: string;
+        size: number;
+        type: string;
+        contentHash: string;
+      }> = [];
+
+      for (let i = 0; i < presignData.urls.length; i++) {
+        const urlInfo = presignData.urls[i];
+        const file = fileMap.get(urlInfo.originalName);
+        if (!file) continue;
+
+        setUploadProgress(`Uploading ${i + 1} of ${presignData.urls.length}...`);
+
+        // Upload directly to Supabase Storage using the signed URL
+        const uploadRes = await fetch(urlInfo.signedUrl, {
+          method: "PUT",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file,
+        });
+
+        if (!uploadRes.ok) {
+          rejectedFiles.push({ filename: file.name, reason: `Upload failed (${uploadRes.status})` });
+          continue;
+        }
+
+        // Compute hash client-side
+        const contentHash = await computeHash(file);
+
+        uploadedFiles.push({
+          originalName: file.name,
+          storagePath: urlInfo.storagePath,
+          size: file.size,
+          type: file.type,
+          contentHash,
+        });
+      }
+
+      if (uploadedFiles.length === 0) {
+        if (rejectedFiles.length > 0) {
+          setDuplicates(rejectedFiles);
+          setUploadProgress(null);
+          setUploading(false);
+          return;
+        }
+        throw new Error("All files failed to upload");
+      }
+
+      // Phase 3: Register uploaded files with the server
+      setUploadProgress("Processing...");
+      const registerRes = await fetch(`/api/pipeline/batches/${batchId}/upload`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: uploadedFiles }),
+      });
+
+      if (!registerRes.ok) {
+        const data = await registerRes.json().catch(() => ({}));
+        throw new Error(data.error || `Registration failed (${registerRes.status})`);
+      }
+
+      const result = await registerRes.json();
+
+      const allDuplicates = [...rejectedFiles, ...(result.duplicates || [])];
+      if (allDuplicates.length > 0) {
+        setDuplicates(allDuplicates);
       }
 
       if (result.items?.length > 0) {
@@ -142,7 +232,7 @@ export function UploadDropZone({ batchId, defaultEntityId: _defaultEntityId, onF
               Drop files here or click to browse
             </div>
             <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
-              PDF, images, or text documents — no file limit
+              PDF, images, or text documents — no size limit
             </div>
           </>
         )}
