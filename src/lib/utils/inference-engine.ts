@@ -429,11 +429,14 @@ export async function detectLifecycleGaps(orgId: string): Promise<InferredPatter
   );
 
   // Lifecycle rules: if entity is > 1 year old, should have annual report
+  // Trusts don't file annual reports or SOIs — only LLCs, corps, LPs do
+  const TRUST_TYPES = new Set(["trust"]);
   const lifecycleChecks = [
     {
       minAge: 1,
       document_type: "annual_report",
       document_category: "compliance",
+      excludeTypes: TRUST_TYPES,
       description: (name: string, years: number) =>
         `${name} was formed ${years} year${years > 1 ? "s" : ""} ago but has no annual report on file.`,
     },
@@ -441,6 +444,7 @@ export async function detectLifecycleGaps(orgId: string): Promise<InferredPatter
       minAge: 0.5,
       document_type: "federal_tax_return",
       document_category: "tax",
+      excludeTypes: null as Set<string> | null,
       description: (name: string, years: number) =>
         `${name} was formed ${years} year${years > 1 ? "s" : ""} ago but has no federal tax return on file.`,
     },
@@ -455,6 +459,7 @@ export async function detectLifecycleGaps(orgId: string): Promise<InferredPatter
 
     for (const check of lifecycleChecks) {
       if (ageYears < check.minAge) continue;
+      if (check.excludeTypes?.has(entity.type)) continue;
       if (docs.has(check.document_type)) continue;
       if (dismissedSet.has(`${entity.id}:${check.document_type}`)) continue;
 
@@ -621,28 +626,32 @@ export async function detectStateComplianceGaps(orgId: string): Promise<Inferred
   const patterns: InferredPattern[] = [];
 
   // State-specific required documents
+  // excludeTypes: entity types that don't file this document (trusts don't file SOIs, annual reports, franchise tax, etc.)
+  const TRUST_TYPES = new Set(["trust"]);
   const stateRequirements: Array<{
     state: string;
     document_type: string;
     document_category: string;
     label: string;
+    excludeTypes?: Set<string>;
   }> = [
-    { state: "CA", document_type: "statement_of_information", document_category: "compliance", label: "Statement of Information" },
-    { state: "DE", document_type: "annual_franchise_tax", document_category: "tax", label: "Annual Franchise Tax" },
-    { state: "NY", document_type: "biennial_statement", document_category: "compliance", label: "Biennial Statement" },
-    { state: "TX", document_type: "franchise_tax_report", document_category: "tax", label: "Franchise Tax Report" },
-    { state: "FL", document_type: "annual_report", document_category: "compliance", label: "Annual Report" },
-    { state: "NV", document_type: "annual_list", document_category: "compliance", label: "Annual List of Officers" },
+    { state: "CA", document_type: "statement_of_information", document_category: "compliance", label: "Statement of Information", excludeTypes: TRUST_TYPES },
+    { state: "DE", document_type: "annual_franchise_tax", document_category: "tax", label: "Annual Franchise Tax", excludeTypes: TRUST_TYPES },
+    { state: "NY", document_type: "biennial_statement", document_category: "compliance", label: "Biennial Statement", excludeTypes: TRUST_TYPES },
+    { state: "TX", document_type: "franchise_tax_report", document_category: "tax", label: "Franchise Tax Report", excludeTypes: TRUST_TYPES },
+    { state: "FL", document_type: "annual_report", document_category: "compliance", label: "Annual Report", excludeTypes: TRUST_TYPES },
+    { state: "NV", document_type: "annual_list", document_category: "compliance", label: "Annual List of Officers", excludeTypes: TRUST_TYPES },
   ];
 
   // Fetch org entities first, then their registrations
   const { data: orgEntities } = await admin
     .from("entities")
-    .select("id")
+    .select("id, type")
     .eq("organization_id", orgId);
   if (!orgEntities || orgEntities.length === 0) return patterns;
 
   const orgEntityIds = orgEntities.map((e: { id: string }) => e.id);
+  const entityTypeMap = new Map(orgEntities.map((e: { id: string; type: string }) => [e.id, e.type]));
 
   const { data: registrations } = await admin
     .from("entity_registrations")
@@ -690,6 +699,7 @@ export async function detectStateComplianceGaps(orgId: string): Promise<Inferred
     if (!entitiesInState || entitiesInState.length === 0) continue;
 
     const missing = entitiesInState.filter((eid) => {
+      if (req.excludeTypes?.has(entityTypeMap.get(eid) || "")) return false;
       const docs = entityDocs.get(eid) || new Set();
       return !docs.has(req.document_type) && !dismissedSet.has(`${eid}:${req.document_type}`);
     });
