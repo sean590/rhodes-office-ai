@@ -212,22 +212,9 @@ export async function buildPdfContent(
           type: "text",
           text: `## Full Document Text (${analysis.page_count} pages)\n\n${fullText}`,
         });
-      } else {
-        // Text extraction failed — send first 100 pages as visual fallback
-        // (Claude API has a 100-page PDF limit)
-        const fallbackN = Math.min(100, analysis.page_count);
-        const fallbackBuffer = fallbackN < analysis.page_count
-          ? await extractPageRange(buffer, [[1, fallbackN]])
-          : buffer;
-        content.push({
-          type: "document",
-          source: {
-            type: "base64",
-            media_type: "application/pdf",
-            data: fallbackBuffer.toString("base64"),
-          },
-        });
       }
+      // If text extraction failed, we'll rely on visual pages only (below).
+      // Don't send the whole PDF — Claude has a 100-page limit.
     }
 
     // Send visual pages (as a split PDF)
