@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import type { QueueItem } from "@/lib/types/entities";
@@ -104,6 +104,7 @@ interface ApprovalCardProps {
 
 export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssignEntity, onReassignEntity, onUpdateRelatedEntities }: ApprovalCardProps) {
   const [loading, setLoading] = useState(false);
+  const actionLockRef = useRef(false);
   const [reviewing, setReviewing] = useState(false);
   const [unchecked, setUnchecked] = useState<Set<number>>(new Set());
   const [selectedEntityId, setSelectedEntityId] = useState(item.staged_entity_id || "");
@@ -171,11 +172,14 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
   const docTypeLabel = DOCUMENT_TYPE_LABELS[docType] || docType;
 
   const handleAction = async (action: () => Promise<void>) => {
+    if (actionLockRef.current) return;
+    actionLockRef.current = true;
     setLoading(true);
     try {
       await action();
     } finally {
       setLoading(false);
+      actionLockRef.current = false;
     }
   };
 
@@ -408,27 +412,30 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
   // --- New Entity ---
   if (reason === "new_entity") {
     const proposed = item.ai_proposed_entity as Record<string, unknown> | null;
+    const selectedEntityName = entities.find((e) => e.id === selectedEntityId)?.name;
     return (
       <div style={{ border: "1px solid #e8e6df", borderRadius: 8, padding: 16, marginBottom: 12, background: "#fafaf7" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <span style={{ color: "#b08000", fontSize: 14 }}>&#9888;</span>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>New Entity: &ldquo;{String(proposed?.name || "Unknown")}&rdquo;</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>Unknown entity: &ldquo;{String(proposed?.name || "Unknown")}&rdquo;</span>
         </div>
         <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
-          AI found references to an entity not in the database.
+          This document references an entity not in your database. Choose how to file it:
         </div>
+
+        {/* Document info */}
         <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 12 }}>
           <div style={{ fontSize: 12, color: "#6b6b76" }}>
-            {proposed?.type ? <div>Type: {String(proposed.type)}</div> : null}
-            {proposed?.formation_state ? <div>State: {String(proposed.formation_state)}</div> : null}
-            <div style={{ marginTop: 4 }}>Document: {docName} ({docTypeLabel}{item.ai_year ? `, ${item.ai_year}` : ""})</div>
+            <div style={{ fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>{docName}</div>
+            <div>{docTypeLabel}{item.ai_year ? ` — ${item.ai_year}` : ""}</div>
+            {proposed?.type ? <div>Detected entity type: {String(proposed.type)}{proposed?.formation_state ? ` (${String(proposed.formation_state)})` : ""}</div> : null}
           </div>
         </div>
 
-        {/* Entity associations — primary + related */}
-        <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 12 }}>
+        {/* Option 1: File under existing entity */}
+        <div style={{ background: "white", border: `1px solid ${selectedEntityId ? "#2d5a3d" : "#e8e6df"}`, borderRadius: 6, padding: 12, marginBottom: 8 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
-            Primary Entity (filed under)
+            File under an existing entity
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <select
@@ -445,10 +452,24 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
               ))}
             </select>
           </div>
+          {selectedEntityId && (
+            <Button
+              size="sm"
+              variant="primary"
+              disabled={loading}
+              onClick={() => handleAction(async () => {
+                await saveRelatedEntities();
+                await onAssignEntity(item.id, selectedEntityId);
+              })}
+              style={{ marginTop: 10 }}
+            >
+              {loading ? "Filing..." : `File under ${selectedEntityName}`}
+            </Button>
+          )}
         </div>
 
         {/* Related entities — interactive */}
-        <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 12 }}>
+        <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 8 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em" }}>
               Also link to ({relatedEntities.filter((_, i) => !uncheckedRelated.has(i)).length})
@@ -513,29 +534,19 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button
-            size="sm"
-            variant="primary"
-            disabled={loading || !selectedEntityId}
-            onClick={() => handleAction(async () => {
-              await saveRelatedEntities();
-              await onAssignEntity(item.id, selectedEntityId);
-            })}
-          >
-            {loading ? "Assigning..." : "Assign & Ingest"}
-          </Button>
-          <Button size="sm" variant="primary" disabled={loading} onClick={() => handleAction(async () => {
+        {/* Other options */}
+        <div style={{ display: "flex", gap: 8, marginTop: 12, borderTop: "1px solid #e8e6df", paddingTop: 12 }}>
+          <Button size="sm" variant="secondary" disabled={loading} onClick={() => handleAction(async () => {
             await saveRelatedEntities();
             await onApprove(item.id);
           })}>
-            {loading ? "Creating..." : "Create Entity & Ingest"}
+            {loading ? "Creating..." : `Create "${String(proposed?.name || "Unknown")}" as new entity`}
           </Button>
           <Button size="sm" variant="secondary" disabled={loading} onClick={() => handleAction(async () => {
             await saveRelatedEntities();
             await onIngestOnly(item.id);
           })}>
-            Ingest as Unassociated
+            Ingest without entity
           </Button>
         </div>
       </div>

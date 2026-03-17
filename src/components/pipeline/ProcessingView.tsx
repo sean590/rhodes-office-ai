@@ -163,7 +163,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   };
 
   const assignEntity = async (itemId: string, entityId: string) => {
-    // Update the queue item's entity and clear new_entity signals so approve
+    // Update the queue item's entity and mark user_corrected so approve
     // doesn't create the proposed entity
     await fetch(`/api/pipeline/queue/${itemId}`, {
       method: "PATCH",
@@ -171,6 +171,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
       body: JSON.stringify({
         staged_entity_id: entityId,
         ai_entity_id: entityId,
+        user_corrected: true,
       }),
     });
     // Now approve (ingest with the assigned entity)
