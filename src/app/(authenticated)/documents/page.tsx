@@ -367,7 +367,7 @@ export default function DocumentsPage() {
               const res = await fetch("/api/pipeline/batches", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ context: "global", entity_discovery: true }),
+                body: JSON.stringify({ context: "global" }),
               });
               if (res.ok) {
                 const batch = await res.json();

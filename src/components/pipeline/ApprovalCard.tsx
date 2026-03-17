@@ -860,13 +860,10 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
     // Compact summary view (default)
     return (
       <div style={{ border: "1px solid #e8e6df", borderRadius: 8, padding: 16, marginBottom: 12, background: "#fafaf7" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
           <span style={{ color: "#b08000", fontSize: 14 }}>&#9888;</span>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f", flex: 1 }}>
-            Database Changes: &ldquo;{entityName}&rdquo;
-          </span>
-          <span style={{ fontSize: 10, color: "#9494a0" }}>
-            Use Review Changes to reassign entity
+            Review: {docName}
           </span>
         </div>
         {item.ai_summary ? (
@@ -878,24 +875,40 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
             AI extracted data that would update this entity.
           </div>
         )}
-        <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 12 }}>
-          <div style={{ fontSize: 12, color: "#1a1a1f", fontWeight: 500, marginBottom: 6 }}>
-            {docName} ({docTypeLabel}{item.ai_year ? `, ${item.ai_year}` : ""})
+
+        {/* Filed under */}
+        <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+            Filed under
           </div>
-          <div style={{ fontSize: 12, color: "#6b6b76" }}>
-            {actions.map((a, i) => (
-              <div key={i} style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                <span>&#8226;</span>
-                <span>{formatAction(a)}</span>
-              </div>
-            ))}
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
+            {entityName}
           </div>
         </div>
-        {/* Related entities — interactive */}
+
+        {/* Proposed changes */}
+        {actions.length > 0 && (
+          <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+              Proposed changes
+            </div>
+            <div style={{ fontSize: 12, color: "#6b6b76" }}>
+              {actions.map((a, i) => (
+                <div key={i} style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>&#8226;</span>
+                  <span>{formatAction(a)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Also visible on — only show if there are related entities */}
+        {(relatedEntities.length > 0 || addingRelated) && (
         <div style={{ background: "white", border: "1px solid #e8e6df", borderRadius: 6, padding: 12, marginBottom: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-              Also link to ({relatedEntities.filter((_, i) => !uncheckedRelated.has(i)).length})
+              Also visible on ({relatedEntities.filter((_, i) => !uncheckedRelated.has(i)).length})
             </div>
             <button
               onClick={() => setAddingRelated(true)}
@@ -936,9 +949,6 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
               </div>
             );
           })}
-          {relatedEntities.length === 0 && !addingRelated && (
-            <div style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>No related entities detected</div>
-          )}
           {addingRelated && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6 }}>
               <select
@@ -956,6 +966,7 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
             </div>
           )}
         </div>
+        )}
         <div style={{ display: "flex", gap: 8 }}>
           <Button
             size="sm"

@@ -56,7 +56,7 @@ export const createBatchSchema = z.object({
   name: z.string().max(255).optional(),
   context: z.enum(["global", "entity", "onboarding"]).default("global"),
   entity_id: z.string().uuid().optional().nullable(),
-  entity_discovery: z.boolean().default(true),
+  entity_discovery: z.boolean().default(false),
 });
 
 // --- Additional mutation schemas ---

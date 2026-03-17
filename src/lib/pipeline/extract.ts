@@ -186,7 +186,7 @@ You MUST respond with valid JSON only — no markdown, no explanation. Return an
     {
       "entity_id": "uuid of another existing entity mentioned in this document",
       "entity_name": "Name as it appears in document",
-      "role": "counterparty | beneficiary | guarantor | member | manager | investor | related",
+      "role": "counterparty | beneficiary | guarantor | member | manager | investor | investment_issuer | service_provider | related",
       "confidence": "high | medium | low",
       "reason": "Why this entity is associated"
     }
@@ -245,7 +245,7 @@ Documents often reference multiple entities. Beyond the primary entity this docu
 Return a "related_entities" array with entries for each additional entity referenced:
 - "entity_id": UUID of the matching existing entity
 - "entity_name": The name as it appears in the document
-- "role": One of "counterparty", "beneficiary", "guarantor", "member", "manager", "investor", "related"
+- "role": One of "counterparty", "beneficiary", "guarantor", "member", "manager", "investor", "investment_issuer", "service_provider", "related"
 - "confidence": "high", "medium", or "low"
 - "reason": Brief explanation of why this entity is associated
 
@@ -253,9 +253,11 @@ Common patterns:
 - Service agreements / contracts: the other party is a "counterparty"
 - Operating agreements naming entities as members: role is "member"
 - K-1s issued to another entity: the recipient entity is "beneficiary"
+- K-1s received FROM a fund/partnership: the issuing fund is "investment_issuer" (the document belongs to the RECIPIENT entity, not the fund)
 - Loan documents with a guarantor entity: role is "guarantor"
 - Fund documents naming an entity as LP/investor: role is "investor"
 - Operating agreements naming an entity as manager: role is "manager"
+- Invoices, engagement letters, or service contracts: the service provider is "service_provider"
 - Any entity mentioned but role unclear: use "related"
 
 Only include entities that exist in the provided entity list. Do not create proposed entities here — that's handled separately via the actions array.
@@ -316,6 +318,15 @@ This document is being processed with entity discovery ENABLED. If this document
 \`\`\`
 
 Set entity_id to null when the document is about a proposed new entity.
+
+### Ownership vs. Investment Distinction
+
+CRITICAL: Only propose creating entities that the family/office OWNS or CONTROLS. Do NOT create entities for:
+- **Investment counterparties**: Companies the family invested IN via SAFEs, convertible notes, stock purchases, LP interests. These are third-party companies — list them in "related_entities" with role "investment_issuer" instead.
+- **Service providers**: Law firms, accountants, banks, fund administrators. List them in "related_entities" with role "service_provider" instead.
+- **K-1 issuers**: Funds or partnerships that issued a K-1 TO one of the family's entities. The K-1 belongs to the RECIPIENT entity. The issuing fund goes in "related_entities" with role "investment_issuer".
+
+Only propose "create_entity" for entities where the family is the FOUNDER, GRANTOR, SOLE MEMBER, or CONTROLLING PARTY — entities they set up and operate, not entities they transact with.
 
 ### Multi-Entity Creation Documents
 
@@ -421,7 +432,7 @@ For ALL sub-documents: set "entity_id" by matching the relevant entity from the 
 export interface RelatedEntityRef {
   entity_id: string;
   entity_name: string;
-  role: 'counterparty' | 'beneficiary' | 'guarantor' | 'member' | 'manager' | 'investor' | 'related';
+  role: 'counterparty' | 'beneficiary' | 'guarantor' | 'member' | 'manager' | 'investor' | 'investment_issuer' | 'service_provider' | 'related';
   confidence: 'high' | 'medium' | 'low';
   reason: string;
 }

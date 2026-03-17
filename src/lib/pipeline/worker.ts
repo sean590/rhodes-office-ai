@@ -103,7 +103,10 @@ export async function processQueueItem(
     console.log(`[PIPELINE] ${itemId}: DB context ready (${(dbContext.entities as unknown[]).length} entities)`);
 
     // 5. Determine options
-    const entityDiscovery = batchData?.entity_discovery ?? false;
+    // Entity discovery is off for entity-scoped uploads (document already has an owner)
+    const entityDiscovery = batchData?.entity_id
+      ? false
+      : (batchData?.entity_discovery ?? false);
     const isCompositeCandidate =
       item.is_composite ||
       item.staged_doc_type === "tax_package" ||
