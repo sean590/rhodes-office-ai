@@ -45,7 +45,28 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    return NextResponse.json(data || []);
+    // Enrich with user names
+    const entries = data || [];
+    const userIds = [...new Set(entries.map((e: { user_id: string | null }) => e.user_id).filter(Boolean))] as string[];
+    const userNameMap = new Map<string, string>();
+
+    if (userIds.length > 0) {
+      const { data: profiles } = await admin
+        .from("user_profiles")
+        .select("id, full_name")
+        .in("id", userIds);
+
+      for (const p of profiles || []) {
+        if (p.full_name) userNameMap.set(p.id, p.full_name);
+      }
+    }
+
+    const enriched = entries.map((e: Record<string, unknown>) => ({
+      ...e,
+      user_name: e.user_id ? userNameMap.get(e.user_id as string) || null : null,
+    }));
+
+    return NextResponse.json(enriched);
   } catch (err) {
     console.error("GET /api/audit error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

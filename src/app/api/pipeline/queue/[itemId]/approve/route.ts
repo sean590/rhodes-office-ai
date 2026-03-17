@@ -5,6 +5,35 @@ import { ingestQueueItem } from "@/lib/pipeline/ingest";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
+function describeAction(action: Record<string, unknown>): string {
+  const a = action.action as string;
+  const d = (action.data || {}) as Record<string, unknown>;
+  switch (a) {
+    case "create_entity": return `Create entity: ${d.name || "unknown"}`;
+    case "update_entity": {
+      const fields = d.fields as Record<string, unknown> | undefined;
+      return fields ? `Update entity: ${Object.keys(fields).join(", ")}` : "Update entity";
+    }
+    case "create_relationship": return `Create relationship: ${d.description || d.type || "relationship"}`;
+    case "add_member": return `Add member: ${d.name || "unknown"}`;
+    case "add_manager": return `Add manager: ${d.name || "unknown"}`;
+    case "add_registration": return `Add registration: ${d.jurisdiction || "unknown"}`;
+    case "update_registration": return `Update registration: ${d.jurisdiction || d.registration_id || "unknown"}`;
+    case "add_trust_role": return `Add trust role: ${d.role || "role"} = ${d.name || "unknown"}`;
+    case "update_trust_details": {
+      const keys = Object.keys(d).filter((k) => k !== "entity_id");
+      return `Update trust details: ${keys.join(", ")}`;
+    }
+    case "update_cap_table": return `Update cap table: ${d.investor_name || "unknown"}`;
+    case "create_directory_entry": return `Create directory entry: ${d.name || "unknown"}`;
+    case "add_custom_field": return `Add field: ${d.label || "unknown"} = ${d.value || ""}`;
+    case "add_partnership_rep": return `Add partnership rep: ${d.name || "unknown"}`;
+    case "add_role": return `Add role: ${d.role_title || "role"} = ${d.name || "unknown"}`;
+    case "complete_obligation": return `Complete obligation${d.payment_amount ? ` ($${(d.payment_amount as number) / 100})` : ""}`;
+    default: return a.replace(/_/g, " ");
+  }
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ itemId: string }> }
@@ -292,6 +321,9 @@ export async function POST(
         document_name: item.ai_suggested_name || item.original_filename,
         document_id: result.document?.id,
         document_type: item.ai_document_type || item.staged_doc_type,
+        changes: Array.isArray(item.ai_proposed_actions)
+          ? (item.ai_proposed_actions as Record<string, unknown>[]).map(describeAction)
+          : [],
       },
       ...reqCtx,
     });

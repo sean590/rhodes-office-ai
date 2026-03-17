@@ -5418,6 +5418,7 @@ export default function EntityDetailPage() {
     resource_id: string | null;
     metadata: Record<string, unknown>;
     user_id: string | null;
+    user_name: string | null;
     created_at: string;
     ip_address: string | null;
   }>>([]);
@@ -6059,8 +6060,10 @@ export default function EntityDetailPage() {
                 } else if (a === "approve" && rt === "pipeline_item") {
                   const dName = meta.document_name ? String(meta.document_name) : null;
                   title = dName ? `Ingested document: ${dName}` : "Approved pipeline item";
-                  if (meta.actions_applied) detail = `${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`;
-                  if (meta.document_type) detail = (detail ? detail + " · " : "") + String(meta.document_type).replace(/_/g, " ");
+                  const parts: string[] = [];
+                  if (meta.actions_applied) parts.push(`${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`);
+                  if (meta.document_type) parts.push(String(meta.document_type).replace(/_/g, " "));
+                  detail = parts.join(" · ");
                 } else if (a === "ingest" && rt === "pipeline_item") {
                   const dName = meta.document_name ? String(meta.document_name) : null;
                   title = dName ? `Ingested document: ${dName}` : "Ingested document (no changes applied)";
@@ -6139,8 +6142,15 @@ export default function EntityDetailPage() {
                           </div>
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap", flexShrink: 0 }}>
-                        {timeStr}
+                      <div style={{ textAlign: "right", flexShrink: 0 }}>
+                        <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap" }}>
+                          {timeStr}
+                        </div>
+                        {entry.user_name && (
+                          <div style={{ fontSize: 11, color: "#b0b0b8", marginTop: 1 }}>
+                            {entry.user_name}
+                          </div>
+                        )}
                       </div>
                     </div>
                     {isExpanded && (
