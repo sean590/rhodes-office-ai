@@ -20,10 +20,10 @@
     "@vercel/speed-insights": "^2.0.0",
     "next": "16.1.6",
     "pdf-lib": "^1.17.1",
-    "pdf-parse": "^2.4.5",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "resend": "^6.9.3",
+    "unpdf": "^1.4.0",
     "zod": "^4.3.6"
   },
   "pnpm": {
@@ -34,7 +34,6 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
     "@types/node": "^20.19.37",
-    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.3",
