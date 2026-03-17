@@ -7,7 +7,31 @@
  * Vercel with pnpm (symlinked node_modules break relative imports).
  */
 
+// Pre-load the pdfjs worker into globalThis.pdfjsWorker so pdfjs-dist
+// skips its broken relative dynamic import("./pdf.worker.mjs") on Vercel
+// with pnpm. We resolve the path via pdf-parse (direct dep) → pdfjs-dist
+// (its dependency) to handle pnpm's symlinked node_modules.
+import { join } from "path";
 
+function resolveWorkerPath(): string {
+  try {
+    // pdf-parse is a direct dep; pdfjs-dist is its peer in pnpm's
+    // virtual store. Find the node_modules directory containing pdf-parse,
+    // then reference pdfjs-dist as a sibling package.
+    const pdfParsePath = require.resolve("pdf-parse");
+    const marker = "/node_modules/pdf-parse/";
+    const idx = pdfParsePath.indexOf(marker);
+    if (idx === -1) return "pdfjs-dist/legacy/build/pdf.worker.mjs";
+    const nodeModulesDir = pdfParsePath.substring(0, idx + "/node_modules/".length);
+    return join(nodeModulesDir, "pdfjs-dist", "legacy", "build", "pdf.worker.mjs");
+  } catch {
+    return "pdfjs-dist/legacy/build/pdf.worker.mjs";
+  }
+}
+
+export const workerReady = import(/* webpackIgnore: true */ resolveWorkerPath())
+  .then((mod) => { (globalThis as Record<string, unknown>).pdfjsWorker = mod; })
+  .catch(() => { /* worker pre-load failed — text extraction will fall back to visual */ });
 
 if (typeof globalThis.DOMMatrix === "undefined") {
   // @ts-expect-error — minimal stub, not a full implementation

@@ -4,14 +4,17 @@
  * for the Claude API across three tiers of PDF complexity.
  */
 
-import "./pdf-polyfill"; // Must be before pdf-parse to stub DOMMatrix/Path2D/ImageData
+import { workerReady } from "./pdf-polyfill"; // Must be before pdf-parse to stub DOMMatrix/Path2D/ImageData
 import { PDFDocument } from "pdf-lib";
 
 // pdf-parse is loaded lazily to avoid eagerly initializing pdfjs-dist's
 // worker module, which fails on Vercel with pnpm due to missing worker files.
+// We await workerReady first so globalThis.pdfjsWorker is set before pdfjs
+// tries its broken relative import.
 let _PDFParse: typeof import("pdf-parse").PDFParse | null = null;
 async function getPDFParse() {
   if (!_PDFParse) {
+    await workerReady;
     const mod = await import("pdf-parse");
     _PDFParse = mod.PDFParse;
   }
