@@ -704,6 +704,20 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   };
 
+  const [resendingInvite, setResendingInvite] = useState<string | null>(null);
+  const handleResendInvite = async (inviteId: string) => {
+    if (!currentUser?.orgId) return;
+    setResendingInvite(inviteId);
+    try {
+      const res = await fetch(`/api/organizations/${currentUser.orgId}/invites/${inviteId}`, { method: "PATCH" });
+      if (res.ok) {
+        const updated = await res.json();
+        setPendingInvites((prev) => prev.map((i) => i.id === inviteId ? { ...i, expires_at: updated.expires_at } : i));
+      }
+    } catch { /* ignore */ }
+    setResendingInvite(null);
+  };
+
   const isAdmin = currentUser?.role === "admin" || currentUser?.orgRole === "owner" || currentUser?.orgRole === "admin";
 
   useEffect(() => {
@@ -2058,7 +2072,9 @@ export default function SettingsPage() {
                   Pending Invites
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {pendingInvites.map((inv) => (
+                  {pendingInvites.map((inv) => {
+                    const isExpired = inv.expires_at && new Date(inv.expires_at) < new Date();
+                    return (
                     <div
                       key={inv.id}
                       style={{
@@ -2084,10 +2100,10 @@ export default function SettingsPage() {
                             borderRadius: 10,
                             fontSize: 11,
                             fontWeight: 500,
-                            background: "rgba(255,169,0,0.10)",
-                            color: "#b37400",
+                            background: isExpired ? "rgba(220,38,38,0.08)" : "rgba(255,169,0,0.10)",
+                            color: isExpired ? "#dc2626" : "#b37400",
                           }}>
-                            Pending
+                            {isExpired ? "Expired" : "Pending"}
                           </span>
                           <span style={{
                             display: "inline-block",
@@ -2101,30 +2117,53 @@ export default function SettingsPage() {
                             {ROLE_LABELS[inv.role] || inv.role}
                           </span>
                           {inv.expires_at && (
-                            <span style={{ fontSize: 11, color: "#9494a0" }}>
-                              Expires {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                            <span style={{ fontSize: 11, color: isExpired ? "#dc2626" : "#9494a0" }}>
+                              {isExpired ? "Expired" : "Expires"} {new Date(inv.expires_at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                             </span>
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={() => handleRevokeInvite(inv.id)}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          color: "#dc2626",
-                          cursor: "pointer",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          padding: isMobile ? "10px 8px" : "4px 8px",
-                          minHeight: isMobile ? 44 : undefined,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        Revoke
-                      </button>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                        {isExpired && (
+                          <button
+                            onClick={() => handleResendInvite(inv.id)}
+                            disabled={resendingInvite === inv.id}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#2d5a3d",
+                              cursor: resendingInvite === inv.id ? "default" : "pointer",
+                              fontSize: 12,
+                              fontWeight: 500,
+                              padding: isMobile ? "10px 8px" : "4px 8px",
+                              minHeight: isMobile ? 44 : undefined,
+                              whiteSpace: "nowrap",
+                              opacity: resendingInvite === inv.id ? 0.5 : 1,
+                            }}
+                          >
+                            {resendingInvite === inv.id ? "Sending..." : "Resend"}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleRevokeInvite(inv.id)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            fontSize: 12,
+                            fontWeight: 500,
+                            padding: isMobile ? "10px 8px" : "4px 8px",
+                            minHeight: isMobile ? 44 : undefined,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Revoke
+                        </button>
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
