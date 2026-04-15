@@ -58,7 +58,7 @@ export async function GET(request: Request) {
         if (next) {
           return setFreshSessionCookies(NextResponse.redirect(`${origin}${next}`));
         }
-        return setFreshSessionCookies(NextResponse.redirect(`${origin}/entities`));
+        return setFreshSessionCookies(NextResponse.redirect(`${origin}/dashboard`));
       }
 
       // 2. Check for pending invite by email

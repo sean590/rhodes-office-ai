@@ -231,8 +231,10 @@ export async function POST(request: Request) {
     const parsed = createEntitySchema.safeParse(body);
     if (!parsed.success) {
       const firstError = parsed.error.issues[0];
+      const path = firstError?.path?.length ? firstError.path.join(".") : null;
+      const msg = firstError?.message || "Invalid input";
       return NextResponse.json(
-        { error: firstError?.message || "Invalid input" },
+        { error: path ? `${path}: ${msg}` : msg },
         { status: 400 }
       );
     }
@@ -249,6 +251,8 @@ export async function POST(request: Request) {
       parent_entity_id,
       notes,
       legal_structure,
+      ssn_last_4,
+      aliases,
     } = parsed.data;
 
     // Validate short_name format
@@ -263,7 +267,7 @@ export async function POST(request: Request) {
       .insert({
         name,
         type,
-        formation_state,
+        formation_state: formation_state || null,
         short_name,
         ein: ein || null,
         formed_date: formed_date || null,
@@ -272,6 +276,8 @@ export async function POST(request: Request) {
         parent_entity_id: parent_entity_id || null,
         notes: notes || null,
         legal_structure: legal_structure || (type === "trust" ? "trust" : null),
+        ssn_last_4: ssn_last_4 || null,
+        aliases: Array.isArray(aliases) ? aliases.filter(a => a.trim()).map(a => a.trim()) : [],
         organization_id: orgId,
       })
       .select()
@@ -288,14 +294,18 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    // Create the initial registration for the formation state
-    const { error: regError } = await supabase.from("entity_registrations").insert({
-      entity_id: entity.id,
-      jurisdiction: formation_state,
-    });
+    // Create the initial registration for the formation state. Persons and
+    // joint_title entities don't have a formation-state registration concept,
+    // so skip this step for them.
+    if (formation_state && type !== "person" && type !== "joint_title") {
+      const { error: regError } = await supabase.from("entity_registrations").insert({
+        entity_id: entity.id,
+        jurisdiction: formation_state,
+      });
 
-    if (regError) {
-      console.error("Failed to create initial registration:", regError.message);
+      if (regError) {
+        console.error("Failed to create initial registration:", regError.message);
+      }
     }
 
     // Auto-create trust_details record for trust entities
@@ -320,7 +330,12 @@ export async function POST(request: Request) {
       resourceType: "entity",
       resourceId: entity.id,
       entityId: entity.id,
-      metadata: { name, type },
+      metadata: {
+        name,
+        type,
+        description: `Created entity: ${name} (${type})`,
+        entity_name: name,
+      },
       ...reqCtx,
     });
 

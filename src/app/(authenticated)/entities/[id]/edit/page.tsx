@@ -21,6 +21,8 @@ const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: "special_purpose", label: "Special Purpose" },
   { value: "management_company", label: "Management Company" },
   { value: "trust", label: "Trust" },
+  { value: "person", label: "Person" },
+  { value: "joint_title", label: "Joint Title" },
   { value: "other", label: "Other" },
 ];
 
@@ -92,6 +94,8 @@ export default function EditEntityPage() {
   const [parentEntityId, setParentEntityId] = useState("");
   const [notes, setNotes] = useState("");
   const [businessPurpose, setBusinessPurpose] = useState("");
+  const [aliasesInput, setAliasesInput] = useState("");
+  const [ssnLast4, setSsnLast4] = useState("");
 
   /* Entity list for parent dropdown */
   const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
@@ -125,6 +129,8 @@ export default function EditEntityPage() {
         setParentEntityId(entity.parent_entity_id || "");
         setNotes(entity.notes || "");
         setBusinessPurpose(entity.business_purpose || "");
+        setAliasesInput(Array.isArray(entity.aliases) ? entity.aliases.join(", ") : "");
+        setSsnLast4(entity.ssn_last_4 || "");
 
         if (listRes.ok) {
           const list = await listRes.json();
@@ -159,8 +165,13 @@ export default function EditEntityPage() {
       setError(snValidation.error!);
       return;
     }
-    if (!formationState) {
+    const isPersonOrJoint = type === "person" || type === "joint_title";
+    if (!isPersonOrJoint && !formationState) {
       setError("Formation State is required.");
+      return;
+    }
+    if (type === "person" && ssnLast4 && !/^\d{4}$/.test(ssnLast4)) {
+      setError("SSN Last 4 must be exactly 4 digits.");
       return;
     }
 
@@ -176,13 +187,15 @@ export default function EditEntityPage() {
           short_name: shortName.trim(),
           type,
           ein: ein.trim() || null,
-          formation_state: formationState,
+          formation_state: formationState || null,
           formed_date: formedDate || null,
           registered_agent: registeredAgent.trim() || null,
           address: address.trim() || null,
           parent_entity_id: parentEntityId || null,
           notes: notes.trim() || null,
           business_purpose: businessPurpose.trim() || null,
+          aliases: aliasesInput.split(",").map(a => a.trim()).filter(Boolean),
+          ssn_last_4: ssnLast4 || null,
         }),
       });
 
@@ -210,6 +223,8 @@ export default function EditEntityPage() {
       </div>
     );
   }
+
+  const isPerson = type === "person";
 
   return (
     <div style={{ maxWidth: 640, margin: "0 auto" }}>
@@ -299,21 +314,23 @@ export default function EditEntityPage() {
           </select>
         </div>
 
-        {/* EIN */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>EIN</label>
-          <input
-            type="text"
-            value={ein}
-            onChange={(e) => setEin(e.target.value)}
-            placeholder="XX-XXXXXXX"
-            style={inputStyle}
-          />
-        </div>
+        {/* EIN — businesses only. */}
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>EIN</label>
+            <input
+              type="text"
+              value={ein}
+              onChange={(e) => setEin(e.target.value)}
+              placeholder="XX-XXXXXXX"
+              style={inputStyle}
+            />
+          </div>
+        )}
 
-        {/* Formation State */}
+        {/* Formation State / Residence State */}
         <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Formation State *</label>
+          <label style={labelStyle}>{isPerson ? "Residence State" : "Formation State *"}</label>
           <select
             value={formationState}
             onChange={(e) => setFormationState(e.target.value)}
@@ -326,30 +343,39 @@ export default function EditEntityPage() {
               </option>
             ))}
           </select>
+          {isPerson && (
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Drives state tax filing obligations.
+            </div>
+          )}
         </div>
 
-        {/* Date Formed */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Date Formed</label>
-          <input
-            type="date"
-            value={formedDate}
-            onChange={(e) => setFormedDate(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
+        {/* Date Formed — businesses only. People are born, not formed. */}
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Date Formed</label>
+            <input
+              type="date"
+              value={formedDate}
+              onChange={(e) => setFormedDate(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+        )}
 
-        {/* Registered Agent */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Registered Agent</label>
-          <input
-            type="text"
-            value={registeredAgent}
-            onChange={(e) => setRegisteredAgent(e.target.value)}
-            placeholder="Agent name"
-            style={inputStyle}
-          />
-        </div>
+        {/* Registered Agent — businesses only. */}
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Registered Agent</label>
+            <input
+              type="text"
+              value={registeredAgent}
+              onChange={(e) => setRegisteredAgent(e.target.value)}
+              placeholder="Agent name"
+              style={inputStyle}
+            />
+          </div>
+        )}
 
         {/* Address */}
         <div style={fieldGroupStyle}>
@@ -363,22 +389,59 @@ export default function EditEntityPage() {
           />
         </div>
 
-        {/* Parent Entity */}
+        {/* Parent Entity — businesses only. */}
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Parent Entity</label>
+            <select
+              value={parentEntityId}
+              onChange={(e) => setParentEntityId(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">None</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Aliases (Also Known As) — present for all entity types but most
+            commonly used for persons, so the document analysis system can
+            match alternate names that appear on K-1s, 1099s, etc. */}
         <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Parent Entity</label>
-          <select
-            value={parentEntityId}
-            onChange={(e) => setParentEntityId(e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">None</option>
-            {entities.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
+          <label style={labelStyle}>Also Known As</label>
+          <input
+            type="text"
+            value={aliasesInput}
+            onChange={(e) => setAliasesInput(e.target.value)}
+            placeholder={type === "person" ? "Sean, Sean D., S. Doherty" : "DBA name, former name, etc."}
+            style={inputStyle}
+          />
+          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+            Comma-separated. Used by document analysis to match this entity when referenced by other names.
+          </div>
         </div>
+
+        {/* SSN Last 4 — persons only. */}
+        {type === "person" && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>SSN Last 4</label>
+            <input
+              type="text"
+              value={ssnLast4}
+              onChange={(e) => setSsnLast4(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="1234"
+              maxLength={4}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Optional. Only used to disambiguate identically-named people.
+            </div>
+          </div>
+        )}
 
         {/* Notes */}
         <div style={fieldGroupStyle}>
@@ -391,8 +454,8 @@ export default function EditEntityPage() {
           />
         </div>
 
-        {/* Business Purpose (non-trust only) */}
-        {type !== "trust" && (
+        {/* Business Purpose (non-trust, non-person only) */}
+        {type !== "trust" && !isPerson && (
           <div style={fieldGroupStyle}>
             <label style={labelStyle}>Business Purpose</label>
             <textarea

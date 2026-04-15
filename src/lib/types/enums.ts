@@ -1,4 +1,4 @@
-export type EntityType = 'holding_company' | 'investment_fund' | 'operating_company' | 'real_estate' | 'special_purpose' | 'management_company' | 'trust' | 'other';
+export type EntityType = 'holding_company' | 'investment_fund' | 'operating_company' | 'real_estate' | 'special_purpose' | 'management_company' | 'trust' | 'person' | 'joint_title' | 'other';
 export type LegalStructure = 'llc' | 'corporation' | 'lp' | 'trust' | 'grantor_trust' | 'non_grantor_trust' | 'gp' | 'sole_prop' | 'other';
 export type EntityStatus = 'active' | 'inactive' | 'dissolved' | 'suspended' | 'pending_formation' | 'converting';
 export type TrustType = 'revocable' | 'irrevocable';

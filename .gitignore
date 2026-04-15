@@ -34,6 +34,11 @@ yarn-error.log*
 .env*
 !.env.example
 
+# This repo uses pnpm (pnpm-lock.yaml). An accidental `npm install` drops a
+# package-lock.json — exclude so it never sneaks into commits and confuses
+# Vercel about which package manager to use.
+package-lock.json
+
 # supabase
 supabase/.temp/
 

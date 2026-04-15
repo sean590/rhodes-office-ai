@@ -27,7 +27,7 @@ export async function GET(
 
     const { data: messages, error: messagesError } = await admin
       .from("chat_messages")
-      .select("id, session_id, role, content, created_at")
+      .select("id, session_id, role, content, metadata, created_at")
       .eq("session_id", id)
       .order("created_at", { ascending: true })
       .limit(500);

@@ -119,7 +119,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
 
   useEffect(() => {
     fetchBatch(); // eslint-disable-line react-hooks/set-state-in-effect -- initial fetch + polling
-    pollRef.current = setInterval(fetchBatch, 2500);
+    pollRef.current = setInterval(fetchBatch, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -205,7 +205,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
     // Resume polling — clear any existing interval first to prevent stacking
     if (pollRef.current) clearInterval(pollRef.current);
     setPhase("processing");
-    pollRef.current = setInterval(fetchBatch, 2500);
+    pollRef.current = setInterval(fetchBatch, 1000);
     await fetchBatch();
   };
 

@@ -1,17 +1,30 @@
 /**
+ * Result event from the chat stream (proposed actions, approval cards).
+ */
+export interface ChatStreamResult {
+  type: "results";
+  message_id: string | null;
+  summary: string;
+  attachments: unknown[];
+  proposed_actions: unknown[];
+  [key: string]: unknown;
+}
+
+/**
  * Reads an SSE stream from the chat API and yields text deltas.
- * Returns the full assembled text when the stream closes.
+ * Returns the full assembled text and any results event when the stream closes.
  */
 export async function readChatStream(
   response: Response,
   onDelta: (fullText: string) => void
-): Promise<string> {
+): Promise<{ text: string; result?: ChatStreamResult }> {
   const reader = response.body?.getReader();
   if (!reader) throw new Error("No reader");
 
   const decoder = new TextDecoder();
   let buffer = "";
   let fullText = "";
+  let resultEvent: ChatStreamResult | undefined;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -29,6 +42,9 @@ export async function readChatStream(
             fullText += parsed.text;
             onDelta(fullText);
           }
+          if (parsed.type === "results") {
+            resultEvent = parsed as ChatStreamResult;
+          }
         } catch {
           // Skip unparseable
         }
@@ -36,5 +52,5 @@ export async function readChatStream(
     }
   }
 
-  return fullText;
+  return { text: fullText, result: resultEvent };
 }

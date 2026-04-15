@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 // StatCard available for future use
 // import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
-import { DocIcon, SearchIcon, XIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
+import { DocIcon, SearchIcon, XIcon, SparkleIcon, PlusIcon, DownIcon, ChatIcon } from "@/components/ui/icons";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
@@ -353,32 +353,16 @@ export default function DocumentsPage() {
             All documents across entities
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={async () => {
-            if (showUpload) {
-              setShowUpload(false);
-              setPipelineBatchId(null);
-              setPipelinePhase("upload");
-              return;
-            }
-            // Create a new pipeline batch
-            try {
-              const res = await fetch("/api/pipeline/batches", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ context: "global" }),
-              });
-              if (res.ok) {
-                const batch = await res.json();
-                setPipelineBatchId(batch.id);
-                setShowUpload(true);
-              }
-            } catch { /* ignore */ }
+        <button
+          onClick={() => { window.dispatchEvent(new CustomEvent("rhodes:open-chat")); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+            borderRadius: 7, border: "1px solid #ddd9d0", background: "none",
+            cursor: "pointer", color: "#6b6b76", fontSize: 13, fontWeight: 500,
           }}
         >
-          <PlusIcon size={14} /> {isMobile ? "Upload" : "Upload Documents"}
-        </Button>
+          <ChatIcon size={14} /> Upload via chat
+        </button>
       </div>
 
       {/* AI Processing Banner */}

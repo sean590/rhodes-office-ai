@@ -90,12 +90,31 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
       }
     }
 
+    // Determine investment_id — check AI proposed actions, extraction result, then page context
+    let investmentId: string | null = null;
+    const aiActions = item.ai_proposed_actions as Array<{ action: string; data: Record<string, unknown> }> | null;
+    if (aiActions) {
+      const linkAction = aiActions.find((a) => a.action === "link_document_to_investment");
+      if (linkAction?.data?.investment_id) {
+        investmentId = linkAction.data.investment_id as string;
+      }
+    }
+    if (!investmentId) {
+      const extraction = item.ai_extraction as Record<string, unknown> | null;
+      if (extraction?.investment_id) {
+        investmentId = extraction.investment_id as string;
+      }
+    }
+
+    console.log(`[INGEST] Document ${item.original_filename}: entity=${finalEntityId}, investment=${investmentId}, ai_extraction_keys=${Object.keys((item.ai_extraction as Record<string, unknown>) || {}).join(",")}`);
+
     // Create document record
     const docName = (item.ai_suggested_name || item.original_filename) as string;
     const { data: doc, error: docError } = await admin
       .from("documents")
       .insert({
         entity_id: finalEntityId,
+        investment_id: investmentId,
         name: docName,
         document_type: finalDocType,
         document_category: finalCategory,

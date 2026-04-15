@@ -24,6 +24,10 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   add_role: { label: "Add Role", color: "#7b4db5" },
   complete_obligation: { label: "Complete Obligation", color: "#2d5a3d" },
   update_obligation: { label: "Update Obligation", color: "#c47520" },
+  create_investment: { label: "Create Investment", color: "#2d5a3d" },
+  link_document_to_investment: { label: "Link to Investment", color: "#6b6b76" },
+  set_investment_allocations: { label: "Set Allocations", color: "#3366a8" },
+  record_investment_transaction: { label: "Record Transaction", color: "#2d5a3d" },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -217,6 +221,25 @@ export function ApprovalCard({ item, entities, onApprove, onIngestOnly, onAssign
       case "complete_obligation": return `Complete obligation: filed ${action.data.completed_at || ""}${ent}`;
       case "add_partnership_rep": return `Add partnership rep: ${action.data.name}${ent}`;
       case "add_role": return `Add role: ${action.data.role_title} = ${action.data.name}${ent}`;
+      case "create_investment": {
+        const invName = action.data.name || "investment";
+        const invType = (action.data.investment_type as string || "").replace(/_/g, " ");
+        const invPct = action.data.ownership_pct != null ? ` — ${action.data.ownership_pct}%` : "";
+        return `Create investment: ${invName} (${invType})${invPct}`;
+      }
+      case "link_document_to_investment": {
+        return `Link document to investment${action.data.investment_id ? ` (${String(action.data.investment_id).slice(0, 8)}...)` : ""}`;
+      }
+      case "set_investment_allocations": {
+        const allocs = action.data.allocations as Array<{ member_name: string; allocation_pct: number }> | undefined;
+        const count = allocs?.length || 0;
+        return `Set ${count} investment allocation${count !== 1 ? "s" : ""}${ent}`;
+      }
+      case "record_investment_transaction": {
+        const txType = (action.data.transaction_type as string || "").replace(/_/g, " ");
+        const amt = action.data.amount ? `$${Number(action.data.amount).toLocaleString()}` : "";
+        return `Record ${txType}: ${amt} on ${action.data.transaction_date || ""}${ent}`;
+      }
       default: return `${action.action}: ${action.reason || ""}`;
     }
   };

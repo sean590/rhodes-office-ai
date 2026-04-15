@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { normalizeName } from "@/lib/utils/name-matching";
-import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@/lib/utils/audit";
 import { updateEntitySchema } from "@/lib/validations";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { refreshEntityExpectations } from "@/lib/utils/document-expectations";
@@ -406,6 +406,11 @@ export async function PUT(
       }
     }
 
+    // Sanitize aliases: trim and drop empties.
+    if (Array.isArray(updates.aliases)) {
+      updates.aliases = (updates.aliases as string[]).map(a => a.trim()).filter(Boolean);
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
@@ -419,6 +424,18 @@ export async function PUT(
     }
 
     updates.updated_at = new Date().toISOString();
+
+    // Fetch existing entity before updating (for audit change tracking)
+    const { data: existing, error: fetchError } = await supabase
+      .from("entities")
+      .select("*")
+      .eq("id", id)
+      .eq("organization_id", orgId)
+      .single();
+
+    if (fetchError || !existing) {
+      return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+    }
 
     const { data: entity, error } = await supabase
       .from("entities")
@@ -439,7 +456,13 @@ export async function PUT(
           { status: 409 }
         );
       }
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      // Surface the actual Postgres error (code + message) so client devtools
+      // shows something diagnostic instead of a bare 500.
+      console.error("PUT /api/entities/[id] update error:", error);
+      return NextResponse.json(
+        { error: `Database error${error.code ? ` (${error.code})` : ""}: ${error.message || "unknown"}` },
+        { status: 500 }
+      );
     }
 
     // If legal_structure or type changed, refresh document expectations
@@ -450,6 +473,7 @@ export async function PUT(
     }
 
     // Audit log
+    const changedFields = Object.keys(updates).filter((k) => k !== "updated_at");
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
@@ -458,7 +482,12 @@ export async function PUT(
       resourceType: "entity",
       resourceId: id,
       entityId: id,
-      metadata: { fields: Object.keys(updates) },
+      metadata: {
+        fields: changedFields,
+        description: `Updated ${existing.name}: ${changedFields.map(humanizeField).join(", ")}`,
+        changes: buildChanges(existing, updates),
+        entity_name: existing.name,
+      },
       ...reqCtx,
     });
 
@@ -513,7 +542,11 @@ export async function DELETE(
       resourceType: "entity",
       resourceId: id,
       entityId: id,
-      metadata: { name: entity.name },
+      metadata: {
+        name: entity.name,
+        description: `Deleted entity: ${entity.name}`,
+        entity_name: entity.name,
+      },
       ...reqCtx,
     });
 

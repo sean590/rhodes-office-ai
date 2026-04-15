@@ -1,13 +1,11 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Inactivity timeout: 30 minutes
+// Inactivity timeout: 30 minutes.
+// Keep in sync with INACTIVITY_TIMEOUT_MS in src/components/session-timeout-manager.tsx.
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
-// Maximum session length: 8 hours
-const MAX_SESSION_MS = 8 * 60 * 60 * 1000;
 
 const ACTIVITY_COOKIE = "rhodes_last_activity";
-const SESSION_START_COOKIE = "rhodes_session_start";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -62,13 +60,13 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Session timeout checks (only for authenticated users on non-public routes)
+  // Inactivity timeout check (only for authenticated users on non-public routes).
+  // No absolute session cap — users stay signed in indefinitely as long as they
+  // keep interacting with the app.
   if (user && !isPublicRoute) {
     const now = Date.now();
     const lastActivity = request.cookies.get(ACTIVITY_COOKIE)?.value;
-    const sessionStart = request.cookies.get(SESSION_START_COOKIE)?.value;
 
-    // Check inactivity timeout
     if (lastActivity) {
       const elapsed = now - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_TIMEOUT_MS) {
@@ -78,42 +76,17 @@ export async function updateSession(request: NextRequest) {
         url.searchParams.set("reason", "inactive");
         const redirect = NextResponse.redirect(url);
         redirect.cookies.delete(ACTIVITY_COOKIE);
-        redirect.cookies.delete(SESSION_START_COOKIE);
         return redirect;
       }
     }
 
-    // Check maximum session length
-    if (sessionStart) {
-      const elapsed = now - parseInt(sessionStart, 10);
-      if (elapsed > MAX_SESSION_MS) {
-        await supabase.auth.signOut();
-        const url = request.nextUrl.clone();
-        url.pathname = "/login";
-        url.searchParams.set("reason", "expired");
-        const redirect = NextResponse.redirect(url);
-        redirect.cookies.delete(ACTIVITY_COOKIE);
-        redirect.cookies.delete(SESSION_START_COOKIE);
-        return redirect;
-      }
-    }
-
-    // Update activity timestamp and set session start if missing
+    // Update activity timestamp on every middleware-handled request.
     supabaseResponse.cookies.set(ACTIVITY_COOKIE, now.toString(), {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       maxAge: 60 * 60 * 24, // 24 hours (cookie lifetime, not timeout)
     });
-
-    if (!sessionStart) {
-      supabaseResponse.cookies.set(SESSION_START_COOKIE, now.toString(), {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24,
-      });
-    }
   }
 
   return supabaseResponse;

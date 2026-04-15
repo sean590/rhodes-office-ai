@@ -54,7 +54,7 @@ export async function GET(
       .map((l) => l.document_id)
       .filter((docId) => !directIds.has(docId));
 
-    let linkedDocs: typeof directDocs = [];
+    let linkedDocs: Array<NonNullable<typeof directDocs>[number]> = [];
     if (linkedDocIds.length > 0) {
       const { data: ld } = await admin
         .from("documents")
@@ -71,10 +71,51 @@ export async function GET(
       linkRoleMap.set(l.document_id, l.role);
     }
 
-    // Merge: direct docs first, then linked docs with a `link_role` marker
+    // Joint-title union: if this entity is a person, also surface documents
+    // whose primary is a joint_title entity the person is a member of. This
+    // implements spec §5 surfacing rule #2.
+    const { data: entityRow } = await admin
+      .from("entities")
+      .select("type")
+      .eq("id", id)
+      .single();
+    type JointDoc = NonNullable<typeof directDocs>[number] & { joint_title_id: string; joint_title_name: string };
+    let jointTitleDocs: JointDoc[] = [];
+    const jointTitleMeta = new Map<string, { id: string; name: string }>();
+    if (entityRow?.type === "person") {
+      const { data: memberships } = await admin
+        .from("joint_title_members")
+        .select("joint_title_id")
+        .eq("person_entity_id", id);
+      const jtIds = (memberships || []).map(m => m.joint_title_id);
+      if (jtIds.length > 0) {
+        const { data: jtEntities } = await admin
+          .from("entities")
+          .select("id, name")
+          .in("id", jtIds);
+        for (const e of jtEntities || []) jointTitleMeta.set(e.id, { id: e.id, name: e.name });
+        const { data: jtDocs } = await admin
+          .from("documents")
+          .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
+          .in("entity_id", jtIds)
+          .is("deleted_at", null)
+          .order("created_at", { ascending: false });
+        jointTitleDocs = (jtDocs || [])
+          .filter(d => !directIds.has(d.id))
+          .map(d => {
+            const meta = d.entity_id ? jointTitleMeta.get(d.entity_id) : undefined;
+            return { ...d, joint_title_id: meta?.id || "", joint_title_name: meta?.name || "" };
+          });
+      }
+    }
+
+    // Merge: direct docs first, then joint-title-held, then linked docs with link_role
     const result = [
-      ...(directDocs || []).map((d) => ({ ...d, link_role: null as string | null })),
-      ...linkedDocs.map((d) => ({ ...d, link_role: linkRoleMap.get(d.id) || "related" })),
+      ...(directDocs || []).map((d) => ({ ...d, link_role: null as string | null, joint_title_id: null as string | null, joint_title_name: null as string | null })),
+      ...jointTitleDocs.map((d) => ({ ...d, link_role: null as string | null })),
+      ...linkedDocs
+        .filter((d) => !jointTitleDocs.some(jd => jd.id === d.id))
+        .map((d) => ({ ...d, link_role: linkRoleMap.get(d.id) || "related", joint_title_id: null as string | null, joint_title_name: null as string | null })),
     ];
 
     return NextResponse.json(result, {

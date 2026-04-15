@@ -15,7 +15,14 @@ import {
   createEntityRoleSchema,
   createCustomFieldSchema,
   validateUploadedFile,
+  validateInvestmentTransactionLineItems,
+  coerceLineItemCategories,
+  createInvestmentTransactionSchema,
 } from "../validations";
+import {
+  deriveTotalsFromTransactions,
+  type TransactionTotalRow,
+} from "../utils/transaction-totals";
 
 describe("createEntitySchema", () => {
   it("accepts valid entity", () => {
@@ -371,5 +378,263 @@ describe("createBatchSchema", () => {
   it("rejects invalid context", () => {
     const result = createBatchSchema.safeParse({ context: "invalid" });
     expect(result.success).toBe(false);
+  });
+});
+
+// ============================================================
+// Spec 036 — investment transaction line items
+// ============================================================
+
+describe("validateInvestmentTransactionLineItems", () => {
+  it("accepts empty line_items (back-compat)", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: 100000,
+      line_items: [],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects contribution line items that don't sum to amount", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: 128942.31,
+      line_items: [
+        { category: "subscription", amount: 112500, description: null },
+        { category: "monitoring_fee", amount: 15000, description: null },
+        // Missing audit_tax_expense; sums to 127500, not 128942.31
+      ],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("accepts a real Silverhawk-style contribution breakdown", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: 128942.31,
+      line_items: [
+        { category: "subscription", amount: 112500, description: null },
+        { category: "monitoring_fee", amount: 15000, description: null },
+        { category: "audit_tax_expense", amount: 1442.31, description: null },
+      ],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects subscription category under a distribution parent", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "distribution",
+      amount: 100,
+      line_items: [
+        { category: "gross_distribution", amount: 100, description: null },
+        { category: "subscription", amount: 0, description: null },
+      ],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects gross_distribution under a contribution parent", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: 100,
+      line_items: [{ category: "gross_distribution", amount: 100, description: null }],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("requires at least one gross_distribution on a distribution", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "distribution",
+      amount: 100,
+      line_items: [{ category: "tax_withholding", amount: 100, description: null }],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("validates the gross - reductions = net rule for distributions", () => {
+    // gross 16,109.31 - carried 3,221.86 = 12,887.45 net
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "distribution",
+      amount: 12887.45,
+      line_items: [
+        { category: "gross_distribution", amount: 16109.31, description: null },
+        { category: "carried_interest", amount: 3221.86, description: null },
+      ],
+    });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejects negative line item amounts on non-adjustment rows", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: 100,
+      line_items: [{ category: "subscription", amount: -100, description: null }],
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("permits negative line item amounts on adjustment rows", () => {
+    const r = validateInvestmentTransactionLineItems({
+      transaction_type: "contribution",
+      amount: -5000,
+      line_items: [{ category: "subscription", amount: -5000, description: "Recall" }],
+      adjusts_transaction_id: "a1b2c3d4-e5f6-4789-89ab-cdef01234567",
+    });
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("coerceLineItemCategories", () => {
+  it("coerces audit_tax_expense → compliance_holdback on a distribution", () => {
+    const out = coerceLineItemCategories("distribution", [
+      { category: "gross_distribution", amount: 24163.95, description: null },
+      { category: "audit_tax_expense", amount: 461.10, description: "Audit/tax holdback" },
+      { category: "carried_interest", amount: 4740.57, description: null },
+    ]);
+    expect(out[0].category).toBe("gross_distribution");
+    expect(out[1].category).toBe("compliance_holdback");
+    expect(out[1].amount).toBe(461.10);
+    expect(out[1].description).toBe("Audit/tax holdback");
+    expect(out[2].category).toBe("carried_interest");
+  });
+
+  it("coerces compliance_holdback → audit_tax_expense on a contribution", () => {
+    const out = coerceLineItemCategories("contribution", [
+      { category: "subscription", amount: 100000, description: null },
+      { category: "compliance_holdback", amount: 1500, description: "Audit fee" },
+    ]);
+    expect(out[0].category).toBe("subscription");
+    expect(out[1].category).toBe("audit_tax_expense");
+  });
+
+  it("does not touch correct categories", () => {
+    const input = [
+      { category: "gross_distribution" as const, amount: 1000, description: null },
+      { category: "compliance_holdback" as const, amount: 100, description: null },
+    ];
+    const out = coerceLineItemCategories("distribution", input);
+    expect(out).toEqual(input);
+  });
+
+  it("returns empty array unchanged", () => {
+    expect(coerceLineItemCategories("distribution", [])).toEqual([]);
+  });
+
+  it("end-to-end: coerced distribution validates cleanly via the shared validator", () => {
+    // Silverhawk row #15 shape: gross 24163.95, audit/tax 461.10, carry 4740.57, net 18962.28
+    const coerced = coerceLineItemCategories("distribution", [
+      { category: "gross_distribution", amount: 24163.95, description: null },
+      { category: "audit_tax_expense", amount: 461.10, description: "Audit/tax holdback" },
+      { category: "carried_interest", amount: 4740.57, description: null },
+    ]);
+    const result = validateInvestmentTransactionLineItems({
+      transaction_type: "distribution",
+      amount: 18962.28,
+      line_items: coerced,
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe("createInvestmentTransactionSchema (spec 036)", () => {
+  it("rejects negative amount on non-adjustment", () => {
+    const r = createInvestmentTransactionSchema.safeParse({
+      investment_investor_id: "a1b2c3d4-e5f6-4789-89ab-cdef01234567",
+      transaction_type: "contribution",
+      amount: -100,
+      transaction_date: "2026-04-01",
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("permits negative amount on adjustment with line items", () => {
+    const r = createInvestmentTransactionSchema.safeParse({
+      investment_investor_id: "a1b2c3d4-e5f6-4789-89ab-cdef01234567",
+      transaction_type: "contribution",
+      amount: -5000,
+      transaction_date: "2026-04-01",
+      adjusts_transaction_id: "b2c3d4e5-f6a7-4890-9abc-def012345678",
+      adjustment_reason: "Sponsor reduced call",
+      line_items: [
+        { category: "subscription", amount: -5000, description: null },
+      ],
+    });
+    expect(r.success).toBe(true);
+  });
+});
+
+describe("deriveTotalsFromTransactions (spec 036)", () => {
+  it("only counts subscription lines toward called_capital", () => {
+    const rows: TransactionTotalRow[] = [
+      {
+        transaction_type: "contribution",
+        amount: 128942.31,
+        line_items: [
+          { category: "subscription", amount: 112500, description: null },
+          { category: "monitoring_fee", amount: 15000, description: null },
+          { category: "audit_tax_expense", amount: 1442.31, description: null },
+        ],
+        adjusts_transaction_id: null,
+      },
+    ];
+    const t = deriveTotalsFromTransactions(rows);
+    expect(t.total_contributed).toBeCloseTo(128942.31, 2);
+    expect(t.called_capital).toBeCloseTo(112500, 2);
+  });
+
+  it("falls back to 100% subscription on contributions with empty line_items", () => {
+    const rows: TransactionTotalRow[] = [
+      { transaction_type: "contribution", amount: 50000, line_items: [], adjusts_transaction_id: null },
+    ];
+    const t = deriveTotalsFromTransactions(rows);
+    expect(t.total_contributed).toBe(50000);
+    expect(t.called_capital).toBe(50000);
+    expect(t.contribution_fallback_count).toBe(1);
+  });
+
+  it("derives gross and net distribution totals from line items", () => {
+    const rows: TransactionTotalRow[] = [
+      {
+        transaction_type: "distribution",
+        amount: 12887.45,
+        line_items: [
+          { category: "gross_distribution", amount: 16109.31, description: null },
+          { category: "carried_interest", amount: 3221.86, description: null },
+        ],
+        adjusts_transaction_id: null,
+      },
+    ];
+    const t = deriveTotalsFromTransactions(rows);
+    expect(t.total_distributed_gross).toBeCloseTo(16109.31, 2);
+    expect(t.total_distributed_net).toBeCloseTo(12887.45, 2);
+  });
+
+  it("falls back to gross == net when distribution line_items are empty", () => {
+    const rows: TransactionTotalRow[] = [
+      { transaction_type: "distribution", amount: 8000, line_items: [], adjusts_transaction_id: null },
+    ];
+    const t = deriveTotalsFromTransactions(rows);
+    expect(t.total_distributed_gross).toBe(8000);
+    expect(t.total_distributed_net).toBe(8000);
+  });
+
+  it("an adjustment with a negative subscription line reduces called_capital", () => {
+    const rows: TransactionTotalRow[] = [
+      {
+        transaction_type: "contribution",
+        amount: 100000,
+        line_items: [{ category: "subscription", amount: 100000, description: null }],
+        adjusts_transaction_id: null,
+      },
+      {
+        transaction_type: "contribution",
+        amount: -5000,
+        line_items: [{ category: "subscription", amount: -5000, description: null }],
+        adjusts_transaction_id: "a1b2c3d4-e5f6-4789-89ab-cdef01234567",
+      },
+    ];
+    const t = deriveTotalsFromTransactions(rows);
+    expect(t.total_contributed).toBe(95000);
+    expect(t.called_capital).toBe(95000);
   });
 });

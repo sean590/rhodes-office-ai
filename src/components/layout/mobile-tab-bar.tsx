@@ -4,19 +4,19 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
-  BuildingIcon, DocIcon, PeopleIcon, ChatIcon,
+  BuildingIcon, ChartIcon, DocIcon, PeopleIcon, ChatIcon,
   LinkIcon, GearIcon, EllipsisIcon,
 } from "../ui/icons";
 
 const PRIMARY_TABS = [
-  { href: "/entities", label: "Entities", Icon: BuildingIcon },
+  { href: "/entities", label: "My Entities", Icon: BuildingIcon },
   { href: "/documents", label: "Docs", Icon: DocIcon },
   { href: "/directory", label: "Directory", Icon: PeopleIcon },
   { href: "/chat", label: "Chat", Icon: ChatIcon },
 ];
 
 const MORE_TABS = [
-  { href: "/relationships", label: "Relationships", Icon: LinkIcon },
+  { href: "/investments", label: "Investments", Icon: ChartIcon },
   { href: "/settings", label: "Settings", Icon: GearIcon },
 ];
 

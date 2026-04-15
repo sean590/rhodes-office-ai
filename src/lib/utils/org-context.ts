@@ -46,3 +46,21 @@ export async function validateEntityOrg(
 
   return !!data;
 }
+
+/**
+ * Validate that an investment belongs to the given organization.
+ */
+export async function validateInvestmentOrg(
+  investmentId: string,
+  orgId: string
+): Promise<boolean> {
+  const admin = createAdminClient();
+  const { data } = await admin
+    .from("investments")
+    .select("id")
+    .eq("id", investmentId)
+    .eq("organization_id", orgId)
+    .maybeSingle();
+
+  return !!data;
+}

@@ -57,14 +57,14 @@ function routeAfterExtraction(
  */
 export async function processQueueItem(
   itemId: string,
-  cachedDbContext?: Record<string, unknown[]>
+  cachedDbContext?: string
 ): Promise<void> {
   const admin = createAdminClient();
 
   // 1. Fetch queue item (include batch org ID)
   const { data: item, error: itemError } = await admin
     .from("document_queue")
-    .select("*, document_batches!fk_queue_batch(entity_discovery, organization_id)")
+    .select("*, document_batches!fk_queue_batch(entity_discovery, organization_id, entity_id, user_context)")
     .eq("id", itemId)
     .single();
 
@@ -72,6 +72,15 @@ export async function processQueueItem(
     console.error(`Queue item ${itemId} not found:`, itemError);
     return;
   }
+
+  // Helper to update processing progress
+  const updateProgress = async (step: string, progress: number) => {
+    await admin.from("document_queue").update({
+      processing_step: step,
+      processing_progress: progress,
+      updated_at: new Date().toISOString(),
+    }).eq("id", itemId);
+  };
 
   // 2. Update status to extracting
   await admin
@@ -85,6 +94,7 @@ export async function processQueueItem(
 
   try {
     // 3. Download file from storage
+    await updateProgress("downloading", 10);
     console.log(`[PIPELINE] ${itemId}: downloading file ${item.file_path}`);
     const { data: fileData, error: downloadError } = await admin.storage
       .from("documents")
@@ -94,13 +104,14 @@ export async function processQueueItem(
       throw new Error(`Failed to download file: ${downloadError?.message || "No data"}`);
     }
     console.log(`[PIPELINE] ${itemId}: downloaded ${item.original_filename}`);
+    await updateProgress("triage", 20);
 
     // 4. Get DB context (use cached if provided, otherwise fetch org-scoped)
     const batchData = item.document_batches;
     const batchOrgId = batchData?.organization_id as string;
     console.log(`[PIPELINE] ${itemId}: fetching DB context (cached=${!!cachedDbContext}, orgId=${batchOrgId})`);
     const dbContext = cachedDbContext ?? await getDbContext(admin, batchOrgId);
-    console.log(`[PIPELINE] ${itemId}: DB context ready (${(dbContext.entities as unknown[]).length} entities)`);
+    console.log(`[PIPELINE] ${itemId}: DB context ready (${dbContext.length} chars)`);
 
     // 5. Determine options
     // Entity discovery is off for entity-scoped uploads (document already has an owner)
@@ -113,7 +124,9 @@ export async function processQueueItem(
       (item.staged_category === "tax" && item.mime_type === "application/pdf");
 
     // 6. Call shared extraction
-    console.log(`[PIPELINE] ${itemId}: calling Claude API (composite=${isCompositeCandidate})`);
+    await updateProgress("extracting", 40);
+    const userContext = (batchData?.user_context as string) || undefined;
+    console.log(`[PIPELINE] ${itemId}: calling Claude API (composite=${isCompositeCandidate}, userContext=${!!userContext})`);
     const result = await extractDocument(
       fileData,
       item.mime_type,
@@ -124,9 +137,11 @@ export async function processQueueItem(
       {
         entityDiscovery,
         compositeDetection: isCompositeCandidate,
+        userContext,
       }
     );
     console.log(`[PIPELINE] ${itemId}: extraction complete (tokens=${result.tokens_used}, entity=${result.entity_id})`);
+    await updateProgress("applying", 70);
 
     // 7. Handle dynamic document type creation
     if (result.is_new_document_type && result.document_type && result.new_type_label) {
@@ -143,11 +158,16 @@ export async function processQueueItem(
 
     // 8. Handle composite results — create child queue items
     if (result.is_composite && result.sub_documents.length > 0) {
-      const entityList = (dbContext.entities as Array<{ id: string; name: string; short_name: string | null }>) || [];
-      await handleCompositeResult(admin, item, result.sub_documents, batchOrgId, entityList);
+      const { data: entityList } = await admin
+        .from("entities")
+        .select("id, name, short_name")
+        .eq("organization_id", batchOrgId)
+        .order("name");
+      await handleCompositeResult(admin, item, result.sub_documents, batchOrgId, entityList || []);
     }
 
     // 9. Route: auto-ingest or review queue
+    await updateProgress("completing", 85);
     const routing = routeAfterExtraction(item, result);
 
     // 10. Update queue item with AI results

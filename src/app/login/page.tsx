@@ -1,8 +1,26 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginInner reason={null} />}>
+      <LoginPageWithParams />
+    </Suspense>
+  );
+}
+
+function LoginPageWithParams() {
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
+  return <LoginInner reason={reason} />;
+}
+
+function LoginInner({ reason }: { reason: string | null }) {
+  const showInactivityBanner = reason === "inactive" || reason === "expired";
+
   const handleGoogleLogin = async () => {
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
@@ -19,6 +37,24 @@ export default function LoginPage() {
         className="w-full max-w-sm rounded-2xl p-10 text-center"
         style={{ background: "#ffffff", border: "1px solid #e8e6df" }}
       >
+        {showInactivityBanner && (
+          <div
+            role="status"
+            style={{
+              background: "#fef6e4",
+              border: "1px solid #f4d99a",
+              color: "#7a5a18",
+              borderRadius: 8,
+              padding: "10px 14px",
+              marginBottom: 20,
+              fontSize: 13,
+              lineHeight: 1.5,
+              textAlign: "left",
+            }}
+          >
+            You were signed out after 30 minutes of inactivity. Please sign back in.
+          </div>
+        )}
         {/* Logo */}
         <div className="flex items-center justify-center gap-2.5 mb-8">
           <div

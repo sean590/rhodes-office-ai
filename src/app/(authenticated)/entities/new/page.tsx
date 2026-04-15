@@ -22,6 +22,7 @@ const ENTITY_TYPES: { value: EntityType; label: string }[] = [
   { value: "special_purpose", label: "Special Purpose" },
   { value: "management_company", label: "Management Company" },
   { value: "trust", label: "Trust" },
+  { value: "person", label: "Person" },
   { value: "other", label: "Other" },
 ];
 
@@ -101,9 +102,13 @@ export default function NewEntityPage() {
   const [address, setAddress] = useState("");
   const [parentEntityId, setParentEntityId] = useState("");
   const [notes, setNotes] = useState("");
+  const [ssnLast4, setSsnLast4] = useState("");
+  const [spouseId, setSpouseId] = useState("");
+  const [aliasesInput, setAliasesInput] = useState("");
 
   /* Entity list for parent dropdown */
-  const [entities, setEntities] = useState<{ id: string; name: string }[]>([]);
+  const [entities, setEntities] = useState<{ id: string; name: string; type?: string }[]>([]);
+  const isPerson = type === "person";
 
   /* Submission state */
   const [saving, setSaving] = useState(false);
@@ -116,7 +121,7 @@ export default function NewEntityPage() {
         const res = await fetch("/api/entities");
         if (!res.ok) return;
         const data = await res.json();
-        setEntities(data.map((e: { id: string; name: string }) => ({ id: e.id, name: e.name })));
+        setEntities(data.map((e: { id: string; name: string; type?: string }) => ({ id: e.id, name: e.name, type: e.type })));
       } catch {
         // Silently fail -- parent dropdown will just be empty
       }
@@ -139,8 +144,12 @@ export default function NewEntityPage() {
       setError(snValidation.error!);
       return;
     }
-    if (!formationState) {
+    if (!isPerson && !formationState) {
       setError("Formation State is required.");
+      return;
+    }
+    if (isPerson && ssnLast4 && !/^\d{4}$/.test(ssnLast4)) {
+      setError("SSN Last 4 must be exactly 4 digits.");
       return;
     }
 
@@ -148,22 +157,30 @@ export default function NewEntityPage() {
     setError(null);
 
     try {
+      const payload: Record<string, unknown> = {
+        name: name.trim(),
+        short_name: shortName.trim(),
+        type,
+        formation_state: formationState || null,
+        formed_date: formedDate || null,
+        address: address.trim() || null,
+        notes: notes.trim() || null,
+      };
+      if (!isPerson) {
+        payload.legal_structure = legalStructure || null;
+        payload.ein = ein.trim() || null;
+        payload.registered_agent = registeredAgent.trim() || null;
+        payload.parent_entity_id = parentEntityId || null;
+      } else {
+        payload.ssn_last_4 = ssnLast4 || null;
+        const aliases = aliasesInput.split(",").map(a => a.trim()).filter(Boolean);
+        if (aliases.length > 0) payload.aliases = aliases;
+      }
+
       const res = await fetch("/api/entities", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: name.trim(),
-          short_name: shortName.trim(),
-          type,
-          legal_structure: legalStructure || null,
-          ein: ein.trim() || null,
-          formation_state: formationState,
-          formed_date: formedDate || null,
-          registered_agent: registeredAgent.trim() || null,
-          address: address.trim() || null,
-          parent_entity_id: parentEntityId || null,
-          notes: notes.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -172,6 +189,24 @@ export default function NewEntityPage() {
       }
 
       const entity = await res.json();
+
+      // If person with spouse selected, create the symmetric spouse_of edge.
+      if (isPerson && spouseId) {
+        try {
+          await fetch("/api/person-relationships", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              from_person_id: entity.id,
+              to_person_id: spouseId,
+              relationship: "spouse_of",
+            }),
+          });
+        } catch {
+          // Non-fatal — person is created; user can wire the relationship later.
+        }
+      }
+
       router.push(`/entities/${entity.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -276,41 +311,62 @@ export default function NewEntityPage() {
           </select>
         </div>
 
-        {/* Legal Structure */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Legal Structure</label>
-          <select
-            value={legalStructure}
-            onChange={(e) => setLegalStructure(e.target.value as LegalStructure | "")}
-            style={selectStyle}
-          >
-            <option value="">Select structure</option>
-            {LEGAL_STRUCTURES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
-            Used to generate state-specific compliance obligations.
+        {!isPerson && (
+          <>
+            {/* Legal Structure */}
+            <div style={fieldGroupStyle}>
+              <label style={labelStyle}>Legal Structure</label>
+              <select
+                value={legalStructure}
+                onChange={(e) => setLegalStructure(e.target.value as LegalStructure | "")}
+                style={selectStyle}
+              >
+                <option value="">Select structure</option>
+                {LEGAL_STRUCTURES.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+                Used to generate state-specific compliance obligations.
+              </div>
+            </div>
+
+            {/* EIN */}
+            <div style={fieldGroupStyle}>
+              <label style={labelStyle}>EIN</label>
+              <input
+                type="text"
+                value={ein}
+                onChange={(e) => setEin(e.target.value)}
+                placeholder="XX-XXXXXXX"
+                style={inputStyle}
+              />
+            </div>
+          </>
+        )}
+
+        {isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>SSN Last 4</label>
+            <input
+              type="text"
+              value={ssnLast4}
+              onChange={(e) => setSsnLast4(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="1234"
+              maxLength={4}
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Optional. Only used to disambiguate identically-named people.
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* EIN */}
+        {/* Formation State / Residence State */}
         <div style={fieldGroupStyle}>
-          <label style={labelStyle}>EIN</label>
-          <input
-            type="text"
-            value={ein}
-            onChange={(e) => setEin(e.target.value)}
-            placeholder="XX-XXXXXXX"
-            style={inputStyle}
-          />
-        </div>
-
-        {/* Formation State */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Formation State *</label>
+          <label style={labelStyle}>{isPerson ? "Residence State" : "Formation State *"}</label>
           <select
             value={formationState}
             onChange={(e) => setFormationState(e.target.value)}
@@ -323,30 +379,37 @@ export default function NewEntityPage() {
               </option>
             ))}
           </select>
+          {isPerson && (
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Drives state tax filing obligations.
+            </div>
+          )}
         </div>
 
-        {/* Date Formed */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Date Formed</label>
-          <input
-            type="date"
-            value={formedDate}
-            onChange={(e) => setFormedDate(e.target.value)}
-            style={inputStyle}
-          />
-        </div>
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Date Formed</label>
+            <input
+              type="date"
+              value={formedDate}
+              onChange={(e) => setFormedDate(e.target.value)}
+              style={inputStyle}
+            />
+          </div>
+        )}
 
-        {/* Registered Agent */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Registered Agent</label>
-          <input
-            type="text"
-            value={registeredAgent}
-            onChange={(e) => setRegisteredAgent(e.target.value)}
-            placeholder="Agent name"
-            style={inputStyle}
-          />
-        </div>
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Registered Agent</label>
+            <input
+              type="text"
+              value={registeredAgent}
+              onChange={(e) => setRegisteredAgent(e.target.value)}
+              placeholder="Agent name"
+              style={inputStyle}
+            />
+          </div>
+        )}
 
         {/* Address */}
         <div style={fieldGroupStyle}>
@@ -360,22 +423,60 @@ export default function NewEntityPage() {
           />
         </div>
 
-        {/* Parent Entity */}
-        <div style={fieldGroupStyle}>
-          <label style={labelStyle}>Parent Entity</label>
-          <select
-            value={parentEntityId}
-            onChange={(e) => setParentEntityId(e.target.value)}
-            style={selectStyle}
-          >
-            <option value="">None</option>
-            {entities.map((e) => (
-              <option key={e.id} value={e.id}>
-                {e.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Parent Entity</label>
+            <select
+              value={parentEntityId}
+              onChange={(e) => setParentEntityId(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">None</option>
+              {entities.map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Also Known As</label>
+            <input
+              type="text"
+              value={aliasesInput}
+              onChange={(e) => setAliasesInput(e.target.value)}
+              placeholder="Sean, Sean D., S. Doherty"
+              style={inputStyle}
+            />
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Comma-separated. Helps document analysis match this person when documents refer to them by other names.
+            </div>
+          </div>
+        )}
+
+        {isPerson && (
+          <div style={fieldGroupStyle}>
+            <label style={labelStyle}>Spouse</label>
+            <select
+              value={spouseId}
+              onChange={(e) => setSpouseId(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="">None</option>
+              {entities.filter((e) => e.type === "person").map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.name}
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>
+              Creates a symmetric spouse_of relationship. Only existing Person entities shown.
+            </div>
+          </div>
+        )}
 
         {/* Notes */}
         <div style={fieldGroupStyle}>

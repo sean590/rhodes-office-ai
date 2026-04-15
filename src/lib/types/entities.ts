@@ -7,7 +7,7 @@ export interface Entity {
   type: EntityType;
   status: EntityStatus;
   ein: string | null;
-  formation_state: Jurisdiction;
+  formation_state: Jurisdiction | null;
   formed_date: string | null;
   address: string | null;
   registered_agent: string | null;
@@ -15,6 +15,8 @@ export interface Entity {
   legal_structure: LegalStructure | null;
   notes: string | null;
   business_purpose: string | null;
+  ssn_last_4: string | null;
+  aliases: string[];
   created_at: string;
   updated_at: string;
 }
@@ -197,6 +199,8 @@ export interface Document {
   k1_recipient: string | null;
   created_at: string;
   link_role?: string | null;  // Set when doc is linked via document_entity_links (not direct entity_id)
+  joint_title_id?: string | null;  // Set when doc surfaces via joint_title membership (person Documents tab)
+  joint_title_name?: string | null;
 }
 
 // --- Pipeline types ---
@@ -341,8 +345,50 @@ export interface ComplianceObligation {
 }
 
 export interface ProposedAction {
-  action: 'create_entity' | 'update_entity' | 'create_relationship' | 'add_member' | 'add_manager' | 'add_registration' | 'add_trust_role' | 'update_cap_table' | 'create_directory_entry' | 'add_custom_field' | 'add_partnership_rep' | 'add_role' | 'complete_obligation' | 'update_obligation';
+  action: 'create_entity' | 'update_entity' | 'create_relationship' | 'add_member' | 'add_manager' | 'add_registration' | 'add_trust_role' | 'update_cap_table' | 'create_directory_entry' | 'add_custom_field' | 'add_partnership_rep' | 'add_role' | 'complete_obligation' | 'update_obligation' | 'create_investment' | 'link_document_to_investment' | 'set_investment_allocations' | 'record_investment_transaction';
   data: Record<string, unknown>;
   reason: string;
   confidence: 'high' | 'medium' | 'low';
+}
+
+// --- Investment tracking types ---
+
+export type InvestmentTransactionType = 'contribution' | 'distribution' | 'return_of_capital';
+
+export interface InvestmentAllocation {
+  id: string;
+  organization_id: string;
+  parent_entity_id: string;
+  deal_entity_id: string;
+  member_directory_id: string;
+  allocation_pct: number;
+  committed_amount: number | null;
+  effective_date: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  // Joined fields
+  member_name?: string;
+}
+
+export interface InvestmentTransaction {
+  id: string;
+  organization_id: string;
+  parent_entity_id: string;
+  deal_entity_id: string;
+  member_directory_id: string | null;
+  transaction_type: InvestmentTransactionType;
+  amount: number;
+  transaction_date: string;
+  document_id: string | null;
+  description: string | null;
+  parent_transaction_id: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  // Joined fields
+  member_name?: string;
+  document_name?: string;
 }

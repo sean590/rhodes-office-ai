@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
-import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
+import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, ChatIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
@@ -34,6 +34,8 @@ import type {
   ComplianceObligation,
 } from "@/lib/types/entities";
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
+import { EntityInvestmentsTab } from "@/components/entities/EntityInvestmentsTab";
+import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -2167,6 +2169,229 @@ function TrustDetailsCard({
   );
 }
 
+/* ---- Joint-Title Overview (joint_title entities only) ----
+
+   The minimal "thin shell" detail page from spec §3: legal title, ownership
+   form, member list, and a Dissolve action. Replaces the generic Overview
+   which would show empty EIN/Legal Structure/Formation State rows. */
+interface JointTitleMember {
+  joint_title_id: string;
+  person_entity_id: string;
+  person_name: string;
+  ownership_form: string;
+  note: string | null;
+}
+
+const OWNERSHIP_FORM_LABELS: Record<string, string> = {
+  jtwros: "JTWROS",
+  tbe: "Tenants by the Entirety",
+  tic: "Tenants in Common",
+  community_property: "Community Property",
+  other: "Other",
+};
+
+function JointTitleOverview({
+  jointTitleId,
+  jointTitleName,
+  status,
+  onStatusChange,
+}: {
+  jointTitleId: string;
+  jointTitleName: string;
+  status: string;
+  onStatusChange: () => void;
+}) {
+  const [members, setMembers] = useState<JointTitleMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dissolving, setDissolving] = useState(false);
+
+  const fetchMembers = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/entities/${jointTitleId}/joint-title-members`);
+      if (res.ok) setMembers(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [jointTitleId]);
+
+  useEffect(() => { fetchMembers(); }, [fetchMembers]);
+
+  const ownershipForm = members[0]?.ownership_form || null;
+  const isInactive = status === "inactive" || status === "dissolved";
+
+  async function handleDissolve() {
+    if (!confirm(`Mark "${jointTitleName}" as dissolved? Use this for title changes, death of a member, or reconstitution of ownership.`)) return;
+    setDissolving(true);
+    try {
+      const res = await fetch(`/api/entities/${jointTitleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "inactive" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to dissolve");
+        return;
+      }
+      onStatusChange();
+    } finally {
+      setDissolving(false);
+    }
+  }
+
+  return (
+    <div>
+      <Card>
+        <SectionHeader>Joint Title</SectionHeader>
+
+        <InfoRow label="Legal Title">{jointTitleName}</InfoRow>
+        <InfoRow label="Ownership Form">
+          {ownershipForm ? (OWNERSHIP_FORM_LABELS[ownershipForm] || ownershipForm.toUpperCase()) : "\u2014"}
+        </InfoRow>
+        <InfoRow label="Status">
+          <span style={{ color: isInactive ? "#9494a0" : "#2d8a4e", fontWeight: 500 }}>
+            {isInactive ? "Dissolved" : "Active"}
+          </span>
+        </InfoRow>
+
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Members
+          </div>
+          {loading ? (
+            <div style={{ fontSize: 13, color: "#9494a0" }}>Loading...</div>
+          ) : members.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#9494a0" }}>No members recorded. Joint-title entities are typically populated by document extraction.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {members.map(m => (
+                <div key={m.person_entity_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f7f4", borderRadius: 6 }}>
+                  <a href={`/entities/${m.person_entity_id}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                    {m.person_name}
+                  </a>
+                  {m.note && <span style={{ fontSize: 12, color: "#9494a0" }}>{m.note}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!isInactive && (
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #e8e6df" }}>
+            <Button variant="secondary" onClick={handleDissolve} disabled={dissolving}>
+              {dissolving ? "Dissolving..." : "Dissolve Joint Title"}
+            </Button>
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6 }}>
+              Use for title changes, death of a member, or reconstitution of ownership.
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---- Family Tab (persons only) ---- */
+interface PersonRel {
+  id: string;
+  from_person_id: string;
+  to_person_id: string;
+  relationship: "spouse_of" | "parent_of" | "child_of";
+  notes: string | null;
+}
+
+interface JointTitleMembership {
+  joint_title_id: string;
+  joint_title_name: string;
+  ownership_form: string;
+  members: Array<{ person_entity_id: string; person_name: string }>;
+}
+
+function FamilyTab({ personId, personName }: { personId: string; personName: string }) {
+  const [rels, setRels] = useState<PersonRel[]>([]);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [jointTitles, setJointTitles] = useState<JointTitleMembership[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [relRes, jtRes] = await Promise.all([
+          fetch(`/api/person-relationships?person_id=${personId}`),
+          fetch(`/api/entities/${personId}/joint-titles`),
+        ]);
+        const relData: PersonRel[] = relRes.ok ? await relRes.json() : [];
+        setRels(relData);
+
+        // Resolve names for all counterpart persons.
+        const counterpartIds = Array.from(new Set(relData.map(r => r.from_person_id === personId ? r.to_person_id : r.from_person_id)));
+        if (counterpartIds.length > 0) {
+          const map: Record<string, string> = {};
+          await Promise.all(counterpartIds.map(async cid => {
+            const r = await fetch(`/api/entities/${cid}`);
+            if (r.ok) { const e = await r.json(); map[cid] = e.name; }
+          }));
+          setNameMap(map);
+        }
+
+        if (jtRes.ok) setJointTitles(await jtRes.json());
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [personId]);
+
+  if (loading) return <div style={{ color: "#9494a0", fontSize: 13, padding: 20 }}>Loading family...</div>;
+
+  const spouseRels = rels.filter(r => r.relationship === "spouse_of" && r.from_person_id === personId);
+  const parents = rels.filter(r => r.relationship === "child_of" && r.from_person_id === personId);
+  const children = rels.filter(r => r.relationship === "parent_of" && r.from_person_id === personId);
+
+  const renderGroup = (label: string, edges: PersonRel[]) => {
+    if (edges.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 8px" }}>{label}</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {edges.map(e => {
+            const otherId = e.from_person_id === personId ? e.to_person_id : e.from_person_id;
+            return (
+              <a key={e.id} href={`/entities/${otherId}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                {nameMap[otherId] || "(Unknown)"}
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const empty = spouseRels.length === 0 && parents.length === 0 && children.length === 0 && jointTitles.length === 0;
+  if (empty) {
+    return <div style={{ color: "#9494a0", fontSize: 13, padding: 20 }}>No family relationships recorded for {personName}.</div>;
+  }
+
+  return (
+    <div>
+      {renderGroup("Spouse", spouseRels)}
+      {renderGroup("Parents", parents)}
+      {renderGroup("Children", children)}
+      {jointTitles.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 8px" }}>Joint Titles</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {jointTitles.map(jt => (
+              <a key={jt.joint_title_id} href={`/entities/${jt.joint_title_id}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                {jt.joint_title_name} <span style={{ color: "#9494a0", fontSize: 12 }}>({jt.ownership_form.toUpperCase()})</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- Relationships Tab (full) ---- */
 function RelationshipsTab({
   relationships,
@@ -3590,6 +3815,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   add_role: { label: "Add Role", color: "#7b4db5" },
   complete_obligation: { label: "Complete Obligation", color: "#2d5a3d" },
   update_obligation: { label: "Update Obligation", color: "#c47520" },
+  set_investment_allocations: { label: "Set Allocations", color: "#3366a8" },
+  record_investment_transaction: { label: "Record Transaction", color: "#2d5a3d" },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -4103,9 +4330,21 @@ function DocumentsTab({
     }
   };
 
+  /* ---- Referenced-in filter (spec §5 surfacing rules) ----
+     Documents linked via a referenced-in role (investment_issuer,
+     service_provider, counterparty, witness, co_beneficiary_secondary) are
+     hidden by default. First-class roles (co_filer, joint_filer, co_owner,
+     co_beneficiary_primary, member), direct documents, and joint-title-held
+     documents always show. */
+  const [showReferencedIn, setShowReferencedIn] = useState(false);
+  const referencedInCount = documents.filter(d => isReferencedInRole(d.link_role)).length;
+  const visibleDocuments = showReferencedIn
+    ? documents
+    : documents.filter(d => !isReferencedInRole(d.link_role));
+
   /* ---- Group documents by category ---- */
   const grouped: Record<string, DocRecord[]> = {};
-  documents.forEach((doc) => {
+  visibleDocuments.forEach((doc) => {
     const cat = doc.document_category || getDocCategory(doc.document_type);
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(doc);
@@ -4200,26 +4439,19 @@ function DocumentsTab({
             {selectMode ? "Cancel" : "Select"}
           </button>
         )}
-        {!showUpload && !selectMode && (
-          <Button variant="primary" onClick={async () => {
-            setShowUpload(true);
-            // Create a pipeline batch for this entity
-            if (!pipelineBatchId) {
-              try {
-                const res = await fetch("/api/pipeline/batches", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ context: "entity", entity_id: entityId }),
-                });
-                if (res.ok) {
-                  const batch = await res.json();
-                  setPipelineBatchId(batch.id);
-                }
-              } catch { /* ignore */ }
-            }
-          }}>
-            <UploadIcon size={14} /> Upload Documents
-          </Button>
+        {!selectMode && (
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("rhodes:open-chat"));
+            }}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+              borderRadius: 7, border: "1px solid #ddd9d0", background: "none",
+              cursor: "pointer", color: "#6b6b76", fontSize: 13, fontWeight: 500,
+            }}
+          >
+            <ChatIcon size={14} /> Drop files in chat to upload
+          </button>
         )}
       </div>
 
@@ -4721,6 +4953,24 @@ function DocumentsTab({
         );
       })()}
 
+      {/* Referenced-in filter toggle (spec §5). Hidden when there are no
+          referenced-in documents to toggle. */}
+      {referencedInCount > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <button
+            onClick={() => setShowReferencedIn(v => !v)}
+            style={{
+              background: showReferencedIn ? "rgba(123,77,181,0.10)" : "none",
+              border: "1px solid #ddd9d0", borderRadius: 6,
+              padding: "4px 10px", fontSize: 12, color: "#6b6b76",
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            {showReferencedIn ? "Hide" : "Show"} {referencedInCount} referenced-in {referencedInCount === 1 ? "doc" : "docs"}
+          </button>
+        </div>
+      )}
+
       {/* Document list grouped by category */}
       {documents.length === 0 && expectations.filter((e) => !e.is_not_applicable && !e.is_suggestion && !e.is_satisfied).length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
@@ -4808,9 +5058,19 @@ function DocumentsTab({
                       </div>
                     </div>
 
-                    {doc.link_role && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                        Linked
+                    {doc.joint_title_name && (
+                      <span title={`Held under joint title: ${doc.joint_title_name}`} style={{ fontSize: 10, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.10)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        Joint &mdash; {doc.joint_title_name}
+                      </span>
+                    )}
+                    {doc.link_role && isFirstClassRelatedRole(doc.link_role) && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.10)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        {ROLE_CHIP_LABELS[doc.link_role] || doc.link_role}
+                      </span>
+                    )}
+                    {doc.link_role && isReferencedInRole(doc.link_role) && (
+                      <span title="Document mentions this entity but isn't owned by it" style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", background: "rgba(148,148,160,0.12)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        Referenced ({ROLE_CHIP_LABELS[doc.link_role] || doc.link_role})
                       </span>
                     )}
 
@@ -4889,7 +5149,9 @@ function DocumentsTab({
                         )}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                        {doc.link_role && <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "3px 10px", borderRadius: 4 }}>Linked ({doc.link_role})</span>}
+                        {doc.joint_title_name && <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.10)", padding: "3px 10px", borderRadius: 4 }}>Joint &mdash; {doc.joint_title_name}</span>}
+                        {doc.link_role && isFirstClassRelatedRole(doc.link_role) && <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.10)", padding: "3px 10px", borderRadius: 4 }}>{ROLE_CHIP_LABELS[doc.link_role] || doc.link_role}</span>}
+                        {doc.link_role && isReferencedInRole(doc.link_role) && <span style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", background: "rgba(148,148,160,0.12)", padding: "3px 10px", borderRadius: 4 }}>Referenced ({ROLE_CHIP_LABELS[doc.link_role] || doc.link_role})</span>}
                         {doc.document_type !== "other" && <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>{DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}</span>}
                         {doc.year && <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>{doc.year}</span>}
                       </div>
@@ -4904,10 +5166,6 @@ function DocumentsTab({
                         <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => handleProcess(doc.id)} disabled={processingId === doc.id} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: processingId === doc.id ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#c47520", fontWeight: 500, fontFamily: "inherit" }}>
-                          <SparkleIcon size={12} />
-                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
-                        </button>
                         <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
                         <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
                       </div>
@@ -5564,7 +5822,7 @@ export default function EntityDetailPage() {
 
   /* ---- Derived data ---- */
   const typeLabel = ENTITY_TYPE_LABELS[entity.type] || entity.type;
-  const formationStateName = getStateLabel(entity.formation_state);
+  const formationStateName = entity.formation_state ? getStateLabel(entity.formation_state) : "";
   const additionalRegs = entity.registrations.filter(
     (r) => r.jurisdiction !== entity.formation_state
   );
@@ -5575,15 +5833,39 @@ export default function EntityDetailPage() {
   const relCount = entity.relationships.length;
   const hasCapTable = entity.cap_table.length > 0;
 
+  // Detect parent investor entity from cap table (entity-type investors with investor_entity_id)
+  const parentInvestor = entity.cap_table.find((c) => c.investor_entity_id);
+  const parentEntityId = parentInvestor?.investor_entity_id || null;
+  const parentEntityName = parentInvestor?.investor_name || null;
+
   /* ---- Build tabs ---- */
+  const isPerson = entity.type === "person";
+  const isJointTitle = entity.type === "joint_title";
   const tabs: { id: string; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "compliance", label: "Compliance & Filings" },
   ];
-  tabs.push({ id: "cap_table", label: `Cap Table${hasCapTable ? ` (${entity.cap_table.length})` : ""}` });
-  tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
+  // Joint-title entities have a minimal tab set: Overview, Documents, Investments.
+  if (!isJointTitle) {
+    tabs.push({ id: "compliance", label: "Compliance & Filings" });
+  }
+  // Cap Table: only meaningful for business entities that have a cap table.
+  if (!isPerson && !isJointTitle) {
+    tabs.push({ id: "cap_table", label: `Cap Table${hasCapTable ? ` (${entity.cap_table.length})` : ""}` });
+  }
+  // Family tab: persons only. Shows spouse, parents, children, joint_title memberships.
+  if (isPerson) {
+    tabs.push({ id: "family", label: "Family" });
+  }
+  // Parent investor detection (used for "See Investments" link on Overview)
+  const isParentInvestor = entity.members.length > 0 && !parentEntityId;
+  if (!isJointTitle) {
+    tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
+  }
+  tabs.push({ id: "investments", label: "Investments" });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
-  tabs.push({ id: "activity", label: "Activity" });
+  if (!isJointTitle) {
+    tabs.push({ id: "activity", label: "Activity" });
+  }
 
   /* ---- Handlers for sub-components ---- */
   function handleRegistrationsChange(regs: EntityRegistration[]) {
@@ -5673,6 +5955,22 @@ export default function EntityDetailPage() {
               )}
             </h1>
             <EntityActionMenu entityId={entityId} entityName={entity.name} router={router} isMobile={isMobile} />
+            {!isMobile && (
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("rhodes:open-chat", { detail: { query: `Tell me about ${entity.name}` } }));
+                }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "4px 10px", borderRadius: 6,
+                  border: "1px solid rgba(45,90,61,0.2)", background: "rgba(45,90,61,0.04)",
+                  cursor: "pointer", color: "#2d5a3d", fontSize: 12, fontWeight: 500,
+                  flexShrink: 0,
+                }}
+              >
+                <SparkleIcon size={12} /> Ask about this
+              </button>
+            )}
           </div>
 
           {/* Subtitle row */}
@@ -5694,8 +5992,12 @@ export default function EntityDetailPage() {
               </>
             )}
             <span>{typeLabel}</span>
-            <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
-            <span>{formationStateName}</span>
+            {formationStateName && (
+              <>
+                <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
+                <span>{isPerson ? `Residence: ${formationStateName}` : formationStateName}</span>
+              </>
+            )}
             {regString && (
               <>
                 <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
@@ -5794,68 +6096,144 @@ export default function EntityDetailPage() {
       {isMobile && <div style={{ height: 16 }} />}
 
       {/* Overview Tab */}
-      {activeTab === "overview" && (
+      {activeTab === "overview" && isJointTitle && (
+        <JointTitleOverview
+          jointTitleId={entityId}
+          jointTitleName={entity.name}
+          status={entity.status}
+          onStatusChange={() => fetchEntity()}
+        />
+      )}
+
+      {activeTab === "overview" && !isJointTitle && (
         <>
-          {/* First row: Entity Information + Document Completeness */}
-          <div id="overview" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
+          {/* See Investments link for parent investor entities */}
+          {isParentInvestor && (
+            <div style={{
+              marginBottom: 20, padding: "12px 16px", background: "rgba(45,90,61,0.04)",
+              border: "1px solid rgba(45,90,61,0.12)", borderRadius: 10,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <span style={{ fontSize: 13, color: "#2d5a3d" }}>
+                <ChartIcon size={16} /> This entity has investments tracked separately.
+              </span>
+              <button
+                onClick={() => router.push(`/investments?parent_entity_id=${entityId}`)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: "#2d5a3d", fontSize: 13, fontWeight: 600, padding: 0,
+                }}
+              >
+                See Investments &rarr;
+              </button>
+            </div>
+          )}
+          {/* First row: Entity Information + Document Completeness.
+              Persons get a single full-width Personal Information card —
+              there's no Document Completeness for persons (none of the
+              business-entity-driven expectations apply, and personal-doc
+              expectations are not yet modelled). */}
+          <div id="overview" style={{ display: "grid", gridTemplateColumns: isPerson || isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
             {/* Left: Entity Information */}
             <Card>
-              <SectionHeader>Entity Information</SectionHeader>
+              <SectionHeader>{isPerson ? "Personal Information" : "Entity Information"}</SectionHeader>
 
-              <InfoRow label="EIN">
-                <span style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {entity.ein || "\u2014"}
-                </span>
+              {/* EIN — businesses only. (Persons technically can have EINs
+                  for sole proprietorships, but this field is meant for the
+                  entity-side EIN, not the person's individual EIN.) */}
+              {!isPerson && (
+                <InfoRow label="EIN">
+                  <span style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {entity.ein || "\u2014"}
+                  </span>
+                </InfoRow>
+              )}
+
+              {/* Formed — businesses only. People are born, not formed. */}
+              {!isPerson && (
+                <InfoRow label="Formed">{formatDate(entity.formed_date)}</InfoRow>
+              )}
+
+              <InfoRow label={isPerson ? "Residence State" : "Formation State"}>{formationStateName}</InfoRow>
+
+              {/* SSN Last 4 — persons only, used to disambiguate identically-
+                  named people. We never store more than the last 4. */}
+              {isPerson && (
+                <InfoRow label="SSN Last 4">
+                  <span style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {entity.ssn_last_4 ? `••• •• ${entity.ssn_last_4}` : "\u2014"}
+                  </span>
+                </InfoRow>
+              )}
+
+              {/* Aliases — feeds document analysis name-matching. Shown for
+                  any entity type that has them set, but featured for persons. */}
+              <InfoRow label="Also Known As">
+                {entity.aliases && entity.aliases.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {entity.aliases.map((a, i) => (
+                      <span key={i} style={{ fontSize: 12, fontWeight: 500, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4 }}>{a}</span>
+                    ))}
+                  </div>
+                ) : "\u2014"}
               </InfoRow>
 
-              <InfoRow label="Formed">{formatDate(entity.formed_date)}</InfoRow>
+              {!isPerson && (
+                <LegalStructureRow
+                  entityId={entityId}
+                  currentValue={entity.legal_structure}
+                  onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, legal_structure: val } : prev))}
+                />
+              )}
 
-              <InfoRow label="Formation State">{formationStateName}</InfoRow>
-
-              <LegalStructureRow
-                entityId={entityId}
-                currentValue={entity.legal_structure}
-                onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, legal_structure: val } : prev))}
-              />
-
-              <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
+              {!isPerson && (
+                <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
+              )}
 
               <InfoRow label="Address">{entity.address || "\u2014"}</InfoRow>
 
-              {/* Registration States */}
-              <RegistrationStatesRow
-                entityId={entityId}
-                formationState={entity.formation_state}
-                registrations={entity.registrations}
-                onRegistrationsChange={handleRegistrationsChange}
-              />
+              {/* Registration States — businesses only (persons don't have
+                  state filing registrations). */}
+              {!isPerson && (
+                <RegistrationStatesRow
+                  entityId={entityId}
+                  formationState={entity.formation_state || ""}
+                  registrations={entity.registrations}
+                  onRegistrationsChange={handleRegistrationsChange}
+                />
+              )}
 
-              {/* Managers */}
-              <PersonRow
-                entityId={entityId}
-                label="Managers"
-                persons={entity.managers}
-                apiPath="managers"
-                deleteIdKey="manager_id"
-                picklist={picklist}
-                picklistLoading={picklistLoading}
-                onPersonsChange={handleManagersChange}
-              />
+              {/* Managers / Members / Partnership Rep / Business Purpose /
+                  Other Roles — all governance concepts that only apply to
+                  legal entities (LLCs, partnerships, etc.). Persons don't
+                  have managers or members. */}
+              {!isPerson && (
+                <PersonRow
+                  entityId={entityId}
+                  label="Managers"
+                  persons={entity.managers}
+                  apiPath="managers"
+                  deleteIdKey="manager_id"
+                  picklist={picklist}
+                  picklistLoading={picklistLoading}
+                  onPersonsChange={handleManagersChange}
+                />
+              )}
 
-              {/* Members */}
-              <PersonRow
-                entityId={entityId}
-                label="Members"
-                persons={entity.members}
-                apiPath="members"
-                deleteIdKey="member_id"
-                picklist={picklist}
-                picklistLoading={picklistLoading}
-                onPersonsChange={handleMembersChange}
-              />
+              {!isPerson && (
+                <PersonRow
+                  entityId={entityId}
+                  label="Members"
+                  persons={entity.members}
+                  apiPath="members"
+                  deleteIdKey="member_id"
+                  picklist={picklist}
+                  picklistLoading={picklistLoading}
+                  onPersonsChange={handleMembersChange}
+                />
+              )}
 
-              {/* Partnership Representative (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <PersonRow
                   entityId={entityId}
                   label="Partnership Rep"
@@ -5868,15 +6246,13 @@ export default function EntityDetailPage() {
                 />
               )}
 
-              {/* Business Purpose (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <InfoRow label="Business Purpose">
                   {entity.business_purpose || "\u2014"}
                 </InfoRow>
               )}
 
-              {/* Other Roles (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <OtherRolesSection
                   entityId={entityId}
                   roles={entity.roles}
@@ -5887,26 +6263,46 @@ export default function EntityDetailPage() {
               )}
             </Card>
 
-            {/* Right: Document Completeness */}
-            <DocumentCompletenessCard
-              entityId={entityId}
-              onNavigateDocs={() => setActiveTab("documents")}
-              initialExpectations={entity?.expectations as Expectation[] | undefined}
-            />
+            {/* Right: Document Completeness — businesses only. The current
+                expectation engine seeds only entity-formation docs (Cert of
+                Formation, Operating Agreement, EIN Letter), none of which
+                apply to a person. Personal-document expectations (1040, K-1s
+                received, 1099s, W-2s) would need a separate rule set. */}
+            {!isPerson && (
+              <DocumentCompletenessCard
+                entityId={entityId}
+                onNavigateDocs={() => setActiveTab("documents")}
+                initialExpectations={entity?.expectations as Expectation[] | undefined}
+              />
+            )}
           </div>
 
-          {/* Second row: Relationships Summary + Cap Table Summary */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
-            <RelationshipsSummaryCard
-              relationships={entity.relationships}
-              entityId={entityId}
-              onViewAll={() => setActiveTab("relationships")}
-            />
-            <CapTableSummaryCard
-              capTable={entity.cap_table}
-              onViewAll={() => setActiveTab("cap_table")}
-            />
-          </div>
+          {/* Second row: Relationships Summary + Cap Table Summary.
+              Cap Table is hidden for persons (already hidden as a tab too).
+              Relationships card is kept since persons can be parties to
+              business relationships. */}
+          {!isPerson && (
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
+              <RelationshipsSummaryCard
+                relationships={entity.relationships}
+                entityId={entityId}
+                onViewAll={() => setActiveTab("relationships")}
+              />
+              <CapTableSummaryCard
+                capTable={entity.cap_table}
+                onViewAll={() => setActiveTab("cap_table")}
+              />
+            </div>
+          )}
+          {isPerson && (
+            <div style={{ marginBottom: 20 }}>
+              <RelationshipsSummaryCard
+                relationships={entity.relationships}
+                entityId={entityId}
+                onViewAll={() => setActiveTab("relationships")}
+              />
+            </div>
+          )}
 
           {/* Trust Details (conditional) */}
           {entity.type === "trust" && entity.trust_details && (
@@ -5940,7 +6336,7 @@ export default function EntityDetailPage() {
       {activeTab === "compliance" && (
         <ComplianceTab
           entityId={entityId}
-          formationState={entity.formation_state}
+          formationState={entity.formation_state || ""}
           registrations={entity.registrations}
           formedDate={entity.formed_date}
           legalStructure={entity.legal_structure}
@@ -5962,6 +6358,16 @@ export default function EntityDetailPage() {
           relationships={entity.relationships}
           entityId={entityId}
         />
+      )}
+
+      {/* Family Tab (persons only) */}
+      {activeTab === "family" && (
+        <FamilyTab personId={entityId} personName={entity.name} />
+      )}
+
+      {/* Investments Tab */}
+      {activeTab === "investments" && (
+        <EntityInvestmentsTab entityId={entityId} entityName={entity.name} />
       )}
 
       {/* Documents Tab */}
@@ -6099,6 +6505,23 @@ export default function EntityDetailPage() {
                 } else if (a === "update_obligation" || (a === "edit" && rt === "compliance_obligation")) {
                   title = "Updated compliance obligation";
                   if (meta.status) detail = `Status: ${meta.status}`;
+                } else if (a === "create" && rt === "investment_allocation") {
+                  title = "Updated investment allocations";
+                  const mc = meta.member_count as number | undefined;
+                  const dc = meta.deactivated_count as number | undefined;
+                  const parts: string[] = [];
+                  if (mc) parts.push(`${mc} member${mc !== 1 ? "s" : ""}`);
+                  if (dc) parts.push(`${dc} deactivated`);
+                  detail = parts.join(", ");
+                } else if (a === "delete" && rt === "investment_allocation") {
+                  title = "Deactivated investment allocation";
+                } else if (a === "create" && rt === "investment_transaction") {
+                  const txnType = meta.transaction_type ? String(meta.transaction_type).replace(/_/g, " ") : "transaction";
+                  const amt = meta.amount as number | undefined;
+                  title = `Recorded ${txnType}`;
+                  if (amt) detail = `$${Number(amt).toLocaleString()} · ${meta.member_count || 0} member splits`;
+                } else if (a === "delete" && rt === "investment_transaction") {
+                  title = "Deleted investment transaction";
                 } else if (a === "create" && rt === "relationship") {
                   title = "Created relationship";
                 } else if (a === "upload" && rt === "pipeline") {

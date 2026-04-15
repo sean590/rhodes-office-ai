@@ -78,6 +78,22 @@ const PAGE_STRATEGIES: Record<string, PageSelectionStrategy> = {
       "This is a trust agreement. Key provisions are in the first 20-30 pages. Extract: trust name, trust type (revocable/irrevocable), trust date, grantor, trustees, successor trustees, beneficiaries, situs state, purpose.",
   },
 
+  // Investment / equity financing agreements
+  series_seed_agreement: {
+    visual_pages: "first_n",
+    visual_first_n: 30,
+    include_full_text: true,
+    extraction_hint:
+      "This is an equity financing agreement (Series Seed, Series A, SAFE, convertible note, or similar). Key terms — company name, investor list, share class, price per share, valuation, closing date, ownership percentages, board composition — are typically in the first 20-30 pages. Signature pages, exhibits, schedules, and stock certificates follow. Extract: company (investment target) name, investment round name, closing date, investors and their investment amounts, share counts, post-money valuation, and any pro-rata or anti-dilution terms. The user's entity (the investor) should be identifiable from the investor schedule. This is an EXTERNAL INVESTMENT — use create_investment, not create_entity.",
+  },
+  investment_agreement: {
+    visual_pages: "first_n",
+    visual_first_n: 30,
+    include_full_text: true,
+    extraction_hint:
+      "This is an investment agreement. Key terms are typically in the first 20-30 pages; exhibits and schedules follow. Extract: counterparty/target name, investment amount, closing date, share class or instrument type, and any material terms (liquidation preference, pro-rata, board rights). This is an EXTERNAL INVESTMENT — use create_investment, not create_entity.",
+  },
+
   // Default
   _default: {
     visual_pages: "first_n",
@@ -99,6 +115,15 @@ export interface PDFAnalysis {
 
 /**
  * Analyze a PDF and determine the extraction strategy.
+ *
+ * Tier thresholds are governed by the Anthropic context window (200k tokens),
+ * NOT Claude's nominal 100-page PDF file limit. Each rendered PDF page costs
+ * roughly 1700 input tokens, so a 96-page PDF alone would consume ~163k
+ * tokens before any system prompt — well past the 200k window once you add
+ * the org context (~30-50k) and extraction schema (~5k). The "short" tier
+ * sends the whole PDF as a single base64 document and is only safe for ~20
+ * pages of full-resolution rendering. Anything larger takes the text +
+ * selective-visual path.
  */
 export async function analyzePdf(
   buffer: Buffer,
@@ -108,12 +133,43 @@ export async function analyzePdf(
   const pageCount = pdfDoc.getPageCount();
 
   let tier: "short" | "medium" | "long";
-  if (pageCount <= 100) tier = "short";
-  else if (pageCount <= 200) tier = "medium";
+  if (pageCount <= 20) tier = "short";
+  else if (pageCount <= 100) tier = "medium";
   else tier = "long";
 
-  const strategy =
+  // Clone the strategy so we can clamp visual page counts without mutating
+  // the shared PAGE_STRATEGIES map.
+  const baseStrategy =
     PAGE_STRATEGIES[stagedDocType || ""] || PAGE_STRATEGIES["_default"];
+  const strategy: PageSelectionStrategy = { ...baseStrategy };
+
+  // Defense in depth: no matter what the strategy says, never send more
+  // visual pages than fit in a realistic token budget. Claude renders each
+  // PDF page as ~1700 input tokens. Reserve ~80k for visual content
+  // (~47 pages), leaving headroom for system prompt + schema + extracted
+  // text + output budget inside the 200k window.
+  const TOKENS_PER_PDF_PAGE = 1700;
+  const VISUAL_TOKEN_BUDGET = 80_000;
+  const maxVisualPages = Math.floor(VISUAL_TOKEN_BUDGET / TOKENS_PER_PDF_PAGE);
+
+  if (strategy.visual_pages === "first_n" && strategy.visual_first_n) {
+    strategy.visual_first_n = Math.min(strategy.visual_first_n, maxVisualPages);
+  } else if (strategy.visual_pages === "specific_ranges" && strategy.visual_page_ranges) {
+    let budgetRemaining = maxVisualPages;
+    const clampedRanges: Array<[number, number]> = [];
+    for (const [start, end] of strategy.visual_page_ranges) {
+      if (budgetRemaining <= 0) break;
+      const rangeLength = end - start + 1;
+      if (rangeLength <= budgetRemaining) {
+        clampedRanges.push([start, end]);
+        budgetRemaining -= rangeLength;
+      } else {
+        clampedRanges.push([start, start + budgetRemaining - 1]);
+        budgetRemaining = 0;
+      }
+    }
+    strategy.visual_page_ranges = clampedRanges;
+  }
 
   return { page_count: pageCount, file_size: buffer.length, tier, strategy };
 }
@@ -190,9 +246,18 @@ export async function buildPdfContent(
     if (strategy.include_full_text) {
       const fullText = await extractFullText(buffer);
       if (fullText) {
+        // Cap extracted text at ~120k tokens (~480k chars at 4 chars/token)
+        // to leave room for visual pages, system prompt, and output budget.
+        // Covers the "500-page deposition transcript" edge case where even
+        // the text alone could blow the input budget.
+        const MAX_TEXT_CHARS = 480_000;
+        const clipped = fullText.length > MAX_TEXT_CHARS
+          ? fullText.slice(0, MAX_TEXT_CHARS) +
+            `\n\n[... text truncated: showing first ${MAX_TEXT_CHARS.toLocaleString()} of ${fullText.length.toLocaleString()} characters from ${analysis.page_count} total pages. Key terms are typically in the earlier pages; exhibits and schedules follow. Focus on extracting structured data from the text shown above plus the visual pages that follow.]`
+          : fullText;
         content.push({
           type: "text",
-          text: `## Full Document Text (${analysis.page_count} pages)\n\n${fullText}`,
+          text: `## Full Document Text (${analysis.page_count} pages)\n\n${clipped}`,
         });
       }
       // If text extraction failed, we'll rely on visual pages only (below).

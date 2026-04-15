@@ -6,6 +6,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRuleById, calculateNextDueDateAfterCompletion } from "@/lib/utils/compliance-engine";
 import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
+import { invalidateOrgCaches } from "@/lib/utils/chat-context";
+import {
+  validateInvestmentTransactionLineItems,
+  coerceLineItemCategories,
+  type TransactionLineItemInput,
+} from "@/lib/validations";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -37,12 +43,22 @@ export async function applyActions(
   const createdTrustDetailIds = new Map<string, string>();
   // Map indexed placeholders (new_entity_0, new_entity_1, ...) to real entity IDs
   const placeholderMap: Record<string, string> = {};
+  // Map investment placeholders (new_investment_0, new_investment_1, ...) to real investment IDs
+  const investmentPlaceholderMap: Record<string, string> = {};
 
   const resolveEntityId = (value: unknown): string | null => {
     if (typeof value === "string" && UUID_REGEX.test(value)) return value;
     // Check indexed placeholder (new_entity_0, new_entity_1, ...)
     if (typeof value === "string" && placeholderMap[value]) return placeholderMap[value];
     return firstCreatedEntityId || options.existingEntityId || null;
+  };
+
+  const resolveInvestmentId = (value: unknown, fallbackName?: unknown): string | null => {
+    if (typeof value === "string" && UUID_REGEX.test(value)) return value;
+    if (typeof value === "string" && investmentPlaceholderMap[value]) return investmentPlaceholderMap[value];
+    // Try fallback name (e.g., investment_name field)
+    if (typeof fallbackName === "string" && investmentPlaceholderMap[fallbackName]) return investmentPlaceholderMap[fallbackName];
+    return null;
   };
 
   for (const item of actions) {
@@ -196,7 +212,8 @@ export async function applyActions(
           if (!memberDirId) {
             const { data: dirEntries } = await supabase
               .from("directory_entries")
-              .select("id, name, aliases");
+              .select("id, name, aliases")
+              .eq("organization_id", options.orgId);
             if (dirEntries) {
               const match = findDirectoryMatch(memberName, dirEntries);
               if (match) memberDirId = match.id;
@@ -255,7 +272,8 @@ export async function applyActions(
           let managerDirId: string | null = null;
           const { data: mgrDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
           if (mgrDirEntries) {
             const match = findDirectoryMatch(managerName, mgrDirEntries);
             if (match) managerDirId = match.id;
@@ -350,7 +368,8 @@ export async function applyActions(
           let trustRoleDirId: string | null = null;
           const { data: trDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
           if (trDirEntries) {
             const match = findDirectoryMatch(trustRoleName, trDirEntries);
             if (match) trustRoleDirId = match.id;
@@ -433,7 +452,8 @@ export async function applyActions(
           let capDirId: string | null = null;
           const { data: capDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
           if (capDirEntries) {
             const dirMatch = findDirectoryMatch(investorName, capDirEntries);
             if (dirMatch) capDirId = dirMatch.id;
@@ -518,11 +538,12 @@ export async function applyActions(
         }
 
         case "create_directory_entry": {
-          // Skip if a directory entry with this name already exists (checking aliases too)
+          // Skip if a directory entry with this name already exists in this org (checking aliases too)
           const dirEntryName = item.data.name as string;
           const { data: allDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
 
           const existing = allDirEntries ? findDirectoryMatch(dirEntryName, allDirEntries) : null;
 
@@ -580,7 +601,8 @@ export async function applyActions(
           let repDirId: string | null = null;
           const { data: repDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
           if (repDirEntries) {
             const match = findDirectoryMatch(repName, repDirEntries);
             if (match) repDirId = match.id;
@@ -610,7 +632,8 @@ export async function applyActions(
           let roleDirId: string | null = null;
           const { data: roleDirEntries } = await supabase
             .from("directory_entries")
-            .select("id, name, aliases");
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
           if (roleDirEntries) {
             const match = findDirectoryMatch(roleName, roleDirEntries);
             if (match) roleDirId = match.id;
@@ -735,6 +758,431 @@ export async function applyActions(
           break;
         }
 
+        case "create_investment": {
+          const invName = item.data.name as string;
+          if (!invName) throw new Error("Investment name is required");
+
+          // Create the investment (deal metadata only — no parent_entity_id, no capital/profit)
+          const { data: newInvestment, error: invErr } = await supabase
+            .from("investments")
+            .insert({
+              organization_id: options.orgId,
+              name: invName,
+              short_name: (item.data.short_name as string) || null,
+              investment_type: (item.data.investment_type as string) || "other",
+              status: "active",
+              description: (item.data.description as string) || null,
+              formation_state: (item.data.formation_state as string) || null,
+              preferred_return_pct: item.data.preferred_return_pct != null ? Number(item.data.preferred_return_pct) : null,
+              preferred_return_basis: (item.data.preferred_return_basis as string) || null,
+            })
+            .select()
+            .single();
+
+          if (invErr) throw invErr;
+
+          // Create investor row if parent_entity_id is provided
+          const invParentEntityId = resolveEntityId(item.data.parent_entity_id);
+          if (invParentEntityId) {
+            await supabase.from("investment_investors").insert({
+              organization_id: options.orgId,
+              investment_id: newInvestment.id,
+              entity_id: invParentEntityId,
+              capital_pct: item.data.ownership_pct != null ? Number(item.data.ownership_pct) : (item.data.capital_pct != null ? Number(item.data.capital_pct) : null),
+              profit_pct: item.data.profit_pct != null ? Number(item.data.profit_pct) : null,
+              committed_capital: item.data.committed_capital != null ? Number(item.data.committed_capital) : null,
+              is_active: true,
+            });
+          }
+
+          // Store placeholder mapping (e.g., new_investment_0 → real UUID)
+          const invPlaceholder = `new_investment_${Object.keys(investmentPlaceholderMap).length}`;
+          investmentPlaceholderMap[invPlaceholder] = newInvestment.id;
+          // Also map any placeholder that was used in the original action data
+          if (typeof item.data.investment_id === "string" && !UUID_REGEX.test(item.data.investment_id)) {
+            investmentPlaceholderMap[item.data.investment_id] = newInvestment.id;
+          }
+          // Map by investment name so link_document_to_investment can resolve by name
+          if (invName) {
+            investmentPlaceholderMap[invName] = newInvestment.id;
+          }
+
+          results.push({
+            action: "create_investment",
+            success: true,
+            data: { investment_id: newInvestment.id, name: invName },
+          });
+          break;
+        }
+
+        case "link_document_to_investment": {
+          const linkInvestmentId = resolveInvestmentId(item.data.investment_id, item.data.investment_name);
+          if (!linkInvestmentId) throw new Error("Could not resolve investment_id");
+
+          // Get first investor's entity_id to also set entity_id on the document
+          const { data: linkInvestor } = await supabase
+            .from("investment_investors")
+            .select("entity_id")
+            .eq("investment_id", linkInvestmentId)
+            .eq("is_active", true)
+            .limit(1)
+            .maybeSingle();
+
+          // Determine which document to link — check action data first, then fall back to options
+          let linkDocId = item.data.document_id as string | null;
+          if (!linkDocId && item.data.queue_item_id) {
+            const { data: qItem } = await supabase.from("document_queue").select("document_id").eq("id", item.data.queue_item_id as string).maybeSingle();
+            linkDocId = qItem?.document_id || null;
+          }
+          if (!linkDocId) linkDocId = options.documentId || null;
+
+          if (linkDocId) {
+            await supabase
+              .from("documents")
+              .update({
+                investment_id: linkInvestmentId,
+                entity_id: linkInvestor?.entity_id || undefined,
+              })
+              .eq("id", linkDocId);
+          }
+
+          results.push({
+            action: "link_document_to_investment",
+            success: true,
+            data: { investment_id: linkInvestmentId, document_id: linkDocId },
+          });
+          break;
+        }
+
+        case "set_investment_allocations": {
+          const allocInvestmentId = resolveInvestmentId(item.data.investment_id, item.data.investment_name);
+          if (!allocInvestmentId) throw new Error("Could not resolve investment_id for allocations");
+
+          // Look up the investment_investor_id
+          let allocInvestorId = item.data.investment_investor_id as string | null;
+          if (!allocInvestorId) {
+            const parentEntityId = resolveEntityId(item.data.parent_entity_id);
+            let investorQuery = supabase
+              .from("investment_investors")
+              .select("id")
+              .eq("investment_id", allocInvestmentId)
+              .eq("is_active", true);
+            if (parentEntityId) {
+              investorQuery = investorQuery.eq("entity_id", parentEntityId);
+            }
+            const { data: investorRow } = await investorQuery.limit(1).single();
+            allocInvestorId = investorRow?.id || null;
+          }
+
+          if (!allocInvestorId) throw new Error("Could not find investor position for allocations");
+
+          const allocations = item.data.allocations as Array<{
+            member_name: string;
+            allocation_pct: number;
+            committed_amount?: number | null;
+          }>;
+          if (!Array.isArray(allocations) || allocations.length === 0) {
+            throw new Error("allocations array is required");
+          }
+
+          // Get the investor entity so we can validate members belong to it
+          const { data: investorRow } = await supabase
+            .from("investment_investors")
+            .select("entity_id")
+            .eq("id", allocInvestorId)
+            .single();
+          const investorEntityId = investorRow?.entity_id;
+
+          // Fetch actual members of the investor entity
+          let validMemberDirIds = new Set<string>();
+          let validMemberEntityIds = new Set<string>();
+          if (investorEntityId) {
+            const { data: entityMembers } = await supabase
+              .from("entity_members")
+              .select("directory_entry_id, ref_entity_id")
+              .eq("entity_id", investorEntityId);
+            for (const m of entityMembers || []) {
+              if (m.directory_entry_id) validMemberDirIds.add(m.directory_entry_id);
+              if (m.ref_entity_id) validMemberEntityIds.add(m.ref_entity_id);
+            }
+          }
+
+          // Resolve member names — only allow members that belong to the investor entity
+          const { data: dirEntries } = await supabase
+            .from("directory_entries")
+            .select("id, name, aliases")
+            .eq("organization_id", options.orgId);
+
+          const { data: allEntities } = await supabase
+            .from("entities")
+            .select("id, name, short_name")
+            .eq("organization_id", options.orgId);
+
+          const resolvedAllocations: Array<{
+            member_directory_id: string | null;
+            member_entity_id: string | null;
+            allocation_pct: number;
+            committed_amount: number | null;
+          }> = [];
+
+          for (const alloc of allocations) {
+            // Try directory entries first
+            const dirMatch = dirEntries ? findDirectoryMatch(alloc.member_name, dirEntries) : null;
+            if (dirMatch) {
+              // Validate this person is a member of the investor entity
+              if (validMemberDirIds.size > 0 && !validMemberDirIds.has(dirMatch.id)) {
+                console.warn(`[APPLY] Skipping allocation for "${alloc.member_name}" — not a member of investor entity`);
+                continue;
+              }
+              resolvedAllocations.push({
+                member_directory_id: dirMatch.id,
+                member_entity_id: null,
+                allocation_pct: alloc.allocation_pct,
+                committed_amount: alloc.committed_amount ?? null,
+              });
+              continue;
+            }
+
+            // Try entities by name
+            const entityMatch = (allEntities || []).find((e: { name: string; short_name: string | null }) =>
+              normalizeName(e.name) === normalizeName(alloc.member_name) ||
+              (e.short_name && normalizeName(e.short_name) === normalizeName(alloc.member_name)) ||
+              normalizeName(e.name).includes(normalizeName(alloc.member_name)) ||
+              normalizeName(alloc.member_name).includes(normalizeName(e.name))
+            );
+            if (entityMatch) {
+              // Validate this entity is a member of the investor entity
+              if (validMemberEntityIds.size > 0 && !validMemberEntityIds.has(entityMatch.id)) {
+                console.warn(`[APPLY] Skipping allocation for "${alloc.member_name}" — not a member of investor entity`);
+                continue;
+              }
+              resolvedAllocations.push({
+                member_directory_id: null,
+                member_entity_id: entityMatch.id,
+                allocation_pct: alloc.allocation_pct,
+                committed_amount: alloc.committed_amount ?? null,
+              });
+              continue;
+            }
+
+            // Skip unresolvable members
+            console.warn(`[APPLY] Could not resolve allocation member: "${alloc.member_name}"`);
+          }
+
+          if (resolvedAllocations.length === 0) {
+            throw new Error("No allocations could be resolved to members of the investor entity");
+          }
+
+          // Deactivate existing allocations for this investor, then insert fresh
+          await supabase
+            .from("investment_allocations")
+            .update({ is_active: false, updated_at: new Date().toISOString() })
+            .eq("investment_investor_id", allocInvestorId)
+            .eq("is_active", true);
+
+          for (const alloc of resolvedAllocations) {
+            const insertData: Record<string, unknown> = {
+              organization_id: options.orgId,
+              investment_investor_id: allocInvestorId,
+              allocation_pct: alloc.allocation_pct,
+              committed_amount: alloc.committed_amount,
+              is_active: true,
+            };
+            if (alloc.member_directory_id) insertData.member_directory_id = alloc.member_directory_id;
+            if (alloc.member_entity_id) insertData.member_entity_id = alloc.member_entity_id;
+            await supabase.from("investment_allocations").insert(insertData);
+          }
+
+          results.push({
+            action: "set_investment_allocations",
+            success: true,
+            data: { investment_investor_id: allocInvestorId, count: resolvedAllocations.length },
+          });
+          break;
+        }
+
+        case "record_investment_transaction": {
+          const txnInvestmentId = resolveInvestmentId(item.data.investment_id, item.data.investment_name);
+          if (!txnInvestmentId) throw new Error("Could not resolve investment_id for transaction");
+
+          // Look up the investment_investor row.
+          //
+          // Resolution rules:
+          //   1. If investment_investor_id was provided directly, use it.
+          //   2. If parent_entity_id was provided, it MUST match an existing
+          //      investor row (or we auto-create one for that entity). We
+          //      never silently fall back to "any other investor" — the
+          //      previous fallback caused all transactions to pile onto a
+          //      single investor when the model emitted unmatched UUIDs.
+          //   3. If neither was provided, fall back to "any active investor"
+          //      ONLY when there's exactly one investor on the deal
+          //      (unambiguous). With multiple investors, refuse — we can't
+          //      guess.
+          let txnInvestorId = item.data.investment_investor_id as string | null;
+          const txnParentEntityId = resolveEntityId(item.data.parent_entity_id);
+          if (!txnInvestorId) {
+            if (txnParentEntityId) {
+              const { data: exactRow } = await supabase
+                .from("investment_investors")
+                .select("id")
+                .eq("investment_id", txnInvestmentId)
+                .eq("entity_id", txnParentEntityId)
+                .eq("is_active", true)
+                .limit(1)
+                .maybeSingle();
+              txnInvestorId = exactRow?.id || null;
+              // If still null, the auto-create block below handles it.
+            } else {
+              // No parent_entity_id given — only auto-pick when unambiguous.
+              const { data: candidates } = await supabase
+                .from("investment_investors")
+                .select("id")
+                .eq("investment_id", txnInvestmentId)
+                .eq("is_active", true);
+              if (candidates && candidates.length === 1) {
+                txnInvestorId = candidates[0].id;
+              } else if (candidates && candidates.length > 1) {
+                throw new Error(
+                  `Investment has ${candidates.length} active investors but parent_entity_id was not provided. ` +
+                  `Specify which investor's transaction this is.`
+                );
+              }
+            }
+          }
+
+          // Auto-create investor position if we have an entity but no investor row.
+          if (!txnInvestorId && txnParentEntityId) {
+            const { data: newInvestor, error: createInvestorErr } = await supabase
+              .from("investment_investors")
+              .insert({
+                organization_id: options.orgId,
+                investment_id: txnInvestmentId,
+                entity_id: txnParentEntityId,
+                is_active: true,
+              })
+              .select("id")
+              .single();
+            if (createInvestorErr) {
+              // Most common cause: parent_entity_id is a UUID that doesn't
+              // exist in the entities table — i.e., the chat model made it
+              // up. Fail loudly so we never silently route the transaction.
+              throw new Error(
+                `Could not create investor position for entity ${txnParentEntityId}: ${createInvestorErr.message}. ` +
+                `This usually means the entity UUID doesn't exist — verify the parent_entity_id matches a real entity.`
+              );
+            }
+            txnInvestorId = newInvestor?.id || null;
+          }
+
+          if (!txnInvestorId) throw new Error("Could not find or create investor position for transaction");
+
+          const txnType = item.data.transaction_type as string;
+          const txnAmount = Number(item.data.amount);
+          const txnDate = item.data.transaction_date as string;
+          const txnDescription = (item.data.description as string) || null;
+          const adjustsTransactionId = (item.data.adjusts_transaction_id as string) || null;
+          const adjustmentReason = (item.data.adjustment_reason as string) || null;
+
+          if (!["contribution", "distribution", "return_of_capital"].includes(txnType)) {
+            throw new Error(`Invalid transaction_type: ${txnType}`);
+          }
+          if (!Number.isFinite(txnAmount)) throw new Error("amount is required and must be a number");
+          if (!adjustsTransactionId && txnAmount <= 0) throw new Error("amount must be positive on non-adjustment rows");
+          if (!txnDate) throw new Error("transaction_date is required");
+
+          // Normalize line_items, then auto-coerce common AI category mistakes
+          // (audit_tax_expense ↔ compliance_holdback), then validate via the
+          // shared helper so the chat-apply path can never write a row that
+          // the HTTP routes would reject. Spec 036.
+          const rawLineItems = item.data.line_items;
+          const normalizedLineItemsRaw: TransactionLineItemInput[] = Array.isArray(rawLineItems)
+            ? (rawLineItems as Array<Record<string, unknown>>)
+                .map((li) => ({
+                  category: li.category as TransactionLineItemInput["category"],
+                  amount: Number(li.amount),
+                  description: (li.description as string) ?? null,
+                }))
+                .filter((li) => Number.isFinite(li.amount) && typeof li.category === "string")
+            : [];
+          const normalizedLineItems = coerceLineItemCategories(
+            txnType as "contribution" | "distribution" | "return_of_capital",
+            normalizedLineItemsRaw,
+          );
+
+          const lineItemCheck = validateInvestmentTransactionLineItems({
+            transaction_type: txnType as "contribution" | "distribution" | "return_of_capital",
+            amount: txnAmount,
+            line_items: normalizedLineItems,
+            adjusts_transaction_id: adjustsTransactionId,
+          });
+          if (!lineItemCheck.ok) throw new Error(lineItemCheck.error);
+
+          // If this is an adjustment, verify the referenced row exists in the
+          // same org and points at the same investor.
+          if (adjustsTransactionId) {
+            const { data: original } = await supabase
+              .from("investment_transactions")
+              .select("id, organization_id, investment_investor_id")
+              .eq("id", adjustsTransactionId)
+              .maybeSingle();
+            if (!original) throw new Error("adjusts_transaction_id does not reference an existing transaction");
+            if (original.organization_id !== options.orgId) throw new Error("adjustment must belong to the same organization");
+            if (original.investment_investor_id !== txnInvestorId) {
+              throw new Error("adjustment must reference the same investor position as the original");
+            }
+          }
+
+          // Resolve document_id with the same fallback chain that
+          // link_document_to_investment uses: prefer the action's own
+          // data.document_id (set by chat-apply-actions enrichment for
+          // multi-PDF batches), then look it up via queue_item_id, then
+          // fall back to the batch-level options.documentId. This ensures
+          // each transaction is linked to ITS specific source document, not
+          // just whichever one happened to be first in the batch.
+          let txnDocId = (item.data.document_id as string) || null;
+          if (!txnDocId && item.data.queue_item_id) {
+            const { data: qItem } = await supabase
+              .from("document_queue")
+              .select("document_id")
+              .eq("id", item.data.queue_item_id as string)
+              .maybeSingle();
+            txnDocId = qItem?.document_id || null;
+          }
+          if (!txnDocId) txnDocId = options.documentId || null;
+
+          // Single insert. The line_items live in a JSONB column on the
+          // parent row — no child rows, no parent_transaction_id involved.
+          // Spec 036 supersedes the previously-shipped child-row pattern.
+          const { data: parentTxn, error: parentTxnErr } = await supabase
+            .from("investment_transactions")
+            .insert({
+              organization_id: options.orgId,
+              investment_id: txnInvestmentId,
+              investment_investor_id: txnInvestorId,
+              member_directory_id: null,
+              transaction_type: txnType,
+              amount: txnAmount,
+              transaction_date: txnDate,
+              description: txnDescription,
+              document_id: txnDocId,
+              parent_transaction_id: null,
+              line_items: normalizedLineItems,
+              adjusts_transaction_id: adjustsTransactionId,
+              adjustment_reason: adjustmentReason,
+            })
+            .select()
+            .single();
+
+          if (parentTxnErr) throw parentTxnErr;
+
+          results.push({
+            action: "record_investment_transaction",
+            success: true,
+            data: { transaction_id: parentTxn.id, type: txnType, amount: txnAmount, line_item_count: normalizedLineItems.length },
+          });
+          break;
+        }
+
         default:
           results.push({ action: item.action, success: false, error: `Unknown action: ${item.action}` });
       }
@@ -744,6 +1192,17 @@ export async function applyActions(
         errObj?.message ?? errObj?.details ?? errObj?.code ?? JSON.stringify(err) ?? "Unknown error";
       results.push({ action: item.action, success: false, error: String(message) });
     }
+  }
+
+  // Invalidate org-context caches if anything succeeded. This is the central
+  // choke point for all chat-pipeline-driven mutations — every action that
+  // touches entities, investments, transactions, directory entries, or
+  // anything else in the cached context blob runs through here. Without this,
+  // the next extraction or chat call sees a stale snapshot of org state from
+  // up to 24 hours ago, which causes "matching worked then suddenly didn't"
+  // bugs that are extremely hard to diagnose.
+  if (options.orgId && results.some((r) => r.success)) {
+    await invalidateOrgCaches(options.orgId);
   }
 
   return { results, firstCreatedEntityId, createdEntityIds };

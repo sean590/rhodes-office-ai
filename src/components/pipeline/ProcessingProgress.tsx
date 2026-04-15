@@ -62,7 +62,7 @@ export function ProcessingProgress({ batchId, showEntityDiscovery, onComplete }:
 
   useEffect(() => {
     fetchBatch();
-    pollRef.current = setInterval(fetchBatch, 2500);
+    pollRef.current = setInterval(fetchBatch, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
