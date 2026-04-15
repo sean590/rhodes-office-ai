@@ -201,6 +201,8 @@ export interface Document {
   link_role?: string | null;  // Set when doc is linked via document_entity_links (not direct entity_id)
   joint_title_id?: string | null;  // Set when doc surfaces via joint_title membership (person Documents tab)
   joint_title_name?: string | null;
+  investment_id?: string | null;  // Set when doc is linked to an investment (investment_id FK on documents)
+  investment_name?: string | null;
 }
 
 // --- Pipeline types ---

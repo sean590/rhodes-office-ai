@@ -101,25 +101,9 @@ export function Header() {
         })}
       </nav>
 
-      {/* Search / Command Palette trigger */}
-      <button
-        onClick={() => {
-          window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }));
-        }}
-        style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "5px 12px", borderRadius: 7,
-          border: "1px solid #ddd9d0", background: "#f5f4f0",
-          cursor: "pointer", color: "#9494a0", fontSize: 13,
-          transition: "all 0.15s",
-        }}
-      >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
-        <span>Search</span>
-        <kbd style={{ fontSize: 10, color: "#b0b0b8", background: "#e8e6df", padding: "1px 4px", borderRadius: 3, fontFamily: "monospace" }}>⌘K</kbd>
-      </button>
+      {/* Search / Command Palette trigger removed (hidden until search
+          quality is properly tested). The CommandPalette component is also
+          unmounted at the layout level so the ⌘K shortcut won't fire. */}
 
       {/* User */}
       <UserMenu />

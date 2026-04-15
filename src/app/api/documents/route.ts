@@ -23,10 +23,13 @@ export async function GET(request: Request) {
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
     const paginated = url.searchParams.get("paginated") === "true";
 
-    // Fetch documents with entity names (omit heavy ai_extraction JSONB for list view)
+    // Fetch documents with entity AND investment names (omit heavy
+    // ai_extraction JSONB for list view). Investment-only docs (entity_id
+    // null but investment_id set) need the investment name so the UI can
+    // show "via {Investment}" instead of "Unassigned".
     const query = admin
       .from("documents")
-      .select("id, name, document_type, document_category, year, entity_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name)", { count: paginated ? "exact" : undefined })
+      .select("id, name, document_type, document_category, year, entity_id, investment_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name), investments(name)", { count: paginated ? "exact" : undefined })
       .eq("organization_id", orgId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -38,11 +41,13 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    // Flatten entity name into each doc
+    // Flatten entity + investment names into each doc
     const result = (docs || []).map((doc) => ({
       ...doc,
       entity_name: (doc.entities as unknown as { name: string } | null)?.name || null,
+      investment_name: (doc.investments as unknown as { name: string } | null)?.name || null,
       entities: undefined,
+      investments: undefined,
     }));
 
     if (paginated) {

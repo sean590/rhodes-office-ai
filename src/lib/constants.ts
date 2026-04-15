@@ -112,6 +112,9 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   tax_package: 'Tax Package',
   state_tax_payment: 'State Tax Payment',
   ca_form_3588: 'CA Form 3588 (Payment Voucher)',
+  investment_correspondence: 'Investment Correspondence',
+  investment_summary: 'Investment Summary',
+  distribution_summary: 'Distribution Summary',
   other: 'Other',
 };
 

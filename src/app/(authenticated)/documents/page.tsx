@@ -866,6 +866,21 @@ export default function DocumentsPage() {
                       >
                         {doc.entity_name}
                       </Link>
+                    ) : doc.investment_id && doc.investment_name ? (
+                      <Link
+                        href={`/investments/${doc.investment_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          color: "#7b4db5",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`Investment: ${doc.investment_name}`}
+                      >
+                        {doc.investment_name}
+                      </Link>
                     ) : (
                       <span style={{ fontStyle: "italic" }}>Unassigned</span>
                     )}
@@ -1132,7 +1147,9 @@ export default function DocumentsPage() {
                       )}
                     </div>
 
-                    {/* Entity link */}
+                    {/* Entity link, or fall back to investment if doc is
+                        only investment-linked (common for investment
+                        correspondence where there's no specific investor). */}
                     {doc.entity_id ? (
                       <Link
                         href={`/entities/${doc.entity_id}`}
@@ -1147,6 +1164,22 @@ export default function DocumentsPage() {
                         }}
                       >
                         {doc.entity_name}
+                      </Link>
+                    ) : doc.investment_id && doc.investment_name ? (
+                      <Link
+                        href={`/investments/${doc.investment_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          fontSize: 12,
+                          color: "#7b4db5",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`Investment: ${doc.investment_name}`}
+                      >
+                        {doc.investment_name}
                       </Link>
                     ) : (
                       <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>

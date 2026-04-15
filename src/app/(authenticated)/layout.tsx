@@ -10,7 +10,8 @@ import { ChatPanelProvider, useChatPanel } from "@/components/chat/chat-panel-pr
 import { useIsMobile } from "@/hooks/use-mobile";
 import { SessionGuard } from "@/components/session-guard";
 import { SessionTimeoutManager } from "@/components/session-timeout-manager";
-import { CommandPalette } from "@/components/command-palette";
+// CommandPalette intentionally not mounted — search/⌘K hidden until the
+// surface gets enough testing. Component file kept for future re-enable.
 
 export default function AuthenticatedLayout({
   children,
@@ -23,7 +24,6 @@ export default function AuthenticatedLayout({
         <SessionGuard />
         <SessionTimeoutManager />
         <LayoutInner>{children}</LayoutInner>
-        <CommandPalette />
       </ChatPanelProvider>
     </PageContextProvider>
   );
@@ -143,7 +143,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           }}
           onMouseEnter={(e) => { e.currentTarget.style.transform = "scale(1.05)"; }}
           onMouseLeave={(e) => { e.currentTarget.style.transform = "scale(1)"; }}
-          title="Open chat panel (⌘K)"
+          title="Open chat panel"
         >
           ✦
         </button>
