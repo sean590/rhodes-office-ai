@@ -894,8 +894,8 @@ export async function applyActions(
           const investorEntityId = investorRow?.entity_id;
 
           // Fetch actual members of the investor entity
-          let validMemberDirIds = new Set<string>();
-          let validMemberEntityIds = new Set<string>();
+          const validMemberDirIds = new Set<string>();
+          const validMemberEntityIds = new Set<string>();
           if (investorEntityId) {
             const { data: entityMembers } = await supabase
               .from("entity_members")

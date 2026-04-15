@@ -31,7 +31,10 @@ const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
 ];
 
 export function SessionTimeoutManager() {
-  const lastActivityRef = useRef<number>(Date.now());
+  // Date.now() can't run during render (impure). Initialize to 0; the
+  // localStorage-hydration effect below will overwrite it with the real
+  // last-activity timestamp, and the activity listeners will keep it fresh.
+  const lastActivityRef = useRef<number>(0);
   const lastHeartbeatRef = useRef<number>(0);
   const [showWarning, setShowWarning] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number>(WARNING_BEFORE_MS);
@@ -77,7 +80,12 @@ export function SessionTimeoutManager() {
   }, [showWarning, sendHeartbeat]);
 
   // Initialize from localStorage so cross-tab activity carries over.
+  // Also seed lastActivityRef to "now" on mount — it can't be initialized
+  // at declaration (Date.now is impure) and the polling effect would
+  // otherwise see ref=0, compute a huge elapsed time, and log the user
+  // out immediately on first poll.
   useEffect(() => {
+    lastActivityRef.current = Date.now();
     try {
       const stored = localStorage.getItem(ACTIVITY_STORAGE_KEY);
       if (stored) {

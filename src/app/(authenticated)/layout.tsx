@@ -33,7 +33,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   const pathname = usePathname();
   const isFullChatPage = pathname === "/chat";
-  const { isOpen, open, close, toggle, panelWidth, setPanelWidth } = useChatPanel();
+  const { isOpen, close, toggle, panelWidth, setPanelWidth } = useChatPanel();
 
   const showPanel = !isFullChatPage && !isMobile && isOpen;
 

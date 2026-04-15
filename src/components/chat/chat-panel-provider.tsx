@@ -32,7 +32,13 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
   const [prefillFiles, setPrefillFiles] = useState<File[]>([]);
   const [panelWidth, setPanelWidth] = useState(400);
 
-  // Load from localStorage, default open on desktop only
+  // Load from localStorage, default open on desktop only.
+  // setState in useEffect is the correct pattern for client-only hydration —
+  // a lazy useState initializer would break SSR (window/localStorage
+  // unavailable on the server). The React 19 set-state-in-effect rule is
+  // disabled for this block; the cascade is one-shot on mount, not a render
+  // loop.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const isMobile = window.innerWidth < 768;
     try {
@@ -49,6 +55,7 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
       setIsOpen(!isMobile);
     }
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Save to localStorage
   useEffect(() => {

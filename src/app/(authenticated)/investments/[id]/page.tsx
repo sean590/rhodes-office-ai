@@ -66,8 +66,8 @@ export default function InvestmentDetailPage() {
   const [editPrefReturnPct, setEditPrefReturnPct] = useState("");
   const [editPrefReturnBasis, setEditPrefReturnBasis] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editInvestors, setEditInvestors] = useState<Array<{ id: string | null; entity_id: string; committed_capital: string }>>([]);
-  const [allEntities, setAllEntities] = useState<Array<{ id: string; name: string }>>([]);
+  // (Investor editing was moved to the Ownership table's Edit Investors panel
+  // in AllocationsTab — these state slots used to back a top-level form.)
 
   // Activity state
   const [activityLog, setActivityLog] = useState<Array<{
@@ -88,10 +88,6 @@ export default function InvestmentDetailPage() {
   }, [id]);
 
   useEffect(() => { fetchInvestment(); }, [fetchInvestment]);
-
-  useEffect(() => {
-    fetch("/api/entities").then(r => r.ok ? r.json() : []).then((data: Array<{ id: string; name: string }>) => setAllEntities(data)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     if (activeTab !== "activity") return;
@@ -116,11 +112,6 @@ export default function InvestmentDetailPage() {
     setEditPrefReturnPct(investment.preferred_return_pct != null ? String(investment.preferred_return_pct) : "");
     setEditPrefReturnBasis(investment.preferred_return_basis || "");
     setEditDescription(investment.description || "");
-    setEditInvestors(investment.investors.map((inv) => ({
-      id: inv.id,
-      entity_id: inv.entity_id,
-      committed_capital: inv.committed_capital != null ? String(inv.committed_capital) : "",
-    })));
     setEditing(true);
   };
 

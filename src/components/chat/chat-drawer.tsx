@@ -10,6 +10,7 @@ import { useChatPanel } from "./chat-panel-provider";
 import { readChatStream } from "@/lib/utils/chat-stream";
 import type { LinkableRef } from "@/lib/utils/linkify";
 import type { ChatSession, ChatMessage, ChatMessageMetadata } from "@/lib/types/chat";
+import { validateUploadedFile } from "@/lib/validations";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -88,7 +89,6 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   }, [input, drawerFiles]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrawerFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { validateUploadedFile } = require("@/lib/validations");
     const selected = Array.from(e.target.files || []);
     const valid = selected.filter((f: File) => validateUploadedFile(f).valid);
     setDrawerFiles((prev) => [...prev, ...valid]);
@@ -1305,7 +1305,6 @@ function DrawerInput({
       onDrop={(e) => {
         e.preventDefault();
         const dropped = Array.from(e.dataTransfer.files);
-        const { validateUploadedFile } = require("@/lib/validations");
         const valid = dropped.filter((f: File) => validateUploadedFile(f).valid);
         setFiles([...files, ...valid]);
       }}
