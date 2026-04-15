@@ -39,8 +39,11 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    // Flatten directory names
-    const allocations = (allAllocations || []).map((row: Record<string, unknown>) => {
+    // Flatten directory names. Type as Record<string, unknown>[] so the
+    // arbitrary columns from `select("*")` (member_directory_id, deal_entity_id,
+    // committed_amount, etc.) remain accessible — the inferred return type
+    // from the callback would otherwise collapse to just { member_name }.
+    const allocations: Array<Record<string, unknown>> = (allAllocations || []).map((row: Record<string, unknown>) => {
       const dirEntry = row.directory_entries as { name: string } | null;
       const { directory_entries: _, ...rest } = row;
       return { ...rest, member_name: dirEntry?.name ?? null };
@@ -75,7 +78,7 @@ export async function GET(
       .in("deal_entity_id", dealEntityIds)
       .order("transaction_date", { ascending: false });
 
-    const transactions = (allTransactions || []).map((row: Record<string, unknown>) => {
+    const transactions: Array<Record<string, unknown>> = (allTransactions || []).map((row: Record<string, unknown>) => {
       const dirEntry = row.directory_entries as { name: string } | null;
       const doc = row.documents as { name: string } | null;
       const { directory_entries: _, documents: _d, ...rest } = row;
