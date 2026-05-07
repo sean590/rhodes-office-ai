@@ -97,9 +97,15 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
       setSummary(data.summary || null);
 
       // Transition to results when no more processing
-      // "staged" = waiting for process endpoint, "extracted" = mid-auto-ingest
+      // "staged" = waiting for process endpoint, "extracted" = mid-auto-ingest.
+      // "password_required" must be active too — once the user submits a
+      // password the worker re-runs extraction and flips the row to
+      // auto_ingested/review_ready, and the UI needs polling to catch that
+      // transition. Without this the poll halts the moment all items reach
+      // password_required, the LockedQueueItem stays mounted on stale state,
+      // and a successful unlock looks like a failure on the next click.
       const allItems = data.items || [];
-      const ACTIVE_STATUSES = ["staged", "queued", "extracting", "extracted"];
+      const ACTIVE_STATUSES = ["staged", "queued", "extracting", "extracted", "password_required"];
       const stillProcessing = allItems.some(
         (i: QueueItem) => ACTIVE_STATUSES.includes(i.status)
       );
@@ -455,6 +461,12 @@ function LockedQueueItem({
       }
       const body = await res.json().catch(() => ({}));
       setError(typeof body?.error === "string" ? body.error : "Unlock failed");
+      // Refresh the batch even on failure: if the previous attempt actually
+      // succeeded server-side and the row moved to auto_ingested/review_ready,
+      // a 400 here means our state is stale. Refetching pulls the new status
+      // and unmounts this row — better than stranding the user with a stuck
+      // password input that can never succeed.
+      onUnlocked();
     } catch {
       setError("Unlock failed");
     } finally {

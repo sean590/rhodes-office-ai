@@ -18,6 +18,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { processQueueItem } from "@/lib/pipeline/worker";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
+// Unlock awaits the full pipeline (download → analyze → agent → write tools).
+// Real K-1s have hit ~38s on a single agent loop; concurrent unlocks of 4
+// files all running the agent in parallel will exceed the 60s default and
+// kill the function mid-tool-call, leaving rows in transient states. Max
+// allowed on Vercel Pro is 300s.
+export const maxDuration = 300;
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ itemId: string }> },
