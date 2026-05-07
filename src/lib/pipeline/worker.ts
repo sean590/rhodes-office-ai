@@ -16,7 +16,7 @@ import * as Sentry from "@sentry/nextjs";
  */
 export async function processQueueItem(
   itemId: string,
-  _options?: { password?: string },
+  options?: { password?: string },
 ): Promise<void> {
   const admin = createAdminClient();
 
@@ -116,6 +116,7 @@ export async function processQueueItem(
       isSplitChild,
       preIdentifiedEntityId,
       knownInvestmentId,
+      password: options?.password,
     });
     console.log(
       `[PIPELINE] ${itemId}: agent ${agentResult.status} — ` +

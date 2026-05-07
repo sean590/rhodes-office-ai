@@ -62,7 +62,13 @@ import {
   updateInvestmentTransactionTool,
 } from "@/lib/mcp/tools/investments-write";
 
-import { analyzePdf, buildPdfContent } from "./pdf-processor";
+import {
+  analyzePdf,
+  analyzePdfWithPassword,
+  buildPdfContent,
+  PdfPasswordRequiredError,
+  probePdfRequiresPassword,
+} from "./pdf-processor";
 
 import { Semaphore } from "@/lib/utils/semaphore";
 
@@ -174,6 +180,11 @@ export interface DocumentAgentInput {
    *  associated with this investment). When set, the agent skips
    *  list_investments/get_investment for re-identification. */
   knownInvestmentId?: string | null;
+  /** Transient password for encrypted PDFs. Supplied by the unlock route /
+   *  unlock_document tool; never persisted. When absent, an encrypted PDF
+   *  surfaces as PdfPasswordRequiredError so the worker can park the item
+   *  in password_required and prompt the user. */
+  password?: string;
 }
 
 export interface DocumentAgentOutput {
@@ -297,6 +308,7 @@ async function runDocumentAgentInternal(
     isSplitChild = false,
     preIdentifiedEntityId,
     knownInvestmentId,
+    password,
   } = input;
 
   // Construct a ToolContext for this run. The agent isn't a logged-in
@@ -324,8 +336,26 @@ async function runDocumentAgentInternal(
   const isPdf = mimeType === "application/pdf";
   let userContent: Anthropic.Messages.ContentBlockParam[];
   if (isPdf) {
-    const analysis = await analyzePdf(fileBuffer, null);
-    const pdfBlocks = await buildPdfContent(fileBuffer, analysis, filename, null, null);
+    // Password gate: pdf-lib's getPageCount walks the page tree, which is
+    // still encrypted on locked PDFs even with ignoreEncryption=true, and
+    // throws "Expected instance of PDFDict, but got instance of undefined".
+    // Probe first; without a password, surface PdfPasswordRequiredError so
+    // the worker parks the item as password_required.
+    const requiresPassword = await probePdfRequiresPassword(fileBuffer);
+    if (requiresPassword && !password) {
+      throw new PdfPasswordRequiredError(filename);
+    }
+    const analysis = password
+      ? await analyzePdfWithPassword(fileBuffer, password)
+      : await analyzePdf(fileBuffer, null);
+    const pdfBlocks = await buildPdfContent(
+      fileBuffer,
+      analysis,
+      filename,
+      null,
+      null,
+      password ? { password } : undefined,
+    );
     // buildPdfContent returns Promise<unknown[]> because it emits a mix of
     // text blocks and base64 PDF/image blocks; the elements ARE valid
     // ContentBlockParam shapes, just typed loosely. Cast through unknown.
