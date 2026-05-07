@@ -551,7 +551,7 @@ export const splitDocumentTool = defineTool({
     //    If the parent doc is already linked to an investment, surface that
     //    + the investment's investor entity_ids so per-investor children
     //    can match against a tight 3-name list rather than the full org.
-    let knownInvestmentId: string | null = doc.investment_id ?? null;
+    const knownInvestmentId: string | null = doc.investment_id ?? null;
     let knownEntityIds: string[] = [];
     if (knownInvestmentId) {
       const { data: investorRows } = await ctx.supabase
