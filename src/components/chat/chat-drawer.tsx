@@ -449,7 +449,15 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
               `You'll get a notification when they're ready for review.\n\n` +
               `[View progress](/batches/${batchId})`;
 
-            await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+            // Append the persisted row to local state immediately. The
+            // Realtime subscription would also deliver this INSERT, but
+            // there's a race where the websocket is still mid-handshake
+            // ("Connecting to wss://..." in console) when the row lands —
+            // the event fires before the subscription is live and the user
+            // never sees the handoff. The dedupe guard in the Realtime
+            // handler (chat-drawer.tsx:90) makes the late-arriving event a
+            // no-op.
+            const handoffRes = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -463,6 +471,14 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
                 },
               }),
             });
+            if (handoffRes.ok) {
+              const persistedHandoff = (await handoffRes.json()) as ChatMessage;
+              setMessages((prev) =>
+                prev.some((m) => m.id === persistedHandoff.id)
+                  ? prev
+                  : [...prev, persistedHandoff],
+              );
+            }
 
             fetchSessions();
             return;
