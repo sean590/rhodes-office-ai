@@ -17,6 +17,26 @@ export async function PATCH(
     const admin = createAdminClient();
     const body = await request.json();
 
+    // Cross-tenant guard: verify the item's batch belongs to the caller's
+    // org before mutating. 404 (not 403) so we don't leak existence.
+    const { data: existing } = await admin
+      .from("document_queue")
+      .select("id, batch_id")
+      .eq("id", itemId)
+      .maybeSingle();
+    if (!existing) {
+      return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
+    }
+    const { data: batchOwn } = await admin
+      .from("document_batches")
+      .select("id")
+      .eq("id", existing.batch_id)
+      .eq("organization_id", orgId)
+      .maybeSingle();
+    if (!batchOwn) {
+      return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
+    }
+
     const allowedFields = [
       'staged_doc_type', 'staged_entity_id', 'staged_entity_name',
       'staged_year', 'staged_category', 'ai_entity_id', 'ai_related_entities',

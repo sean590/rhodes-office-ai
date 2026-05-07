@@ -5,13 +5,32 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { QueueItem } from "@/lib/types/entities";
 import { SuccessSummary } from "./SuccessSummary";
-import { ApprovalCard } from "./ApprovalCard";
+import { ReviewCard } from "./ReviewCard";
+import { useChatPanel } from "@/components/chat/chat-panel-provider";
 
 interface ProcessingViewProps {
   batchId: string;
   entities: Array<{ id: string; name: string }>;
   onComplete?: () => void;
   onDocumentsChanged?: () => void;
+}
+
+interface DocSummaryRow {
+  id: string;
+  document_id: string | null;
+  name: string;
+  type: string;
+  type_label: string;
+  year: number | null;
+  status: string;
+  // Enrichment from migration 057+ (review/chat unification, batch route):
+  // shows the linkage chain — investment + transaction summary — so the
+  // user can verify what the agent did at a glance instead of clicking
+  // into each doc.
+  investment_name?: string | null;
+  transaction_summary?: string | null;
+  is_parent?: boolean;
+  child_count?: number;
 }
 
 interface BatchSummary {
@@ -25,25 +44,10 @@ interface BatchSummary {
   entities_affected: Array<{
     entity_id: string | null;
     entity_name: string;
-    documents: Array<{
-      id: string;
-      document_id: string | null;
-      name: string;
-      type: string;
-      type_label: string;
-      year: number | null;
-      status: string;
-    }>;
+    documents: DocSummaryRow[];
   }>;
-  unassociated_documents: Array<{
-    id: string;
-    document_id: string | null;
-    name: string;
-    type: string;
-    type_label: string;
-    year: number | null;
-    status: string;
-  }>;
+  unassociated_documents: DocSummaryRow[];
+  parent_documents?: DocSummaryRow[];
 }
 
 const STATUS_ICONS: Record<string, string> = {
@@ -62,6 +66,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   const [phase, setPhase] = useState<"processing" | "results">("processing");
   const [fetchedEntities, setFetchedEntities] = useState<Array<{ id: string; name: string }>>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatPanel = useChatPanel();
 
   // Derive liveEntities: prefer parent prop, fall back to fetched
   const liveEntities = initialEntities.length > 0 ? initialEntities : fetchedEntities;
@@ -126,75 +131,9 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   }, [fetchBatch]);
 
   // --- Actions ---
-  const approveItem = async (itemId: string, excludedActionIndices?: number[]) => {
-    try {
-      const fetchOptions: RequestInit = {
-        method: "POST",
-        ...(excludedActionIndices && excludedActionIndices.length > 0
-          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_actions: excludedActionIndices }) }
-          : {}),
-      };
-      const res = await fetch(`/api/pipeline/queue/${itemId}/approve`, fetchOptions);
-      if (res.ok) {
-        const data = await res.json();
-        // If a new entity was created, refresh the entities list
-        if (data.new_entity_id) {
-          await refreshEntities();
-        }
-      } else {
-        console.error("Approve failed:", res.status, await res.json().catch(() => ({})));
-      }
-    } catch (err) {
-      console.error("Approve error:", err);
-    }
-    await fetchBatch();
-    onDocumentsChanged?.();
-  };
-
-  const ingestOnly = async (itemId: string) => {
-    try {
-      const res = await fetch(`/api/pipeline/queue/${itemId}/ingest-only`, { method: "POST" });
-      if (!res.ok) console.error("Ingest-only failed:", res.status, await res.json().catch(() => ({})));
-    } catch (err) {
-      console.error("Ingest-only error:", err);
-    }
-    await fetchBatch();
-    onDocumentsChanged?.();
-  };
-
-  const assignEntity = async (itemId: string, entityId: string) => {
-    // Update the queue item's entity and mark user_corrected so approve
-    // doesn't create the proposed entity
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        staged_entity_id: entityId,
-        ai_entity_id: entityId,
-        user_corrected: true,
-      }),
-    });
-    // Now approve (ingest with the assigned entity)
-    await approveItem(itemId);
-  };
-
-  const reassignEntity = async (itemId: string, entityId: string) => {
-    // Just update the entity assignment without approving
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staged_entity_id: entityId, ai_entity_id: entityId }),
-    });
-  };
-
-  const updateRelatedEntities = async (itemId: string, relatedEntities: Array<{ entity_id: string; entity_name: string; role: string; confidence: string; reason: string }>) => {
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ai_related_entities: relatedEntities }),
-    });
-  };
-
+  // Per-item approval is owned by ReviewCard now (it composes the actions
+  // and POSTs to /api/chat/apply-actions). What's left here is just the
+  // "retry an errored item" affordance.
   const retryItem = async (itemId: string) => {
     await fetch(`/api/pipeline/queue/${itemId}`, {
       method: "PATCH",
@@ -316,16 +255,23 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   // --- Results Phase ---
   const reviewItems = items.filter((i) => i.status === "review_ready");
   const errorItems = items.filter((i) => i.status === "error");
+  const lockedItems = items.filter((i) => i.status === "password_required");
   const ingestedCount = summary ? summary.auto_ingested + summary.approved : 0;
-  const allDone = !items.some((i) => i.status === "review_ready" || i.status === "error");
+  const allDone = !items.some(
+    (i) => i.status === "review_ready" || i.status === "error" || i.status === "password_required",
+  );
 
   // Headline
   const totalFileCount = items.filter((i) => !i.parent_queue_id).length;
   let headline: string;
-  if (reviewItems.length === 0 && errorItems.length === 0) {
+  if (reviewItems.length === 0 && errorItems.length === 0 && lockedItems.length === 0) {
     headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${totalFileCount} file${totalFileCount !== 1 ? "s" : ""}`;
   } else {
-    headline = `${totalFileCount} file${totalFileCount !== 1 ? "s" : ""} processed \u2014 ${ingestedCount} ingested, ${reviewItems.length} need${reviewItems.length === 1 ? "s" : ""} review`;
+    const parts: string[] = [];
+    if (ingestedCount > 0) parts.push(`${ingestedCount} ingested`);
+    if (reviewItems.length > 0) parts.push(`${reviewItems.length} need${reviewItems.length === 1 ? "s" : ""} review`);
+    if (lockedItems.length > 0) parts.push(`${lockedItems.length} need${lockedItems.length === 1 ? "s" : ""} a password`);
+    headline = `${totalFileCount} file${totalFileCount !== 1 ? "s" : ""} processed \u2014 ${parts.join(", ")}`;
   }
 
   return (
@@ -358,6 +304,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
             <SuccessSummary
               entitiesAffected={summary.entities_affected}
               unassociatedDocuments={summary.unassociated_documents}
+              parentDocuments={summary.parent_documents ?? []}
             />
           </div>
         )}
@@ -368,16 +315,76 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
             <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
               Needs Review
             </div>
-            {reviewItems.map((item) => (
-              <ApprovalCard
+            {reviewItems.map((item) => {
+              // Legacy items (pre-agent / pre-unification) won't have a
+              // chat_session_id. Render them as a stub message so they're
+              // not invisible — the user can still reject or open the
+              // doc directly. Drain these via SQL or by re-uploading.
+              if (!item.chat_session_id) {
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      background: "#f8f7f4",
+                      border: "1px solid #e8e6df",
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 12,
+                      fontSize: 12,
+                      color: "#6b6b76",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>
+                      {item.original_filename}
+                    </div>
+                    Legacy queue item from before the review/chat unification —
+                    re-upload or reject to clear.
+                  </div>
+                );
+              }
+              return (
+                <ReviewCard
+                  key={item.id}
+                  item={{
+                    id: item.id,
+                    document_id: item.document_id,
+                    chat_session_id: item.chat_session_id,
+                    ai_summary: item.ai_summary,
+                    ai_entity_id: item.ai_entity_id,
+                    ai_document_type: item.ai_document_type,
+                    ai_document_category: item.ai_document_category,
+                    ai_year: item.ai_year,
+                    original_filename: item.original_filename,
+                  }}
+                  entities={liveEntities}
+                  onSubmitted={fetchBatch}
+                  onOpenChat={(sessionId) =>
+                    chatPanel.open(undefined, undefined, sessionId)
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Needs Passwords section — inline unlock UI for password-protected
+            PDFs that paused during extraction. The chat drawer also shows a
+            password_request message for the same items; either entry point
+            unlocks them. */}
+        {lockedItems.length > 0 && (
+          <div style={{ marginBottom: errorItems.length > 0 ? 20 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#c47520", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
+              Needs Passwords
+            </div>
+            <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 8 }}>
+              Enter the password below or share it in chat — Claude will unlock it.
+            </div>
+            {lockedItems.map((item) => (
+              <LockedQueueItem
                 key={item.id}
-                item={item}
-                entities={liveEntities}
-                onApprove={approveItem}
-                onIngestOnly={ingestOnly}
-                onAssignEntity={assignEntity}
-                onReassignEntity={reassignEntity}
-                onUpdateRelatedEntities={updateRelatedEntities}
+                itemId={item.id}
+                filename={item.original_filename}
+                onUnlocked={fetchBatch}
               />
             ))}
           </div>
@@ -408,5 +415,109 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
         )}
       </div>
     </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  LockedQueueItem                                                    */
+/* ------------------------------------------------------------------ */
+
+// Inline unlock form for one password-protected queue item. Mirrors the
+// shape used by the /review page's LockedItemRow but stripped of source
+// context (this component already lives inside a single batch view).
+function LockedQueueItem({
+  itemId,
+  filename,
+  onUnlocked,
+}: {
+  itemId: string;
+  filename: string;
+  onUnlocked: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!password) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/pipeline/queue/${itemId}/unlock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        setPassword("");
+        onUnlocked();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setError(typeof body?.error === "string" ? body.error : "Unlock failed");
+    } catch {
+      setError("Unlock failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "10px 0",
+        borderBottom: "1px solid #f0eeea",
+      }}
+    >
+      <span
+        aria-label="Locked"
+        style={{
+          width: 22, height: 22, borderRadius: 5,
+          background: "rgba(196,117,32,0.1)", color: "#c47520",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: "#1a1a1f" }}>{filename}</div>
+        <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="password"
+            value={password}
+            disabled={busy}
+            onChange={(e) => { setPassword(e.target.value); setError(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            placeholder="Enter password"
+            style={{
+              flex: 1, minWidth: 180,
+              padding: "6px 10px", fontSize: 13, fontFamily: "inherit",
+              background: "#fafaf7",
+              border: `1px solid ${error ? "#c44520" : "#ddd9d0"}`,
+              borderRadius: 6, outline: "none",
+            }}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busy || !password}
+            onClick={submit}
+          >
+            {busy ? "Unlocking…" : "Unlock"}
+          </Button>
+        </div>
+        {error && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#c44520" }}>
+            {error}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

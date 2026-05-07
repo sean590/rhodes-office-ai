@@ -1,9 +1,20 @@
+/**
+ * POST /api/pipeline/queue/[itemId]/ingest-only
+ *
+ * Historical: under the proposal model, "Ingest only" meant "file the
+ * document but skip the AI's proposed actions." Under the agent model,
+ * actions are applied inline by tool calls; there's nothing to skip.
+ * Both this route and /approve now collapse to the same primitive
+ * (`fileQueueItem`) — kept as a separate URL so legacy callers don't
+ * break, deprecated for new use.
+ */
+
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { ingestQueueItem } from "@/lib/pipeline/ingest";
+import { fileQueueItem } from "@/lib/pipeline/queue-actions";
 import { requireOrg, isError } from "@/lib/utils/org-context";
-import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   _request: Request,
@@ -22,59 +33,28 @@ export async function POST(
       .select("id")
       .eq("id", user.id)
       .maybeSingle();
-    const userId = userRow ? user.id : null;
-
-    const { data: item, error: itemError } = await admin
-      .from("document_queue")
-      .select("*")
-      .eq("id", itemId)
-      .single();
-
-    if (itemError || !item) {
-      return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
-    }
-
-    if (item.status !== "review_ready") {
-      return NextResponse.json({ error: `Cannot ingest item in status: ${item.status}` }, { status: 400 });
-    }
-
-    const result = await ingestQueueItem({
-      item,
-      userId,
-      orgId,
-      applyMutations: false,
-      finalStatus: "approved",
-    });
-
-    if (!result.success) {
-      return NextResponse.json({ error: result.error }, { status: 500 });
-    }
 
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
-    await logAuditEvent({
-      userId: user.id,
-      action: "ingest",
-      resourceType: "pipeline_item",
-      resourceId: itemId,
-      entityId: item.ai_entity_id || item.staged_entity_id || null,
-      metadata: {
-        batch_id: item.batch_id,
-        document_name: item.ai_suggested_name || item.original_filename,
-        document_id: result.document?.id,
-        document_type: item.ai_document_type || item.staged_doc_type,
-      },
-      ...reqCtx,
+
+    const result = await fileQueueItem(itemId, {
+      orgId,
+      userId: userRow ? user.id : null,
+      requestContext: reqCtx,
     });
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
 
     return NextResponse.json({
       status: "approved",
-      document: result.document,
-      actions_applied: 0,
-      actions_failed: 0,
+      queue_item_id: result.item.id,
+      document_id: result.documentId,
     });
   } catch (err) {
     console.error("POST /api/pipeline/queue/[itemId]/ingest-only error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

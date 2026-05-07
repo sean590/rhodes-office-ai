@@ -5,7 +5,23 @@
  */
 
 import { PDFDocument } from "pdf-lib";
-import { extractText } from "unpdf";
+import { extractText, getDocumentProxy } from "unpdf";
+
+/**
+ * Thrown when a PDF requires a password to decrypt. Caught by the pipeline
+ * worker and translated into queue status "password_required" so the user
+ * can supply the password via chat or the inline UI.
+ *
+ * The password itself is NEVER stored — it's used transiently inside
+ * extractFullText to decrypt the buffer for text extraction; the extracted
+ * text is what gets persisted.
+ */
+export class PdfPasswordRequiredError extends Error {
+  constructor(public readonly filename: string = "unknown") {
+    super(`Password required for "${filename}"`);
+    this.name = "PdfPasswordRequiredError";
+  }
+}
 
 // --- Page Selection Strategies ---
 
@@ -178,15 +194,88 @@ export async function analyzePdf(
  * Extract raw text from all pages of a PDF.
  * Uses unpdf which bundles its own PDF.js — no worker file needed,
  * works reliably on Vercel serverless with pnpm.
+ *
+ * Password-protected PDFs throw a PdfPasswordRequiredError so the worker
+ * can mark the queue item and resume the rest of the batch. Other extraction
+ * failures still return "" (callers fall back to visual-only).
  */
-export async function extractFullText(buffer: Buffer): Promise<string> {
+export async function extractFullText(
+  buffer: Buffer,
+  options?: { password?: string },
+): Promise<string> {
   try {
+    if (options?.password) {
+      const proxy = await getDocumentProxy(new Uint8Array(buffer), {
+        password: options.password,
+      });
+      const result = await extractText(proxy, { mergePages: true });
+      return typeof result.text === "string" ? result.text : (result.text as string[]).join("\n");
+    }
     const result = await extractText(new Uint8Array(buffer), { mergePages: true });
     return typeof result.text === "string" ? result.text : (result.text as string[]).join("\n");
   } catch (err) {
+    // pdfjs throws PasswordException with name === "PasswordException".
+    // Bubble that up as PdfPasswordRequiredError so callers can branch.
+    if (err && typeof err === "object" && "name" in err && (err as Error).name === "PasswordException") {
+      throw new PdfPasswordRequiredError();
+    }
     console.error("[PDF] Text extraction failed, falling back to visual-only:", err instanceof Error ? err.message : err);
     return ""; // Caller handles empty text gracefully
   }
+}
+
+/**
+ * Lightweight password-protection probe. Tries to open the PDF; if it
+ * throws PasswordException, surfaces a PdfPasswordRequiredError. Other
+ * errors are swallowed (we don't want to block extraction on a malformed
+ * file the AI path can still recover from).
+ *
+ * Used at the top of the document agent so short-tier PDFs (which send raw
+ * base64 to Claude without ever calling extractFullText) still trip the
+ * password gate before reaching the model.
+ */
+export async function probePdfRequiresPassword(buffer: Buffer): Promise<boolean> {
+  try {
+    await getDocumentProxy(new Uint8Array(buffer));
+    return false;
+  } catch (err) {
+    if (err && typeof err === "object" && "name" in err && (err as Error).name === "PasswordException") {
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Password-aware sibling of analyzePdf. pdf-lib opens encrypted PDFs with
+ * ignoreEncryption=true to read top-level metadata, but the page tree
+ * dictionaries are still encrypted indirect references — calling
+ * pdfDoc.getPageCount() walks that tree and blows up with
+ * "Expected instance of PDFDict, but got instance of undefined".
+ *
+ * unpdf (pdfjs under the hood) decrypts the page tree natively when given
+ * the password, so we use it for page counting on locked files. The rest
+ * of the analysis collapses to a no-op since buildPdfContent's password
+ * branch only consumes page_count anyway (it sends Claude text-only).
+ */
+export async function analyzePdfWithPassword(
+  buffer: Buffer,
+  password: string,
+): Promise<PDFAnalysis> {
+  let pageCount = 0;
+  try {
+    const proxy = await getDocumentProxy(new Uint8Array(buffer), { password });
+    pageCount = proxy.numPages;
+  } catch {
+    // Wrong-password / corrupt-file errors will be surfaced downstream by
+    // extractFullText. Returning a zero page count is cosmetic only.
+  }
+  return {
+    page_count: pageCount,
+    file_size: buffer.length,
+    tier: "medium", // value unused — buildPdfContent's password branch ignores tier/strategy
+    strategy: PAGE_STRATEGIES["_default"],
+  };
 }
 
 /**
@@ -224,9 +313,32 @@ export async function buildPdfContent(
   analysis: PDFAnalysis,
   docName: string,
   docType: string | null,
-  year: number | null
+  year: number | null,
+  options?: { password?: string },
 ): Promise<unknown[]> {
   const content: unknown[] = [];
+
+  // Password-protected path: send extracted text only. We can decrypt for
+  // text via pdfjs but we'd have to re-encode the decrypted PDF to send a
+  // visual base64 block, which is heavyweight. Text-only is good enough
+  // for the common case (tax returns, K-1s) and keeps the unlock flow
+  // simple. If quality is poor on a specific file, the user can decrypt
+  // out-of-band and re-upload.
+  if (options?.password) {
+    const fullText = await extractFullText(buffer, options);
+    if (fullText) {
+      content.push({
+        type: "text",
+        text: `## Document Text (decrypted from password-protected PDF, ${analysis.page_count} pages)\n\n${fullText}`,
+      });
+    } else {
+      content.push({
+        type: "text",
+        text: `## Document Text\n\n(Empty extraction — the PDF unlocked but pdfjs could not extract text.)`,
+      });
+    }
+    return content;
+  }
 
   if (analysis.tier === "short") {
     // Tier 1: send whole PDF as-is
@@ -244,7 +356,7 @@ export async function buildPdfContent(
 
     // Extract and send full text
     if (strategy.include_full_text) {
-      const fullText = await extractFullText(buffer);
+      const fullText = await extractFullText(buffer, options);
       if (fullText) {
         // Cap extracted text at ~120k tokens (~480k chars at 4 chars/token)
         // to leave room for visual pages, system prompt, and output budget.

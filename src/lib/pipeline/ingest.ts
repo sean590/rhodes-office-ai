@@ -7,6 +7,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { applyActions } from "@/lib/pipeline/apply";
+import { assertNoDbError, logDbError } from "./db-errors";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
 import { runEntityInference, upsertRecurrenceSignal, reevaluateRecurrenceExpectations } from "@/lib/utils/inference-engine";
@@ -108,38 +109,62 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
 
     console.log(`[INGEST] Document ${item.original_filename}: entity=${finalEntityId}, investment=${investmentId}, ai_extraction_keys=${Object.keys((item.ai_extraction as Record<string, unknown>) || {}).join(",")}`);
 
-    // Create document record
+    // Create or update document record.
+    // If the queue item already has a document_id (created at registration time
+    // with status='processing'), UPDATE that row with extraction results and
+    // set status='ready'. Otherwise INSERT a new row (legacy path, edge cases).
     const docName = (item.ai_suggested_name || item.original_filename) as string;
-    const { data: doc, error: docError } = await admin
-      .from("documents")
-      .insert({
-        entity_id: finalEntityId,
-        investment_id: investmentId,
-        name: docName,
-        document_type: finalDocType,
-        document_category: finalCategory,
-        year: finalYear,
-        file_path: finalPath,
-        file_size: item.file_size,
-        mime_type: item.mime_type,
-        uploaded_by: userId,
-        content_hash: item.content_hash,
-        direction: finalDirection,
-        jurisdiction: item.ai_jurisdiction || null,
-        source_page_range: item.ai_page_range || null,
-        k1_recipient: item.ai_k1_recipient || null,
-        organization_id: orgId,
-        ai_extracted: true,
-        ai_extraction: item.ai_extraction,
-        ai_extracted_at: item.extraction_completed_at || new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const docFields = {
+      entity_id: finalEntityId,
+      investment_id: investmentId,
+      name: docName,
+      document_type: finalDocType,
+      document_category: finalCategory,
+      year: finalYear,
+      file_path: finalPath,
+      file_size: item.file_size,
+      mime_type: item.mime_type,
+      content_hash: item.content_hash,
+      direction: finalDirection,
+      jurisdiction: item.ai_jurisdiction || null,
+      source_page_range: item.ai_page_range || null,
+      k1_recipient: item.ai_k1_recipient || null,
+      ai_extracted: true,
+      ai_extraction: item.ai_extraction,
+      ai_extracted_at: item.extraction_completed_at || new Date().toISOString(),
+      status: "ready",
+    };
 
-    if (docError) {
-      console.error("Document insert failed:", docError.message, { finalEntityId, finalDocType, finalCategory });
-      return { success: false, error: `Failed to create document: ${docError.message}` };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let doc: Record<string, any> | null = null;
+    if (item.document_id) {
+      const { error: updateErr } = await admin
+        .from("documents")
+        .update(docFields)
+        .eq("id", item.document_id);
+      if (updateErr) {
+        console.error("Document update failed:", updateErr.message, { document_id: item.document_id });
+        return { success: false, error: `Failed to update document: ${updateErr.message}` };
+      }
+      doc = { id: item.document_id as string, ...docFields };
+    } else {
+      const { data: newDoc, error: docError } = await admin
+        .from("documents")
+        .insert({
+          ...docFields,
+          uploaded_by: userId,
+          organization_id: orgId,
+        })
+        .select()
+        .single();
+      if (docError) {
+        console.error("Document insert failed:", docError.message, { finalEntityId, finalDocType, finalCategory });
+        return { success: false, error: `Failed to create document: ${docError.message}` };
+      }
+      doc = newDoc;
     }
+
+    if (!doc) return { success: false, error: "Document record not created" };
 
     // If composite child, link to parent document
     if (item.parent_queue_id) {
@@ -149,10 +174,11 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
         .eq("id", item.parent_queue_id)
         .single();
       if (parentItem?.document_id) {
-        await admin
+        const { error } = await admin
           .from("documents")
           .update({ source_document_id: parentItem.document_id })
           .eq("id", doc.id);
+        logDbError(error, `link composite child doc ${doc.id} to parent`);
       }
     }
 
@@ -170,16 +196,22 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
         });
 
         if (!finalEntityId && firstCreatedEntityId) {
-          await admin
+          // Invariant: actions just created an entity for this doc, so the
+          // doc row must point to it. A silent failure here leaves the doc
+          // unowned despite a fresh entity being attached via actions.
+          const { error } = await admin
             .from("documents")
             .update({ entity_id: firstCreatedEntityId })
             .eq("id", doc.id);
+          assertNoDbError(error, `attach created entity ${firstCreatedEntityId} to doc ${doc.id}`);
         }
 
-        // Create entity links for ALL created entities (umbrella documents)
+        // Create entity links for ALL created entities (umbrella documents).
+        // Awaited (was fire-and-forget) so we can surface DB errors. The
+        // upserts are fast and run sequentially per doc — no perf concern.
         for (const createdId of createdEntityIds) {
           const isPrimary = createdId === firstCreatedEntityId && !finalEntityId;
-          await admin.from("document_entity_links").upsert({
+          const { error } = await admin.from("document_entity_links").upsert({
             document_id: doc.id,
             entity_id: createdId,
             organization_id: orgId,
@@ -188,17 +220,19 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
             confidence: 1.0,
             ai_reason: "Entity created from this document",
             created_by: userId,
-          }, { onConflict: "document_id,entity_id" }).then(() => {});
+          }, { onConflict: "document_id,entity_id" });
+          logDbError(error, `link doc ${doc.id} to created entity ${createdId}`);
         }
 
         actionsApplied = results.filter((r) => r.success).length;
         actionsFailed = results.filter((r) => !r.success).length;
 
-        // Mark actions as applied on the document so the entity page doesn't re-prompt
+        // Mark actions as applied on the document so the entity page doesn't
+        // re-prompt. Best-effort — UI re-prompts are annoying but recoverable.
         if (actionsApplied > 0) {
           const currentExtraction = (doc.ai_extraction || {}) as Record<string, unknown>;
           const allIndices = actions.map((_, i) => i);
-          await admin
+          const { error } = await admin
             .from("documents")
             .update({
               ai_extraction: {
@@ -208,14 +242,16 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
               },
             })
             .eq("id", doc.id);
+          logDbError(error, `mark actions applied on doc ${doc.id}`);
         }
       }
     }
 
-    // Create document-entity links
+    // Create document-entity links. Was fire-and-forget via `.then(() => {})`
+    // which fully silenced errors; now awaited so logDbError can surface them.
     // 1. Primary link
     if (finalEntityId) {
-      await admin.from("document_entity_links").upsert({
+      const { error } = await admin.from("document_entity_links").upsert({
         document_id: doc.id,
         entity_id: finalEntityId,
         organization_id: orgId,
@@ -223,7 +259,8 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
         source: "ai",
         confidence: 1.0,
         created_by: userId,
-      }, { onConflict: "document_id,entity_id" }).then(() => {});
+      }, { onConflict: "document_id,entity_id" });
+      logDbError(error, `primary link doc ${doc.id} → entity ${finalEntityId}`);
     }
 
     // 2. Secondary links from AI extraction
@@ -232,7 +269,7 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
     }>;
     for (const ref of relatedEntities) {
       if (ref.entity_id && ref.entity_id !== finalEntityId) {
-        await admin.from("document_entity_links").upsert({
+        const { error } = await admin.from("document_entity_links").upsert({
           document_id: doc.id,
           entity_id: ref.entity_id,
           organization_id: orgId,
@@ -241,7 +278,8 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
           confidence: ref.confidence === "high" ? 0.9 : ref.confidence === "medium" ? 0.7 : 0.5,
           ai_reason: ref.reason,
           created_by: userId,
-        }, { onConflict: "document_id,entity_id" }).then(() => {});
+        }, { onConflict: "document_id,entity_id" });
+        logDbError(error, `related link doc ${doc.id} → entity ${ref.entity_id}`);
       }
     }
 
@@ -277,17 +315,24 @@ export async function ingestQueueItem(options: IngestOptions): Promise<IngestRes
       }
     }
 
-    // Update queue item
-    await admin
-      .from("document_queue")
-      .update({
-        status: finalStatus,
-        document_id: doc.id,
-        reviewed_by: userId,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", item.id);
+    // Update queue item — terminal status transition. A silent failure here
+    // leaves the queue row in 'review_ready'/'extracted' despite the document
+    // being created and actions applied; the user sees the same item to
+    // approve again. Throw so the outer try/catch returns success: false and
+    // callers (worker auto-ingest, approve endpoint) react.
+    {
+      const { error } = await admin
+        .from("document_queue")
+        .update({
+          status: finalStatus,
+          document_id: doc.id,
+          reviewed_by: userId,
+          reviewed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", item.id);
+      assertNoDbError(error, `${item.id}: terminal queue update to ${finalStatus}`);
+    }
 
     return {
       success: true,

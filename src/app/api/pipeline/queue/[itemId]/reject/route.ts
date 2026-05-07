@@ -1,8 +1,16 @@
+/**
+ * POST /api/pipeline/queue/[itemId]/reject
+ *
+ * Thin wrapper around `rejectQueueItem`. Same primitive as the
+ * `reject_queue_item` MCP tool.
+ */
+
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rejectQueueItem } from "@/lib/pipeline/queue-actions";
 import { requireOrg, isError } from "@/lib/utils/org-context";
-import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { getRequestContext } from "@/lib/utils/audit";
 
 export async function POST(
   request: Request,
@@ -11,44 +19,45 @@ export async function POST(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { user, orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { itemId } = await params;
     const admin = createAdminClient();
 
+    const { data: userRow } = await admin
+      .from("users")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
     const body = await request.json().catch(() => ({}));
-
-    const { data, error } = await admin
-      .from("document_queue")
-      .update({
-        status: "rejected",
-        extraction_error: body.reason || null,
-        reviewed_by: user.id,
-        reviewed_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", itemId)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
-    }
+    const reason = typeof body?.reason === "string" ? body.reason : null;
 
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
-    await logAuditEvent({
-      userId: user.id,
-      action: "reject",
-      resourceType: "pipeline_item",
-      resourceId: itemId,
-      metadata: { reason: body.reason || null },
-      ...reqCtx,
-    });
 
-    return NextResponse.json({ status: "rejected", item: data });
+    const result = await rejectQueueItem(
+      itemId,
+      {
+        orgId,
+        userId: userRow ? user.id : null,
+        requestContext: reqCtx,
+      },
+      reason,
+    );
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
+    return NextResponse.json({
+      status: "rejected",
+      queue_item_id: result.item.id,
+      reason,
+    });
   } catch (err) {
     console.error("POST /api/pipeline/queue/[itemId]/reject error:", err);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    const message = err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

@@ -7,6 +7,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRuleById, calculateNextDueDateAfterCompletion } from "@/lib/utils/compliance-engine";
 import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
 import { invalidateOrgCaches } from "@/lib/utils/chat-context";
+import { logAuditEvent } from "@/lib/utils/audit";
+import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
 import {
   validateInvestmentTransactionLineItems,
   coerceLineItemCategories,
@@ -26,6 +28,7 @@ export interface ApplyOptions {
   documentId?: string;  // For linking compliance obligations
   existingEntityId?: string;  // Document's current entity_id
   orgId?: string;  // Organization ID for new root-table records
+  userId?: string | null;  // Acting user for audit log attribution
 }
 
 /**
@@ -95,6 +98,8 @@ export async function applyActions(
               registered_agent: item.data.registered_agent || null,
               notes: item.data.notes || null,
               business_purpose: item.data.business_purpose || null,
+              legal_structure: item.data.legal_structure || null,
+              tax_classification: item.data.tax_classification || null,
               organization_id: options.orgId,
             })
             .select()
@@ -132,6 +137,24 @@ export async function applyActions(
             firstCreatedEntityId = data.id;
           }
 
+          // Auto-generate compliance obligations for the new entity. Fires for
+          // anything that might produce rules — businesses with legal_structure,
+          // persons (which pick up personal federal tax rules without a legal
+          // structure), or anything with tax_classification already set. The
+          // sync function itself guards against entities with nothing to match.
+          if (
+            options.orgId &&
+            (
+              (data.legal_structure && data.formation_state) ||
+              data.type === "person" ||
+              data.tax_classification
+            )
+          ) {
+            import("@/lib/utils/compliance-sync").then(({ syncComplianceForEntity }) =>
+              syncComplianceForEntity(data.id, options.orgId!).catch(console.error),
+            );
+          }
+
           results.push({ action: "create_entity", success: true, data });
           break;
         }
@@ -140,14 +163,27 @@ export async function applyActions(
           const allowedFields = [
             "name", "type", "status", "ein", "formation_state", "formed_date",
             "address", "registered_agent", "notes", "business_purpose",
+            "legal_structure", "tax_classification",
           ];
+          const fields = (item.data.fields as Record<string, unknown>) || {};
           const updates: Record<string, unknown> = {};
           for (const field of allowedFields) {
-            if (field in (item.data.fields as Record<string, unknown> || {})) {
-              updates[field] = (item.data.fields as Record<string, unknown>)[field];
+            if (field in fields) {
+              updates[field] = fields[field];
             }
           }
           updates.updated_at = new Date().toISOString();
+
+          // Capture previous status for lifecycle cascade detection.
+          let previousStatus: string | null = null;
+          if ("status" in fields) {
+            const { data: current } = await supabase
+              .from("entities")
+              .select("status")
+              .eq("id", item.data.entity_id)
+              .single();
+            previousStatus = (current?.status as string) ?? null;
+          }
 
           const { data, error } = await supabase
             .from("entities")
@@ -157,6 +193,32 @@ export async function applyActions(
             .single();
 
           if (error) throw error;
+
+          // If status changed, run lifecycle cascade.
+          if (fields.status && previousStatus && fields.status !== previousStatus) {
+            const { deactivateEntityCompliance, reactivateEntityCompliance } =
+              await import("@/lib/utils/entity-lifecycle");
+            const newStatus = fields.status as string;
+            if (["dissolved", "inactive"].includes(newStatus) && !["dissolved", "inactive"].includes(previousStatus)) {
+              await deactivateEntityCompliance(supabase, item.data.entity_id as string).catch(console.error);
+            } else if (newStatus === "active" && ["dissolved", "inactive"].includes(previousStatus)) {
+              await reactivateEntityCompliance(supabase, item.data.entity_id as string, options.orgId ?? "").catch(console.error);
+            }
+          }
+
+          // If legal_structure, formation_state, or tax_classification changed
+          // on an active entity, re-sync compliance obligations. Each of these
+          // fields can flip which state or federal rules match the entity.
+          if (
+            (fields.legal_structure || fields.formation_state || fields.tax_classification) &&
+            data.status === "active" &&
+            options.orgId
+          ) {
+            import("@/lib/utils/compliance-sync").then(({ syncComplianceForEntity }) =>
+              syncComplianceForEntity(item.data.entity_id as string, options.orgId!).catch(console.error),
+            );
+          }
+
           results.push({ action: "update_entity", success: true, data });
           break;
         }
@@ -213,7 +275,8 @@ export async function applyActions(
             const { data: dirEntries } = await supabase
               .from("directory_entries")
               .select("id, name, aliases")
-              .eq("organization_id", options.orgId);
+              .eq("organization_id", options.orgId)
+              .is("deleted_at", null);
             if (dirEntries) {
               const match = findDirectoryMatch(memberName, dirEntries);
               if (match) memberDirId = match.id;
@@ -273,7 +336,8 @@ export async function applyActions(
           const { data: mgrDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
           if (mgrDirEntries) {
             const match = findDirectoryMatch(managerName, mgrDirEntries);
             if (match) managerDirId = match.id;
@@ -369,7 +433,8 @@ export async function applyActions(
           const { data: trDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
           if (trDirEntries) {
             const match = findDirectoryMatch(trustRoleName, trDirEntries);
             if (match) trustRoleDirId = match.id;
@@ -453,7 +518,8 @@ export async function applyActions(
           const { data: capDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
           if (capDirEntries) {
             const dirMatch = findDirectoryMatch(investorName, capDirEntries);
             if (dirMatch) capDirId = dirMatch.id;
@@ -543,7 +609,8 @@ export async function applyActions(
           const { data: allDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
 
           const existing = allDirEntries ? findDirectoryMatch(dirEntryName, allDirEntries) : null;
 
@@ -594,6 +661,90 @@ export async function applyActions(
           break;
         }
 
+        case "set_custom_field": {
+          // Upsert-by-(entity_id, label). Unlike add_custom_field which always
+          // inserts, set_custom_field looks up an existing definition first
+          // so repeated calls with the same label update instead of duplicate.
+          const entityId = item.data.entity_id as string;
+          const label = item.data.label as string;
+          const value = item.data.value as string;
+          if (!entityId) throw new Error("entity_id is required");
+          if (!label) throw new Error("label is required");
+
+          const { data: existingDef } = await supabase
+            .from("custom_field_definitions")
+            .select("id")
+            .eq("entity_id", entityId)
+            .eq("label", label)
+            .maybeSingle();
+
+          let defId: string;
+          if (existingDef) {
+            defId = existingDef.id;
+          } else {
+            const { data: created, error: defErr } = await supabase
+              .from("custom_field_definitions")
+              .insert({
+                label,
+                field_type: "text",
+                entity_id: entityId,
+                is_global: false,
+                sort_order: 0,
+                organization_id: options.orgId,
+              })
+              .select("id")
+              .single();
+            if (defErr) throw defErr;
+            defId = created.id;
+          }
+
+          const { data: upserted, error: valErr } = await supabase
+            .from("custom_field_values")
+            .upsert(
+              {
+                entity_id: entityId,
+                field_def_id: defId,
+                value_text: value,
+                updated_at: new Date().toISOString(),
+              },
+              { onConflict: "entity_id,field_def_id" },
+            )
+            .select()
+            .single();
+          if (valErr) throw valErr;
+          results.push({
+            action: "set_custom_field",
+            success: true,
+            data: { field_def_id: defId, label, value: upserted?.value_text ?? value },
+          });
+          break;
+        }
+
+        case "remove_custom_field": {
+          const entityId = item.data.entity_id as string;
+          const label = item.data.label as string;
+          if (!entityId) throw new Error("entity_id is required");
+          if (!label) throw new Error("label is required");
+
+          // Delete the definition; values cascade via FK ON DELETE CASCADE.
+          // Only removes entity-scoped definitions — global fields stay put.
+          const { data: deleted, error } = await supabase
+            .from("custom_field_definitions")
+            .delete()
+            .eq("entity_id", entityId)
+            .eq("label", label)
+            .eq("is_global", false)
+            .select("id")
+            .maybeSingle();
+          if (error) throw error;
+          results.push({
+            action: "remove_custom_field",
+            success: true,
+            data: { id: deleted?.id ?? null, label },
+          });
+          break;
+        }
+
         case "add_partnership_rep": {
           const repName = item.data.name as string;
 
@@ -602,7 +753,8 @@ export async function applyActions(
           const { data: repDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
           if (repDirEntries) {
             const match = findDirectoryMatch(repName, repDirEntries);
             if (match) repDirId = match.id;
@@ -633,7 +785,8 @@ export async function applyActions(
           const { data: roleDirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
           if (roleDirEntries) {
             const match = findDirectoryMatch(roleName, roleDirEntries);
             if (match) roleDirId = match.id;
@@ -651,6 +804,36 @@ export async function applyActions(
             .single();
           if (error) throw error;
           results.push({ action: "add_role", success: true, data });
+          break;
+        }
+
+        case "remove_role": {
+          const entityId = item.data.entity_id as string;
+          const roleId = item.data.role_id as string;
+          if (!roleId) throw new Error("role_id is required");
+
+          const { error } = await supabase
+            .from("entity_roles")
+            .delete()
+            .eq("id", roleId)
+            .eq("entity_id", entityId);
+          if (error) throw error;
+          results.push({ action: "remove_role", success: true, data: { id: roleId } });
+          break;
+        }
+
+        case "remove_partnership_rep": {
+          const entityId = item.data.entity_id as string;
+          const repId = item.data.rep_id as string;
+          if (!repId) throw new Error("rep_id is required");
+
+          const { error } = await supabase
+            .from("entity_partnership_reps")
+            .delete()
+            .eq("id", repId)
+            .eq("entity_id", entityId);
+          if (error) throw error;
+          results.push({ action: "remove_partnership_rep", success: true, data: { id: repId } });
           break;
         }
 
@@ -690,7 +873,8 @@ export async function applyActions(
           if (item.data.payment_amount != null) completionUpdates.payment_amount = item.data.payment_amount;
           if (item.data.confirmation) completionUpdates.confirmation = item.data.confirmation;
           if (item.data.notes) completionUpdates.notes = item.data.notes;
-          if (options.documentId) completionUpdates.document_id = options.documentId;
+          if (item.data.document_id) completionUpdates.document_id = item.data.document_id;
+          else if (options.documentId) completionUpdates.document_id = options.documentId;
 
           const { data: updatedObligation, error: obligationError } = await supabase
             .from("compliance_obligations")
@@ -815,6 +999,114 @@ export async function applyActions(
           break;
         }
 
+        case "update_investment": {
+          // Investments live in their own table now (Investments v3 —
+          // migration 027+). The legacy code in updateInvestmentTool
+          // dispatched `update_entity` which targeted the wrong table and
+          // hit "Cannot coerce result to single JSON object" because the
+          // investment id was nowhere in `entities`. This case handles
+          // updates against the right table with the flat input shape
+          // the tool emits ({investment_id, name?, status?, ...}).
+          const updInvId = item.data.investment_id as string;
+          if (!updInvId) throw new Error("investment_id is required");
+          const allowedInvFields = [
+            "name",
+            "short_name",
+            "investment_type",
+            "status",
+            "description",
+            "formation_state",
+            "date_invested",
+            "date_exited",
+            "preferred_return_pct",
+            "preferred_return_basis",
+          ];
+          const updInvUpdates: Record<string, unknown> = {
+            updated_at: new Date().toISOString(),
+          };
+          for (const field of allowedInvFields) {
+            if (field in item.data) updInvUpdates[field] = item.data[field];
+          }
+          const { data: invBefore } = await supabase
+            .from("investments")
+            .select("*")
+            .eq("id", updInvId)
+            .eq("organization_id", options.orgId)
+            .maybeSingle();
+          if (!invBefore) {
+            throw new Error(`Investment ${updInvId} not found`);
+          }
+          const { data: invAfter, error: invUpdErr } = await supabase
+            .from("investments")
+            .update(updInvUpdates)
+            .eq("id", updInvId)
+            .eq("organization_id", options.orgId)
+            .select()
+            .single();
+          if (invUpdErr) throw invUpdErr;
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "investment",
+            resourceId: updInvId,
+            organizationId: options.orgId ?? null,
+            metadata: { before: invBefore, after: invAfter },
+          });
+          results.push({ action: "update_investment", success: true, data: invAfter });
+          break;
+        }
+
+        case "link_document_to_entity": {
+          const linkEntityDocId = item.data.document_id as string;
+          const linkEntityId = item.data.entity_id as string;
+          if (!linkEntityDocId) throw new Error("document_id is required");
+          if (!linkEntityId) throw new Error("entity_id is required");
+
+          const { data: beforeLink } = await supabase
+            .from("documents")
+            .select("id, entity_id, name")
+            .eq("id", linkEntityDocId)
+            .single();
+
+          await supabase
+            .from("documents")
+            .update({ entity_id: linkEntityId })
+            .eq("id", linkEntityDocId);
+
+          const { data: afterLink } = await supabase
+            .from("documents")
+            .select("id, entity_id, name")
+            .eq("id", linkEntityDocId)
+            .single();
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "link",
+            resourceType: "document",
+            resourceId: linkEntityDocId,
+            entityId: linkEntityId,
+            organizationId: options.orgId ?? null,
+            metadata: {
+              entity_id: linkEntityId,
+              document_name: afterLink?.name,
+              before: { entity_id: beforeLink?.entity_id },
+              after: { entity_id: linkEntityId },
+            },
+          });
+
+          // Auto-satisfy any matching document expectations on the new entity.
+          await checkAndSatisfyExpectations(linkEntityDocId).catch((err) =>
+            console.error("checkAndSatisfyExpectations after link_document_to_entity failed:", err),
+          );
+
+          results.push({
+            action: "link_document_to_entity",
+            success: true,
+            data: afterLink,
+          });
+          break;
+        }
+
         case "link_document_to_investment": {
           const linkInvestmentId = resolveInvestmentId(item.data.investment_id, item.data.investment_name);
           if (!linkInvestmentId) throw new Error("Could not resolve investment_id");
@@ -911,7 +1203,8 @@ export async function applyActions(
           const { data: dirEntries } = await supabase
             .from("directory_entries")
             .select("id, name, aliases")
-            .eq("organization_id", options.orgId);
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null);
 
           const { data: allEntities } = await supabase
             .from("entities")
@@ -1180,6 +1473,887 @@ export async function applyActions(
             success: true,
             data: { transaction_id: parentTxn.id, type: txnType, amount: txnAmount, line_item_count: normalizedLineItems.length },
           });
+          break;
+        }
+
+        case "add_investment_investor": {
+          const investmentId = resolveInvestmentId(item.data.investment_id);
+          const entityId = resolveEntityId(item.data.entity_id);
+          if (!investmentId) throw new Error("investment_id is required");
+          if (!entityId) throw new Error("entity_id is required");
+
+          const { data: existing, error: fetchErr } = await supabase
+            .from("investment_investors")
+            .select("id, is_active, committed_capital, capital_pct, profit_pct")
+            .eq("investment_id", investmentId)
+            .eq("entity_id", entityId)
+            .maybeSingle();
+          if (fetchErr) throw fetchErr;
+
+          if (existing && existing.is_active) {
+            results.push({
+              action: "add_investment_investor",
+              success: false,
+              error: "already an investor",
+              data: { investment_investor_id: existing.id },
+            });
+            break;
+          }
+
+          const fields = {
+            committed_capital: (item.data.committed_capital as number | null | undefined) ?? null,
+            capital_pct: (item.data.capital_pct as number | null | undefined) ?? null,
+            profit_pct: (item.data.profit_pct as number | null | undefined) ?? null,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          };
+
+          let row: { id: string } | null = null;
+          if (existing) {
+            const { data, error } = await supabase
+              .from("investment_investors")
+              .update(fields)
+              .eq("id", existing.id)
+              .select("id")
+              .single();
+            if (error) throw error;
+            row = data;
+          } else {
+            const { data, error } = await supabase
+              .from("investment_investors")
+              .insert({
+                investment_id: investmentId,
+                entity_id: entityId,
+                organization_id: options.orgId,
+                ...fields,
+                created_by: options.userId ?? null,
+              })
+              .select("id")
+              .single();
+            if (error) throw error;
+            row = data;
+          }
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: existing ? "reactivate" : "create",
+            resourceType: "investment_investor",
+            resourceId: row!.id,
+            investmentId,
+            entityId,
+            organizationId: options.orgId ?? null,
+            metadata: { before: existing ?? null, after: { ...fields } },
+          });
+
+          results.push({
+            action: "add_investment_investor",
+            success: true,
+            data: { investment_investor_id: row!.id, investment_id: investmentId, entity_id: entityId },
+          });
+          break;
+        }
+
+        case "update_investment_investor": {
+          const id = item.data.investment_investor_id as string;
+          if (!id) throw new Error("investment_investor_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("investment_investors")
+            .select("*")
+            .eq("id", id)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+          if ("committed_capital" in item.data) updates.committed_capital = item.data.committed_capital ?? null;
+          if ("capital_pct" in item.data) updates.capital_pct = item.data.capital_pct ?? null;
+          if ("profit_pct" in item.data) updates.profit_pct = item.data.profit_pct ?? null;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("investment_investors")
+            .update(updates)
+            .eq("id", id)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "investment_investor",
+            resourceId: id,
+            investmentId: before.investment_id,
+            entityId: before.entity_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "update_investment_investor", success: true, data: after });
+          break;
+        }
+
+        case "remove_investment_investor": {
+          const id = item.data.investment_investor_id as string;
+          if (!id) throw new Error("investment_investor_id is required");
+
+          const { data: target, error: fetchErr } = await supabase
+            .from("investment_investors")
+            .select("id, investment_id, entity_id, is_active")
+            .eq("id", id)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { data: activeRows, error: countErr } = await supabase
+            .from("investment_investors")
+            .select("id")
+            .eq("investment_id", target.investment_id)
+            .eq("is_active", true);
+          if (countErr) throw countErr;
+
+          const wouldBeRemaining = (activeRows || []).filter((r) => r.id !== id).length;
+          if (target.is_active && wouldBeRemaining === 0) {
+            results.push({
+              action: "remove_investment_investor",
+              success: false,
+              error: "cannot remove last investor on investment; delete the investment instead",
+            });
+            break;
+          }
+
+          const { data: after, error: updateErr } = await supabase
+            .from("investment_investors")
+            .update({ is_active: false, updated_at: new Date().toISOString() })
+            .eq("id", id)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "delete",
+            resourceType: "investment_investor",
+            resourceId: id,
+            investmentId: target.investment_id,
+            entityId: target.entity_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before: target, after },
+          });
+
+          results.push({ action: "remove_investment_investor", success: true, data: after });
+          break;
+        }
+
+        case "update_investment_transaction": {
+          const txnId = item.data.transaction_id as string;
+          if (!txnId) throw new Error("transaction_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("investment_transactions")
+            .select("*")
+            .eq("id", txnId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+          if ("investment_investor_id" in item.data) updates.investment_investor_id = item.data.investment_investor_id;
+          if ("transaction_type" in item.data) updates.transaction_type = item.data.transaction_type;
+          if ("amount" in item.data) updates.amount = item.data.amount;
+          if ("transaction_date" in item.data) updates.transaction_date = item.data.transaction_date;
+          // The investment_transactions column is `description` (matches
+          // the create path). The historic action schema accepted `notes`
+          // and the apply handler tried to write it directly — Postgres
+          // returned "Could not find the 'notes' column ... in the schema
+          // cache". Map both `description` and the legacy `notes` field
+          // to the description column, preferring description when both
+          // are supplied.
+          if ("description" in item.data) updates.description = item.data.description ?? null;
+          else if ("notes" in item.data) updates.description = item.data.notes ?? null;
+
+          if ("line_items" in item.data) {
+            const txnType = ((updates.transaction_type as string) ?? before.transaction_type) as
+              | "contribution"
+              | "distribution"
+              | "return_of_capital";
+            const txnAmount = ((updates.amount as number) ?? before.amount) as number;
+            const rawItems = (item.data.line_items as TransactionLineItemInput[]) || [];
+            const coerced = coerceLineItemCategories(txnType, rawItems);
+            const validation = validateInvestmentTransactionLineItems({
+              transaction_type: txnType,
+              amount: txnAmount,
+              line_items: coerced,
+              adjusts_transaction_id: before.adjusts_transaction_id ?? null,
+            });
+            if (!validation.ok) {
+              results.push({
+                action: "update_investment_transaction",
+                success: false,
+                error: validation.error,
+              });
+              break;
+            }
+            updates.line_items = coerced;
+          }
+
+          // Resolve document_id with the same fallback chain as
+          // record_investment_transaction. This is the path used by the
+          // dedup branch — when extraction sees an existing matching txn it
+          // proposes update_investment_transaction so the new source doc
+          // gets attached to the existing row instead of creating a dup.
+          // Only overwrite document_id when one resolves; never null out an
+          // existing link just because the action didn't carry one.
+          if ("document_id" in item.data) {
+            updates.document_id = item.data.document_id ?? null;
+          } else {
+            let resolvedDocId: string | null = null;
+            if (item.data.queue_item_id) {
+              const { data: qItem } = await supabase
+                .from("document_queue")
+                .select("document_id")
+                .eq("id", item.data.queue_item_id as string)
+                .maybeSingle();
+              resolvedDocId = qItem?.document_id || null;
+            }
+            if (!resolvedDocId) resolvedDocId = options.documentId || null;
+            if (resolvedDocId && !before.document_id) {
+              updates.document_id = resolvedDocId;
+            }
+          }
+
+          const { data: after, error: updateErr } = await supabase
+            .from("investment_transactions")
+            .update(updates)
+            .eq("id", txnId)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "investment_transaction",
+            resourceId: txnId,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "update_investment_transaction", success: true, data: after });
+          break;
+        }
+
+        case "delete_investment_transaction": {
+          const txnId = item.data.transaction_id as string;
+          if (!txnId) throw new Error("transaction_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("investment_transactions")
+            .select("*")
+            .eq("id", txnId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { error: deleteErr } = await supabase
+            .from("investment_transactions")
+            .delete()
+            .eq("id", txnId);
+          if (deleteErr) throw deleteErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "delete",
+            resourceType: "investment_transaction",
+            resourceId: txnId,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before },
+          });
+
+          results.push({ action: "delete_investment_transaction", success: true, data: { transaction_id: txnId } });
+          break;
+        }
+
+        case "add_co_investor": {
+          const investmentId = resolveInvestmentId(item.data.investment_id);
+          if (!investmentId) throw new Error("investment_id is required");
+          const directoryEntryId = item.data.directory_entry_id as string;
+          if (!directoryEntryId) throw new Error("directory_entry_id is required");
+          const role = item.data.role as string;
+          if (!role) throw new Error("role is required");
+
+          const { data, error } = await supabase
+            .from("investment_co_investors")
+            .insert({
+              investment_id: investmentId,
+              organization_id: options.orgId,
+              directory_entry_id: directoryEntryId,
+              role,
+              capital_pct: (item.data.capital_pct as number | null | undefined) ?? null,
+              profit_pct: (item.data.profit_pct as number | null | undefined) ?? null,
+              notes: (item.data.notes as string | null | undefined) ?? null,
+            })
+            .select()
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "create",
+            resourceType: "investment_co_investor",
+            resourceId: data.id,
+            investmentId,
+            organizationId: options.orgId ?? null,
+            metadata: { after: data },
+          });
+
+          results.push({ action: "add_co_investor", success: true, data });
+          break;
+        }
+
+        case "update_co_investor": {
+          const id = item.data.co_investor_id as string;
+          if (!id) throw new Error("co_investor_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("investment_co_investors")
+            .select("*")
+            .eq("id", id)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+          if ("role" in item.data) updates.role = item.data.role;
+          if ("capital_pct" in item.data) updates.capital_pct = item.data.capital_pct ?? null;
+          if ("profit_pct" in item.data) updates.profit_pct = item.data.profit_pct ?? null;
+          if ("notes" in item.data) updates.notes = item.data.notes ?? null;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("investment_co_investors")
+            .update(updates)
+            .eq("id", id)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "investment_co_investor",
+            resourceId: id,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "update_co_investor", success: true, data: after });
+          break;
+        }
+
+        case "remove_co_investor": {
+          const id = item.data.co_investor_id as string;
+          if (!id) throw new Error("co_investor_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("investment_co_investors")
+            .select("*")
+            .eq("id", id)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { error: deleteErr } = await supabase
+            .from("investment_co_investors")
+            .delete()
+            .eq("id", id);
+          if (deleteErr) throw deleteErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "delete",
+            resourceType: "investment_co_investor",
+            resourceId: id,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before },
+          });
+
+          results.push({ action: "remove_co_investor", success: true, data: { co_investor_id: id } });
+          break;
+        }
+
+        case "archive_document": {
+          const documentId = item.data.document_id as string;
+          if (!documentId) throw new Error("document_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("documents")
+            .select("id, entity_id, investment_id, deleted_at")
+            .eq("id", documentId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("documents")
+            .update({ deleted_at: new Date().toISOString() })
+            .eq("id", documentId)
+            .select("id, deleted_at")
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "archive",
+            resourceType: "document",
+            resourceId: documentId,
+            entityId: before.entity_id,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "archive_document", success: true, data: after });
+          break;
+        }
+
+        case "update_document": {
+          const documentId = item.data.document_id as string;
+          if (!documentId) throw new Error("document_id is required");
+
+          // Only write fields the caller explicitly passed.
+          const updates: Record<string, unknown> = {};
+          for (const key of ["name", "document_type", "document_category", "year", "jurisdiction"] as const) {
+            if (item.data[key] !== undefined) updates[key] = item.data[key];
+          }
+          if (Object.keys(updates).length === 0) {
+            throw new Error("At least one field must be provided to update_document");
+          }
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("documents")
+            .select("id, entity_id, investment_id, name, document_type, document_category, year, jurisdiction")
+            .eq("id", documentId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("documents")
+            .update(updates)
+            .eq("id", documentId)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "edit",
+            resourceType: "document",
+            resourceId: documentId,
+            entityId: before.entity_id,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: {
+              document_name: after.name,
+              fields: Object.keys(updates),
+              before,
+              after,
+            },
+          });
+
+          // If the document_type changed, refresh expectation satisfaction:
+          // the old type may no longer match, and the new type might match a
+          // different expectation. unsatisfy first, then check — both helpers
+          // already exist in document-expectations.ts.
+          if (
+            updates.document_type !== undefined &&
+            before.document_type !== updates.document_type
+          ) {
+            const { unsatisfyByDocument, checkAndSatisfyExpectations } = await import(
+              "@/lib/utils/document-expectations"
+            );
+            await unsatisfyByDocument(documentId).catch((err) =>
+              console.error(`update_document unsatisfy failed for ${documentId}:`, err),
+            );
+            await checkAndSatisfyExpectations(documentId).catch((err) =>
+              console.error(`update_document check-and-satisfy failed for ${documentId}:`, err),
+            );
+          }
+
+          results.push({ action: "update_document", success: true, data: after });
+          break;
+        }
+
+        case "add_document_expectation": {
+          const entityId = item.data.entity_id as string;
+          const documentType = item.data.document_type as string;
+          const documentCategory = item.data.document_category as string;
+          const isRequired = item.data.is_required as boolean | undefined;
+          const notes = (item.data.notes as string | null | undefined) ?? null;
+          if (!entityId) throw new Error("entity_id is required");
+          if (!documentType) throw new Error("document_type is required");
+          if (!documentCategory) throw new Error("document_category is required");
+
+          const { data, error } = await supabase
+            .from("entity_document_expectations")
+            .upsert(
+              {
+                entity_id: entityId,
+                organization_id: options.orgId,
+                document_type: documentType,
+                document_category: documentCategory,
+                is_required: isRequired ?? true,
+                source: "manual",
+                notes,
+                is_not_applicable: false,
+                is_suggestion: false,
+              },
+              { onConflict: "entity_id,document_type" },
+            )
+            .select()
+            .single();
+          if (error) throw error;
+          results.push({ action: "add_document_expectation", success: true, data });
+          break;
+        }
+
+        case "dismiss_document_expectation": {
+          const entityId = item.data.entity_id as string;
+          const expectationId = item.data.expectation_id as string;
+          if (!entityId) throw new Error("entity_id is required");
+          if (!expectationId) throw new Error("expectation_id is required");
+
+          const { error } = await supabase
+            .from("entity_document_expectations")
+            .update({
+              is_not_applicable: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", expectationId)
+            .eq("entity_id", entityId);
+          if (error) throw error;
+          results.push({
+            action: "dismiss_document_expectation",
+            success: true,
+            data: { id: expectationId },
+          });
+          break;
+        }
+
+        case "dismiss_document_suggestion": {
+          const expectationId = item.data.expectation_id as string;
+          if (!expectationId) throw new Error("expectation_id is required");
+
+          // dismissSuggestion both marks the expectation not_applicable AND
+          // records the pattern dismissal so the inference engine doesn't
+          // re-suggest it.
+          const { dismissSuggestion } = await import("@/lib/utils/inference-engine");
+          await dismissSuggestion(expectationId);
+          results.push({
+            action: "dismiss_document_suggestion",
+            success: true,
+            data: { id: expectationId },
+          });
+          break;
+        }
+
+        case "accept_document_suggestion": {
+          const expectationId = item.data.expectation_id as string;
+          if (!expectationId) throw new Error("expectation_id is required");
+
+          // confirmSuggestion flips is_suggestion=false so the expectation
+          // becomes a real requirement. The row stays in place.
+          const { confirmSuggestion } = await import("@/lib/utils/inference-engine");
+          await confirmSuggestion(expectationId);
+          results.push({
+            action: "accept_document_suggestion",
+            success: true,
+            data: { id: expectationId },
+          });
+          break;
+        }
+
+        case "unlink_document": {
+          const documentId = item.data.document_id as string;
+          const scope = item.data.scope as "entity" | "investment" | "both";
+          if (!documentId) throw new Error("document_id is required");
+          if (!["entity", "investment", "both"].includes(scope)) throw new Error("invalid scope");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("documents")
+            .select("id, entity_id, investment_id")
+            .eq("id", documentId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const updates: Record<string, unknown> = {};
+          if (scope === "entity" || scope === "both") updates.entity_id = null;
+          if (scope === "investment" || scope === "both") updates.investment_id = null;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("documents")
+            .update(updates)
+            .eq("id", documentId)
+            .select("id, entity_id, investment_id")
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "unlink",
+            resourceType: "document",
+            resourceId: documentId,
+            entityId: before.entity_id,
+            investmentId: before.investment_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after, scope },
+          });
+
+          results.push({ action: "unlink_document", success: true, data: after });
+          break;
+        }
+
+        // split_document is no longer a pipeline action — it moved to the
+        // MCP tool layer (`splitDocumentTool` in tools/documents-write.ts).
+        // The tool runs splitter.ts to enqueue children; the worker picks
+        // them up like normal uploads. Any stale staged action with this
+        // name will fall through to the default-case handler below.
+
+        case "create_compliance_obligation": {
+          const entityId = resolveEntityId(item.data.entity_id);
+          if (!entityId) throw new Error("entity_id is required");
+          const name = item.data.name as string;
+          const dueDate = item.data.due_date as string;
+          if (!name) throw new Error("name is required");
+          if (!dueDate) throw new Error("due_date is required");
+
+          const recurrence = (item.data.recurrence as string | null | undefined) ?? null;
+
+          const ruleId = (item.data.rule_id as string | null | undefined) ?? null;
+          const source = (item.data.source as string | undefined) ?? (ruleId ? "rule" : "ai");
+
+          const { data, error } = await supabase
+            .from("compliance_obligations")
+            .insert({
+              entity_id: entityId,
+              rule_id: ruleId,
+              name,
+              next_due_date: dueDate,
+              frequency: recurrence,
+              obligation_type: (item.data.obligation_type as string) || "custom",
+              jurisdiction: item.data.jurisdiction as string,
+              status: "pending",
+              notes: (item.data.notes as string | null | undefined) ?? null,
+              source,
+            })
+            .select()
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "create",
+            resourceType: "compliance_obligation",
+            resourceId: data.id,
+            entityId,
+            organizationId: options.orgId ?? null,
+            metadata: { after: data },
+          });
+
+          results.push({ action: "create_compliance_obligation", success: true, data });
+          break;
+        }
+
+        case "update_compliance_obligation": {
+          const obligationId = item.data.obligation_id as string;
+          if (!obligationId) throw new Error("obligation_id is required");
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("compliance_obligations")
+            .select("*")
+            .eq("id", obligationId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+          if ("name" in item.data) updates.name = item.data.name;
+          if ("due_date" in item.data) updates.next_due_date = item.data.due_date;
+          if ("recurrence" in item.data) updates.frequency = item.data.recurrence ?? null;
+          if ("notes" in item.data) updates.notes = item.data.notes ?? null;
+          if ("completed_at" in item.data) {
+            updates.completed_at = item.data.completed_at ?? null;
+            updates.status = item.data.completed_at ? "completed" : "pending";
+          }
+          if ("document_id" in item.data) updates.document_id = item.data.document_id ?? null;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("compliance_obligations")
+            .update(updates)
+            .eq("id", obligationId)
+            .select()
+            .single();
+          if (updateErr) throw updateErr;
+
+          // Mirror complete_obligation: if this update flipped completed_at from null → date
+          // and the obligation is rule-driven with a non-one_time cadence, schedule the next cycle.
+          const justCompleted =
+            !before.completed_at && after.completed_at && after.rule_id;
+          if (justCompleted) {
+            const rule = getRuleById(after.rule_id);
+            if (rule && rule.frequency !== "one_time") {
+              const { data: entity } = await supabase
+                .from("entities")
+                .select("formed_date")
+                .eq("id", after.entity_id)
+                .single();
+              const nextDueDate = calculateNextDueDateAfterCompletion(
+                rule,
+                after.completed_at,
+                entity?.formed_date || null,
+              );
+              if (nextDueDate) {
+                const { data: existingNewer } = await supabase
+                  .from("compliance_obligations")
+                  .select("id")
+                  .eq("entity_id", after.entity_id)
+                  .eq("rule_id", rule.id)
+                  .gte("next_due_date", nextDueDate)
+                  .limit(1)
+                  .maybeSingle();
+                if (!existingNewer) {
+                  await supabase.from("compliance_obligations").upsert(
+                    {
+                      entity_id: after.entity_id,
+                      rule_id: rule.id,
+                      jurisdiction: after.jurisdiction,
+                      obligation_type: rule.obligation_type,
+                      name: rule.name,
+                      description: rule.description,
+                      frequency: rule.frequency,
+                      next_due_date: nextDueDate,
+                      status: "pending",
+                      fee_description: rule.fee,
+                      form_number: rule.form_number || null,
+                      portal_url: rule.portal_url || null,
+                      filed_with: rule.filed_with,
+                      penalty_description: rule.penalty_description || null,
+                    },
+                    { onConflict: "entity_id,rule_id,next_due_date" },
+                  );
+                }
+              }
+            }
+          }
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "compliance_obligation",
+            resourceId: obligationId,
+            entityId: before.entity_id,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "update_compliance_obligation", success: true, data: after });
+          break;
+        }
+
+        case "archive_directory_entry": {
+          const directoryEntryId = item.data.directory_entry_id as string;
+          if (!directoryEntryId) throw new Error("directory_entry_id is required");
+
+          // Guard: refuse if any active records still reference this entry.
+          const [allocRefs, coInvestorRefs, memberRefs] = await Promise.all([
+            supabase
+              .from("investment_allocations")
+              .select("id", { count: "exact", head: true })
+              .eq("member_directory_id", directoryEntryId)
+              .eq("is_active", true),
+            supabase
+              .from("investment_co_investors")
+              .select("id", { count: "exact", head: true })
+              .eq("directory_entry_id", directoryEntryId),
+            supabase
+              .from("entity_members")
+              .select("id", { count: "exact", head: true })
+              .eq("directory_entry_id", directoryEntryId),
+          ]);
+
+          const refCount =
+            (allocRefs.count || 0) + (coInvestorRefs.count || 0) + (memberRefs.count || 0);
+          if (refCount > 0) {
+            results.push({
+              action: "archive_directory_entry",
+              success: false,
+              error: `directory entry still referenced by ${refCount} active records`,
+            });
+            break;
+          }
+
+          const { data: before, error: fetchErr } = await supabase
+            .from("directory_entries")
+            .select("id, name, organization_id")
+            .eq("id", directoryEntryId)
+            .single();
+          if (fetchErr) throw fetchErr;
+
+          const { data: after, error: updateErr } = await supabase
+            .from("directory_entries")
+            .update({ deleted_at: new Date().toISOString() })
+            .eq("id", directoryEntryId)
+            .select("id, deleted_at")
+            .single();
+          if (updateErr) throw updateErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "archive",
+            resourceType: "directory_entry",
+            resourceId: directoryEntryId,
+            organizationId: options.orgId ?? null,
+            metadata: { before, after },
+          });
+
+          results.push({ action: "archive_directory_entry", success: true, data: after });
+          break;
+        }
+
+        case "upsert_state_id": {
+          const stateIdEntityId = item.data.entity_id as string;
+          const stateIdJurisdiction = item.data.jurisdiction as string;
+          const stateIdNumber = item.data.state_id_number as string;
+          const stateIdLabel = (item.data.label as string) || "Entity Number";
+          if (!stateIdEntityId) throw new Error("entity_id is required");
+          if (!stateIdJurisdiction) throw new Error("jurisdiction is required");
+          if (!stateIdNumber) throw new Error("state_id_number is required");
+
+          const { data: stateIdData, error: stateIdErr } = await supabase
+            .from("entity_state_ids")
+            .upsert(
+              {
+                entity_id: stateIdEntityId,
+                jurisdiction: stateIdJurisdiction,
+                state_id_number: stateIdNumber,
+                label: stateIdLabel,
+              },
+              { onConflict: "entity_id,jurisdiction" },
+            )
+            .select()
+            .single();
+          if (stateIdErr) throw stateIdErr;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "upsert",
+            resourceType: "entity_state_id",
+            resourceId: stateIdData.id,
+            entityId: stateIdEntityId,
+            organizationId: options.orgId ?? null,
+            metadata: {
+              jurisdiction: stateIdJurisdiction,
+              state_id_number: stateIdNumber,
+              label: stateIdLabel,
+            },
+          });
+
+          results.push({ action: "upsert_state_id", success: true, data: stateIdData });
           break;
         }
 

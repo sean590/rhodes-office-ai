@@ -69,18 +69,19 @@ export async function POST(
     }
 
     const uploaded: Array<Record<string, unknown>> = [];
-    const duplicates: Array<{ filename: string; reason: string }> = [];
+    const duplicates: Array<{ filename: string; reason: string; existing_document_id?: string | null }> = [];
 
     // Batch duplicate checks
     const allHashes = files.map((f) => f.contentHash);
     const duplicateDocHashes = new Map<string, string>();
+    const duplicateDocIds = new Map<string, string>();
     const duplicateQueueHashes = new Map<string, string>();
 
     if (allHashes.length > 0) {
       const [docDupes, queueDupes] = await Promise.all([
         admin
           .from("documents")
-          .select("content_hash, name")
+          .select("id, content_hash, name")
           .in("content_hash", allHashes)
           .eq("organization_id", orgId)
           .is("deleted_at", null),
@@ -93,6 +94,7 @@ export async function POST(
 
       for (const doc of docDupes.data || []) {
         duplicateDocHashes.set(doc.content_hash, doc.name);
+        duplicateDocIds.set(doc.content_hash, doc.id);
       }
       for (const q of queueDupes.data || []) {
         duplicateQueueHashes.set(q.content_hash, q.original_filename);
@@ -102,12 +104,14 @@ export async function POST(
     for (const file of files) {
       const contentHash = file.contentHash;
 
-      // Check duplicates
+      // Check duplicates — include the existing document_id so Claude can
+      // reference it for linking without searching.
       const existingDocName = duplicateDocHashes.get(contentHash);
       if (existingDocName) {
         duplicates.push({
           filename: file.originalName,
           reason: `Duplicate of existing document "${existingDocName}"`,
+          existing_document_id: duplicateDocIds.get(contentHash) || null,
         });
         continue;
       }
@@ -172,7 +176,43 @@ export async function POST(
         continue;
       }
 
-      uploaded.push(queueItem);
+      // Create a documents row immediately so the ID is available for chat
+      // linking in the same turn. Starts with status='processing'; the pipeline
+      // worker updates it with extraction results + status='ready' when done.
+      let documentId: string | null = null;
+      try {
+        const { data: docRow } = await admin
+          .from("documents")
+          .insert({
+            organization_id: orgId,
+            entity_id: entityId,
+            name: file.originalName,
+            document_type: classification.document_type || "other",
+            document_category: classification.category || null,
+            year: classification.year || null,
+            file_path: file.storagePath,
+            file_size: file.size,
+            mime_type: file.type || null,
+            uploaded_by: user.id,
+            content_hash: contentHash,
+            direction: direction || null,
+            ai_extracted: false,
+            status: "processing",
+          })
+          .select("id")
+          .single();
+        if (docRow) {
+          documentId = docRow.id;
+          await admin
+            .from("document_queue")
+            .update({ document_id: docRow.id })
+            .eq("id", queueItem.id);
+        }
+      } catch (docErr) {
+        console.error(`Early doc creation failed for ${file.originalName}:`, docErr);
+      }
+
+      uploaded.push({ ...queueItem, document_id: documentId });
     }
 
     // Update batch stats

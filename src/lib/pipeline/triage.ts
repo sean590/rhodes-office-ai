@@ -54,6 +54,7 @@ interface EntityRosterItem {
   name: string;
   type: string;
   ein_last4?: string;
+  aliases?: string[];
 }
 
 interface InvestmentRosterItem {
@@ -92,7 +93,7 @@ export async function buildEntityRoster(orgId: string): Promise<EntityRosterItem
   const admin = createAdminClient();
   const { data: entities } = await admin
     .from("entities")
-    .select("id, name, type, ein")
+    .select("id, name, type, ein, aliases")
     .eq("organization_id", orgId)
     .order("name");
 
@@ -101,6 +102,7 @@ export async function buildEntityRoster(orgId: string): Promise<EntityRosterItem
     name: e.name,
     type: e.type,
     ein_last4: e.ein ? e.ein.slice(-4) : undefined,
+    aliases: Array.isArray(e.aliases) ? e.aliases : undefined,
   }));
 }
 
@@ -179,20 +181,46 @@ export async function scanDocumentStructure(buffer: Buffer): Promise<StructuralS
   }
 
   const formPatterns = [
+    // Tax forms
     /form\s*1065/i, /form\s*1120/i, /form\s*1041/i,
     /schedule\s*k-?1/i, /form\s*565/i, /form\s*568/i,
     /form\s*1040/i, /form\s*8865/i, /form\s*199/i,
+    // Investment-package section markers — distribution/capital-call
+    // notices and standalone investor statements often have a fresh
+    // "Distribution Notice" / "Capital Call Notice" header per investor.
+    /distribution\s*(notice|statement)/i,
+    /capital\s*(call|contribution)\s*(notice|statement)/i,
+    /investor\s*statement/i,
   ];
 
   const einPattern = /\d{2}-?\d{7}/g;
+  // Per-page header line shaped like "Investor Name: Acme Holdings LLC"
+  // signals a fresh section in multi-investor packages, even when the form
+  // type / EIN don't change between pages.
+  const investorPattern = /(?:investor|partner|member|shareholder)\s*(?:name)?\s*:\s*(.+)/i;
+  // Unlabeled layout: distribution / capital-call notices and similar
+  // per-investor pages often display the investor's name on one line and
+  // a role marker ("Limited Partner", "General Partner", "Limited Member",
+  // "General Member") on the adjacent line — no colon-delimited label.
+  // We pick up the role marker and grab the nearest preceding name-shaped
+  // line as the investor name.
+  const roleMarkerPattern = /\b(?:limited|general)\s+(?:partner|member)\b/i;
 
   const sectionBreaks: Array<{ page: number; signal: string }> = [];
   const formTypes = new Set<string>();
   const eins = new Set<string>();
+  const investorNames = new Set<string>();
 
   for (let pageNum = 0; pageNum < pageTexts.length; pageNum++) {
-    // Only look at first 200 chars per page (header area)
-    const header = pageTexts[pageNum].slice(0, 200);
+    // Scan the full page text. The previous 200-char header window was a
+    // perf optimization that broke for PDFs where the discriminating
+    // signal lives outside the visual top of the page — e.g.,
+    // distribution-notice templates with rotated investor names at the
+    // bottom-left, where unpdf's content-stream order doesn't put the
+    // name in the first 200 chars. The patterns below are specific
+    // enough (form numbers, EIN format, labeled investor markers) that
+    // false positives from body-text matches are minimal.
+    const header = pageTexts[pageNum];
 
     for (const pattern of formPatterns) {
       const match = header.match(pattern);
@@ -212,14 +240,109 @@ export async function scanDocumentStructure(buffer: Buffer): Promise<StructuralS
       }
       eins.add(ein);
     }
+
+    const investorMatch = header.match(investorPattern);
+    if (investorMatch) {
+      const investorName = investorMatch[1].trim().slice(0, 80); // cap to avoid grabbing whole paragraphs
+      const key = investorName.toLowerCase();
+      if (investorNames.size > 0 && !investorNames.has(key)) {
+        sectionBreaks.push({ page: pageNum + 1, signal: `New investor: ${investorName}` });
+      }
+      investorNames.add(key);
+    } else {
+      // Fallback: unlabeled layout. Find a "Limited Partner" / "General
+      // Partner" marker and walk backward through the page's lines for
+      // the closest name-shaped predecessor. Falls forward if nothing
+      // sensible appears before the marker (some templates put the name
+      // after the role marker in the content stream).
+      const candidate = extractInvestorNameNearRoleMarker(header, roleMarkerPattern);
+      if (candidate) {
+        const key = candidate.toLowerCase();
+        if (investorNames.size > 0 && !investorNames.has(key)) {
+          sectionBreaks.push({ page: pageNum + 1, signal: `New investor: ${candidate}` });
+        }
+        investorNames.add(key);
+      }
+    }
   }
 
   return {
-    likely_composite: formTypes.size >= 2 || eins.size >= 2 || sectionBreaks.length >= 2,
+    likely_composite:
+      formTypes.size >= 2 ||
+      eins.size >= 2 ||
+      investorNames.size >= 2 ||
+      sectionBreaks.length >= 2,
     section_breaks: sectionBreaks,
     distinct_form_types: Array.from(formTypes),
     distinct_eins: Array.from(eins),
   };
+}
+
+// Words that look name-shaped (capitalized, multi-word) but aren't actual
+// investor identities — column headers, doc labels, common terminology
+// that crops up next to role markers in distribution / capital-call
+// templates. Anything matching the WHOLE candidate (case-insensitive)
+// rejects it as a name candidate.
+const NAME_FALSE_POSITIVES = new Set<string>([
+  "limited partner",
+  "general partner",
+  "limited member",
+  "general member",
+  "distributable cash",
+  "carried interest",
+  "compliance holdback",
+  "audit tax",
+  "net distribution",
+  "basin mineral",
+  "tax withholding",
+  "return of capital",
+  "operating cashflows",
+  "capital call",
+  "distribution notice",
+  "investor statement",
+]);
+
+function looksLikeName(line: string): boolean {
+  if (!line) return false;
+  const trimmed = line.trim();
+  if (trimmed.length < 3 || trimmed.length > 80) return false;
+  if (/\d/.test(trimmed)) return false;
+  if (NAME_FALSE_POSITIVES.has(trimmed.toLowerCase())) return false;
+  // 2–6 words; most should start uppercase. Tolerate one lowercase
+  // connector ("of", "and") so "Bank of America" / "Smith and Jones"
+  // pass without false positives.
+  const words = trimmed.split(/\s+/);
+  if (words.length < 2 || words.length > 6) return false;
+  const capitalized = words.filter((w) => /^[A-Z]/.test(w)).length;
+  return capitalized >= words.length - 1;
+}
+
+/**
+ * Given a page's text and a role-marker regex, find the role marker and
+ * walk through the page's line list looking for the nearest name-shaped
+ * line. Walks backward first (the typical layout puts the name above the
+ * role label), then forward as a fallback. Returns the trimmed name or
+ * null if nothing sensible turns up.
+ */
+function extractInvestorNameNearRoleMarker(
+  pageText: string,
+  rolePattern: RegExp,
+): string | null {
+  const lines = pageText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  const markerIdx = lines.findIndex((l) => rolePattern.test(l));
+  if (markerIdx < 0) return null;
+  // Walk backward: name typically immediately precedes the role label.
+  for (let i = markerIdx - 1; i >= Math.max(0, markerIdx - 4); i--) {
+    if (looksLikeName(lines[i])) return lines[i];
+  }
+  // Fallback: walk forward (some templates put the name after the role).
+  for (let i = markerIdx + 1; i < Math.min(lines.length, markerIdx + 4); i++) {
+    if (looksLikeName(lines[i])) return lines[i];
+  }
+  return null;
 }
 
 // Layer 3: Combined decision (keywords + structural + Claude tier 1)
@@ -277,9 +400,12 @@ export async function runTier1(
 
   // Build roster strings
   const entityRosterStr = entityRoster.length > 0
-    ? entityRoster.map((e) =>
-        `- ${e.name} (id: ${e.id}, type: ${e.type}${e.ein_last4 ? `, EIN: ****${e.ein_last4}` : ""})`
-      ).join("\n")
+    ? entityRoster.map((e) => {
+        const aliasPart = e.aliases && e.aliases.length > 0
+          ? `, aka: ${e.aliases.join(" / ")}`
+          : "";
+        return `- ${e.name} (id: ${e.id}, type: ${e.type}${e.ein_last4 ? `, EIN: ****${e.ein_last4}` : ""}${aliasPart})`;
+      }).join("\n")
     : "(no entities)";
 
   const investmentRosterStr = investmentRoster.length > 0
