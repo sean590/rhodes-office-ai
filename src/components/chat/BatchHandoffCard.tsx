@@ -1,0 +1,164 @@
+"use client";
+
+// Renders an assistant chat message whose metadata.type === "batch_handoff".
+// These are the system-style messages emitted by the chat drawer when a user
+// uploads 6+ files at once: instead of running through the MCP orchestrator,
+// the files are routed to the pipeline in the background and this card
+// surfaces live progress in the conversation.
+//
+// The card subscribes to Realtime UPDATE events on document_batches scoped
+// to its own batch_id, so the status indicator and CTA copy transition in
+// place: processing → review → completed. No polling fallback — Realtime is
+// already required for the notification bell, so it's an existing dependency.
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/client";
+
+type BatchStatus = "staging" | "processing" | "review" | "completed";
+
+interface BatchHandoffMeta {
+  batch_id: string;
+  file_count: number;
+  filenames: string[];
+}
+
+const COLLAPSE_THRESHOLD = 5;
+
+function statusCopy(status: BatchStatus, fileCount: number): {
+  headline: string;
+  cta: string;
+  dotColor: string;
+} {
+  const docs = `${fileCount} document${fileCount === 1 ? "" : "s"}`;
+  switch (status) {
+    case "review":
+      return {
+        headline: `${docs} ready for review`,
+        cta: "Review now",
+        dotColor: "#c44520",
+      };
+    case "completed":
+      return {
+        headline: `${docs} processed`,
+        cta: "View details",
+        dotColor: "#2d8a4e",
+      };
+    case "staging":
+    case "processing":
+    default:
+      return {
+        headline: `Processing ${docs} in the background…`,
+        cta: "View progress",
+        dotColor: "#c47520",
+      };
+  }
+}
+
+export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
+  const { batch_id, file_count, filenames } = metadata;
+  const [status, setStatus] = useState<BatchStatus>("processing");
+  const [expanded, setExpanded] = useState(false);
+  const supabase = useMemo(() => createClient(), []);
+
+  // Initial fetch + Realtime subscription on this batch's row only.
+  useEffect(() => {
+    if (!batch_id) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/pipeline/batches/${batch_id}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (!cancelled && data?.status) setStatus(data.status as BatchStatus);
+      } catch { /* ignore */ }
+    })();
+
+    const channel = supabase
+      .channel(`batch-handoff-${batch_id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "document_batches",
+          filter: `id=eq.${batch_id}`,
+        },
+        (payload) => {
+          const next = (payload.new as { status?: BatchStatus } | null)?.status;
+          if (next) setStatus(next);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, [supabase, batch_id]);
+
+  const copy = statusCopy(status, file_count);
+  const showAll = expanded || filenames.length <= COLLAPSE_THRESHOLD;
+  const visibleFiles = showAll ? filenames : filenames.slice(0, COLLAPSE_THRESHOLD);
+
+  return (
+    <div style={{
+      maxWidth: "85%",
+      padding: 14,
+      borderRadius: "16px 16px 16px 4px",
+      background: "#ffffff",
+      border: "1px solid #e8e6df",
+      fontSize: 13,
+      lineHeight: 1.5,
+      color: "#1a1a1f",
+      display: "flex", flexDirection: "column", gap: 10,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: "50%",
+          background: copy.dotColor, flexShrink: 0,
+        }} />
+        <span style={{ fontWeight: 500 }}>{copy.headline}</span>
+      </div>
+
+      {filenames.length > 0 && (
+        <div style={{ fontSize: 12, color: "#6b6b76" }}>
+          {visibleFiles.map((name, i) => (
+            <div key={i} style={{
+              padding: "2px 0",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              · {name}
+            </div>
+          ))}
+          {!showAll && (
+            <button
+              onClick={() => setExpanded(true)}
+              style={{
+                marginTop: 4, fontSize: 11, color: "#2d5a3d",
+                background: "none", border: "none", cursor: "pointer",
+                padding: 0, fontFamily: "inherit",
+              }}
+            >
+              Show {filenames.length - COLLAPSE_THRESHOLD} more
+            </button>
+          )}
+        </div>
+      )}
+
+      <Link
+        href={`/batches/${batch_id}`}
+        style={{
+          alignSelf: "flex-start",
+          padding: "6px 12px",
+          fontSize: 12, fontWeight: 600, color: "#2d5a3d",
+          background: "rgba(45,90,61,0.08)", borderRadius: 6,
+          textDecoration: "none",
+        }}
+      >
+        {copy.cta} →
+      </Link>
+    </div>
+  );
+}

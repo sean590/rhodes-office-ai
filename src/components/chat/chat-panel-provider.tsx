@@ -4,11 +4,16 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 
 interface ChatPanelContext {
   isOpen: boolean;
-  open: (prefill?: string, files?: File[]) => void;
+  open: (prefill?: string, files?: File[], sessionId?: string) => void;
   close: () => void;
   toggle: () => void;
   prefillQuery: string | null;
   prefillFiles: File[];
+  /** When set, the drawer should load this session on open instead of
+   *  picking the most-recent. Used by /review's "Open in chat" to pull up
+   *  the session the worker pre-seeded for a deferred queue item. Cleared
+   *  by `clearPrefill` after the drawer reads it. */
+  prefillSessionId: string | null;
   clearPrefill: () => void;
   panelWidth: number;
   setPanelWidth: (w: number) => void;
@@ -21,6 +26,7 @@ const ChatPanelCtx = createContext<ChatPanelContext>({
   toggle: () => {},
   prefillQuery: null,
   prefillFiles: [],
+  prefillSessionId: null,
   clearPrefill: () => {},
   panelWidth: 400,
   setPanelWidth: () => {},
@@ -30,6 +36,7 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
   const [isOpen, setIsOpen] = useState(false); // Set after mount based on device
   const [prefillQuery, setPrefillQuery] = useState<string | null>(null);
   const [prefillFiles, setPrefillFiles] = useState<File[]>([]);
+  const [prefillSessionId, setPrefillSessionId] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(400);
 
   // Load from localStorage, default open on desktop only.
@@ -62,9 +69,10 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("rhodes_chat_panel", JSON.stringify({ open: isOpen, width: panelWidth }));
   }, [isOpen, panelWidth]);
 
-  const open = useCallback((prefill?: string, files?: File[]) => {
+  const open = useCallback((prefill?: string, files?: File[], sessionId?: string) => {
     if (prefill) setPrefillQuery(prefill);
     if (files && files.length > 0) setPrefillFiles(files);
+    if (sessionId) setPrefillSessionId(sessionId);
     setIsOpen(true);
   }, []);
 
@@ -72,7 +80,7 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      open(detail?.query, detail?.files);
+      open(detail?.query, detail?.files, detail?.sessionId);
     };
     window.addEventListener("rhodes:open-chat", handler);
     return () => window.removeEventListener("rhodes:open-chat", handler);
@@ -80,10 +88,14 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
 
   const close = useCallback(() => setIsOpen(false), []);
   const toggle = useCallback(() => setIsOpen(prev => !prev), []);
-  const clearPrefill = useCallback(() => { setPrefillQuery(null); setPrefillFiles([]); }, []);
+  const clearPrefill = useCallback(() => {
+    setPrefillQuery(null);
+    setPrefillFiles([]);
+    setPrefillSessionId(null);
+  }, []);
 
   return (
-    <ChatPanelCtx.Provider value={{ isOpen, open, close, toggle, prefillQuery, prefillFiles, clearPrefill, panelWidth, setPanelWidth }}>
+    <ChatPanelCtx.Provider value={{ isOpen, open, close, toggle, prefillQuery, prefillFiles, prefillSessionId, clearPrefill, panelWidth, setPanelWidth }}>
       {children}
     </ChatPanelCtx.Provider>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { PlusIcon, XIcon, SparkleIcon } from "@/components/ui/icons";
 import { MessageBubble, ThinkingBubble, StreamingBubble } from "./message-bubble";
@@ -8,9 +8,13 @@ import { ChatApprovalCard } from "./ChatApprovalCard";
 import { usePageContext, type PageContext } from "./page-context-provider";
 import { useChatPanel } from "./chat-panel-provider";
 import { readChatStream } from "@/lib/utils/chat-stream";
+import { createClient } from "@/lib/supabase/client";
+import { readStreamEvents } from "@/lib/chat/stream-reader";
+import type { StreamEvent } from "@/lib/mcp/stream-events";
 import type { LinkableRef } from "@/lib/utils/linkify";
 import type { ChatSession, ChatMessage, ChatMessageMetadata } from "@/lib/types/chat";
 import { validateUploadedFile } from "@/lib/validations";
+import { uploadFilesToBatch } from "@/lib/utils/batch-upload";
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -22,6 +26,13 @@ const DRAWER_PROMPTS = [
   "Show me recent documents",
   "Summarize compliance status",
 ];
+
+// When a chat upload contains more than this many files, skip the inline
+// MCP orchestrator turn — Claude can't reliably read 6+ PDFs and stage all
+// the corresponding link/update actions in a single turn (tool-call budget).
+// Above the threshold, the files are routed to the pipeline in the background
+// and a system-style "batch handoff" message is posted to the conversation.
+const BATCH_THRESHOLD = 5;
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -52,11 +63,77 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   const drawerFileInputRef = useRef<HTMLInputElement>(null);
   const prefillHandled = useRef(false);
 
-  // Handle prefill from panel context (dashboard input, command palette, etc.)
+  // Stable browser Supabase client for Realtime subscriptions.
+  const supabase = useMemo(() => createClient(), []);
+
+  // --- Realtime subscription for live message delivery ----------------------
+  // Listens for INSERT events on chat_messages for the active session. Picks
+  // up pipeline completion notifications, messages from other tabs/devices,
+  // and (later) streaming responses + background agent messages.
+  useEffect(() => {
+    if (!activeSessionId) return;
+
+    const channel = supabase
+      .channel(`chat-${activeSessionId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "chat_messages",
+          filter: `session_id=eq.${activeSessionId}`,
+        },
+        (payload) => {
+          const newMsg = payload.new as ChatMessage;
+          setMessages((prev) => {
+            // Dedupe: already have this exact id.
+            if (prev.some((m) => m.id === newMsg.id)) return prev;
+            // Replace temp message with the real DB row when content + role match.
+            const tempIdx = prev.findIndex(
+              (m) =>
+                typeof m.id === "string" &&
+                m.id.startsWith("temp-") &&
+                m.content === newMsg.content &&
+                m.role === newMsg.role,
+            );
+            if (tempIdx !== -1) {
+              const updated = [...prev];
+              updated[tempIdx] = { ...newMsg };
+              return updated;
+            }
+            return [...prev, newMsg];
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeSessionId, supabase]);
+
+  // Handle prefill from panel context (dashboard input, command palette,
+  // /review's "Open in chat", etc.)
   useEffect(() => {
     if (prefillHandled.current) return;
     const hasQuery = chatPanel.prefillQuery;
     const hasFiles = chatPanel.prefillFiles.length > 0;
+    const hasSession = chatPanel.prefillSessionId;
+
+    // Session prefill: load the named session and pre-fill the input draft
+    // (no auto-send — user reviews the framing first, per the unification
+    // plan). This is /review's "Open in chat" path: the worker created the
+    // session with the agent's defer reason as the first assistant message.
+    if (hasSession) {
+      prefillHandled.current = true;
+      const sessionId = chatPanel.prefillSessionId as string;
+      const draft = hasQuery ? chatPanel.prefillQuery || "" : "";
+      chatPanel.clearPrefill();
+      void loadSession(sessionId).then(() => {
+        if (draft) setInput(draft);
+      });
+      return;
+    }
 
     if (hasQuery || hasFiles) {
       prefillHandled.current = true;
@@ -75,7 +152,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         }
       }, 300);
     }
-  }, [chatPanel.prefillQuery, chatPanel.prefillFiles]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatPanel.prefillQuery, chatPanel.prefillFiles, chatPanel.prefillSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Listen for auto-send trigger
   useEffect(() => {
@@ -99,6 +176,9 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   const [showSessionPicker, setShowSessionPicker] = useState(false);
   const [refs, setRefs] = useState<LinkableRef[]>([]);
   const [sessionLengthDismissed, setSessionLengthDismissed] = useState(false);
+  // MCP is the only chat path post-Phase-3 cutover. The state variable is
+  // kept (always true) so the rest of the component doesn't need a rewrite.
+  const [mcpEnabled] = useState<boolean>(true);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -261,7 +341,16 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
 
       // Optimistic user message — capture page_context so the divider logic
       // can detect when the user moved between pages mid-conversation.
-      const content = text.trim() || (hasFiles ? `Uploaded ${drawerFiles.length} file${drawerFiles.length !== 1 ? "s" : ""}` : "");
+      // Strip system-generated "[Continuing …]" prefixes from the display
+      // content. Two flavors fire today:
+      //   "[Continuing after approval] …"   after apply-actions follow_up
+      //   "[Continuing after truncation] …" after a max_tokens stop reason
+      // Claude sees these in the API payload as a hint to resume; the user
+      // shouldn't see the prefix in the chat bubble.
+      const CONTINUATION_RE = /^\[Continuing[^\]]*\]\s*/;
+      const isAutoFollow = CONTINUATION_RE.test(text);
+      const displayText = isAutoFollow ? text.replace(CONTINUATION_RE, "") : text.trim();
+      const content = displayText || (hasFiles ? `Uploaded ${drawerFiles.length} file${drawerFiles.length !== 1 ? "s" : ""}` : "");
       const optimisticMeta: ChatMessageMetadata = {};
       if (hasFiles) {
         optimisticMeta.attachments = drawerFiles.map((f) => ({
@@ -290,6 +379,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       };
       setMessages((prev) => [...prev, userMsg]);
       setInput("");
+      if (inputRef.current) inputRef.current.style.height = "auto";
       const currentFiles = [...drawerFiles];
       setDrawerFiles([]);
       setSending(true);
@@ -297,51 +387,309 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
 
       try {
         if (hasFiles) {
+          // === BATCH MODE (6+ docs) ===
+          // Above the threshold, skip the MCP orchestrator entirely — Claude
+          // can't reliably read 6+ PDFs in one turn within the tool-call
+          // budget. Files go through the standard pipeline; the user picks
+          // up the work via the notification bell + batch review page.
+          if (currentFiles.length > BATCH_THRESHOLD) {
+            // 1–5. Create batch → presign → upload → register → process.
+            const { batchId } = await uploadFilesToBatch(currentFiles, {
+              context: "chat",
+              name: `Chat upload — ${currentFiles.length} document${currentFiles.length === 1 ? "" : "s"}`,
+              entityId: pageContext?.entityId ?? null,
+              metadata: { session_id: sessionId },
+            });
+
+            // 6. Persist the user's message server-side. We replace the
+            //    optimistic temp message by id (using the inserted row's id)
+            //    rather than relying on the content+role dedupe — the
+            //    optimistic content ("Uploaded N files") and the persisted
+            //    content can diverge, and an id-based swap is unambiguous.
+            //    When the Realtime INSERT for this row arrives a moment
+            //    later, the chat-drawer's existing `prev.some(m => m.id ===
+            //    newMsg.id)` guard treats it as a no-op.
+            const userMsgRes = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                role: "user",
+                content,
+                metadata: {
+                  attachments: currentFiles.map((f) => ({
+                    queue_item_id: "",
+                    document_id: null,
+                    filename: f.name,
+                    status: "queued",
+                  })),
+                  batch_id: batchId,
+                  ...(pageContext ? { page_context: {
+                    page: pageContext.page,
+                    entityId: pageContext.entityId,
+                    entityName: pageContext.entityName,
+                    investmentId: pageContext.investmentId,
+                    investmentName: pageContext.investmentName,
+                  } } : {}),
+                },
+              }),
+            });
+            if (userMsgRes.ok) {
+              const persistedUserMsg = (await userMsgRes.json()) as ChatMessage;
+              setMessages((prev) =>
+                prev.map((m) => (m.id === userMsg.id ? persistedUserMsg : m)),
+              );
+            }
+
+            // 7. Insert the assistant batch-handoff message. Skips the MCP
+            //    orchestrator so Claude never sees these documents — they
+            //    process in the background and the user picks them up via
+            //    the notification bell + batch review page.
+            const handoffText =
+              `I've started processing your ${currentFiles.length} documents in the background. ` +
+              `You'll get a notification when they're ready for review.\n\n` +
+              `[View progress](/batches/${batchId})`;
+
+            await fetch(`/api/chat/sessions/${sessionId}/messages`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                role: "assistant",
+                content: handoffText,
+                metadata: {
+                  type: "batch_handoff",
+                  batch_id: batchId,
+                  file_count: currentFiles.length,
+                  filenames: currentFiles.map((f) => f.name),
+                },
+              }),
+            });
+
+            fetchSessions();
+            return;
+          }
+
           // === FILE UPLOAD PATH ===
-          const formData = new FormData();
-          formData.append("session_id", sessionId);
-          formData.append("message", text.trim());
-          if (pageContext) formData.append("page_context", JSON.stringify(pageContext));
-          for (const file of currentFiles) formData.append("files", file);
+          // Routes through the pipeline batch API (create → presign → upload
+          // to storage → register → process). The legacy monolithic FormData
+          // path was removed in the Phase 3-4 cutover; this is the unified
+          // upload handler the MCP architecture calls for.
 
-          const res = await fetch("/api/chat", { method: "POST", body: formData });
-          if (!res.ok) throw new Error("Upload failed");
+          // 1. Create a chat-context batch.
+          const batchRes = await fetch("/api/pipeline/batches", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              context: "chat",
+              name: `Chat upload — ${currentFiles.length} document${currentFiles.length !== 1 ? "s" : ""}`,
+              entity_id: pageContext?.entityId ?? null,
+              metadata: { session_id: sessionId },
+            }),
+          });
+          if (!batchRes.ok) throw new Error("Failed to create upload batch");
+          const batch = (await batchRes.json()) as { id: string };
 
-          // Read SSE stream
-          const reader = res.body?.getReader();
-          if (reader) {
-            const decoder = new TextDecoder();
-            let buffer = "";
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              buffer += decoder.decode(value, { stream: true });
-              const lines = buffer.split("\n");
-              buffer = lines.pop() || "";
-              for (const line of lines) {
-                if (!line.startsWith("data: ")) continue;
-                try {
-                  const event = JSON.parse(line.slice(6));
-                  if (event.type === "results") {
-                    const assistantMsg: ChatMessage = {
-                      id: event.message_id || `temp-assistant-${Date.now()}`,
-                      session_id: sessionId!,
-                      role: "assistant",
-                      content: event.summary || "Processing complete.",
-                      metadata: {
-                        batch_id: event.batch_id,
-                        attachments: event.attachments,
-                        proposed_actions: event.proposed_actions,
-                        processing_status: "completed",
-                      },
-                      created_at: new Date().toISOString(),
-                    };
-                    setMessages((prev) => [...prev, assistantMsg]);
-                  }
-                } catch { /* skip */ }
-              }
+          // 2. Presign upload URLs for each file.
+          const presignRes = await fetch(
+            `/api/pipeline/batches/${batch.id}/presign`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                files: currentFiles.map((f) => ({
+                  name: f.name,
+                  size: f.size,
+                  type: f.type,
+                })),
+              }),
+            },
+          );
+          if (!presignRes.ok) throw new Error("Failed to presign uploads");
+          const presignData = (await presignRes.json()) as {
+            urls: Array<{
+              originalName: string;
+              safeName: string;
+              storagePath: string;
+              signedUrl: string;
+              token: string;
+            }>;
+          };
+
+          // 3. Upload each file to Supabase Storage + compute SHA-256 hash.
+          const fileHashes: string[] = [];
+          for (let i = 0; i < presignData.urls.length; i++) {
+            const { signedUrl, token } = presignData.urls[i];
+            const file = currentFiles[i];
+            const buf = await file.arrayBuffer();
+            const hashBuf = await crypto.subtle.digest("SHA-256", buf);
+            const hashHex = Array.from(new Uint8Array(hashBuf))
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join("");
+            fileHashes.push(hashHex);
+            const uploadRes = await fetch(signedUrl, {
+              method: "PUT",
+              headers: {
+                "Content-Type": file.type || "application/octet-stream",
+                "x-upsert": "true",
+                Authorization: `Bearer ${token}`,
+              },
+              body: buf,
+            });
+            if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+          }
+
+          // 4. Register uploaded files with the batch.
+          const registerRes = await fetch(
+            `/api/pipeline/batches/${batch.id}/upload`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                files: presignData.urls.map((u, i) => ({
+                  originalName: u.originalName,
+                  storagePath: u.storagePath,
+                  size: currentFiles[i].size,
+                  type: currentFiles[i].type,
+                  contentHash: fileHashes[i],
+                })),
+              }),
+            },
+          );
+          if (!registerRes.ok) throw new Error("Failed to register uploads");
+          const registerData = (await registerRes.json()) as {
+            uploaded: number;
+            items: Array<{ document_id?: string | null }>;
+          };
+
+          // 5. Kick off background processing.
+          await fetch(`/api/pipeline/batches/${batch.id}/process`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          });
+
+          // 6. Send the chat message WITH attachment metadata so the MCP
+          //    orchestrator fetches the files from Storage and builds content
+          //    blocks — Claude sees the actual document content in this turn.
+          // document_id comes from the early doc rows created at registration.
+          const chatAttachments = presignData.urls.map((u, i) => ({
+            storage_path: u.storagePath,
+            filename: u.originalName,
+            content_type: currentFiles[i].type,
+            size: currentFiles[i].size,
+            batch_id: batch.id,
+            document_id: registerData.items?.[i]?.document_id ?? undefined,
+          }));
+
+          // Include duplicate documents with their existing IDs so Claude
+          // can reference them for linking without searching.
+          const dupes = (registerData as { duplicates?: Array<{ filename: string; existing_document_id?: string | null }> }).duplicates ?? [];
+          for (const dupe of dupes) {
+            if (dupe.existing_document_id) {
+              chatAttachments.push({
+                storage_path: "",
+                filename: dupe.filename,
+                content_type: "",
+                size: 0,
+                batch_id: batch.id,
+                document_id: dupe.existing_document_id,
+              });
             }
           }
+
+          // Build context about duplicates for Claude.
+          const dupeContext = dupes
+            .filter((d) => d.existing_document_id)
+            .map((d) => `"${d.filename}" already exists as document_id: ${d.existing_document_id}`)
+            .join("; ");
+
+          let chatMessage =
+            text.trim() ||
+            `I've uploaded ${currentFiles.length} document${currentFiles.length > 1 ? "s" : ""}: ${currentFiles.map((f) => f.name).join(", ")}. Please review ${currentFiles.length > 1 ? "them" : "it"}.`;
+          if (dupeContext) {
+            chatMessage += `\n\n[Note: ${dupeContext}. Use the existing document_id for any linking.]`;
+          }
+
+          const chatRes = await fetch("/api/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              session_id: sessionId,
+              message: chatMessage,
+              page_context: pageContext ?? undefined,
+              attachments: chatAttachments,
+            }),
+          });
+
+          if (!chatRes.body) throw new Error("No response body");
+
+          // Streaming — same pattern as the regular chat path.
+          const uploadPlaceholderId = `temp-assistant-upload-${Date.now()}`;
+          setMessages((prev) => [...prev, {
+            id: uploadPlaceholderId,
+            session_id: sessionId,
+            role: "assistant" as const,
+            content: "",
+            metadata: { mcp_chat: true, processing_status: "streaming" as const },
+            created_at: new Date().toISOString(),
+          }]);
+
+          let uploadAccText = "";
+          const uploadToolCalls: Array<{ name: string; ok: boolean; duration_ms?: number; error?: string }> = [];
+          const uploadStagedActions: NonNullable<ChatMessageMetadata["staged_actions"]> = [];
+          let uploadDoneResult: (StreamEvent & { type: "done" }) | null = null;
+
+          await readStreamEvents(chatRes.body, {
+            onTextDelta: (d) => {
+              uploadAccText += d.text;
+              setStreamingText(uploadAccText);
+            },
+            onToolStart: (d) => {
+              uploadToolCalls.push({ name: d.name, ok: false });
+              setMessages((prev) => prev.map((m) =>
+                m.id === uploadPlaceholderId
+                  ? { ...m, metadata: { ...m.metadata, tool_calls: [...uploadToolCalls] } }
+                  : m,
+              ));
+            },
+            onToolComplete: (d) => {
+              const tc = uploadToolCalls[d.index];
+              if (tc) { tc.ok = d.ok; tc.duration_ms = d.durationMs; if (d.error) tc.error = d.error; }
+              setMessages((prev) => prev.map((m) =>
+                m.id === uploadPlaceholderId
+                  ? { ...m, metadata: { ...m.metadata, tool_calls: [...uploadToolCalls] } }
+                  : m,
+              ));
+            },
+            onToolStaged: (d) => {
+              uploadStagedActions.push({ id: d.id, tool: d.tool, input: {}, summary: d.summary, resource_preview: d.resource_preview });
+            },
+            onDone: (d) => { uploadDoneResult = d; },
+          });
+
+          setStreamingText("");
+          setMessages((prev) => prev.map((m) =>
+            m.id === uploadPlaceholderId
+              ? {
+                  ...m,
+                  id: uploadDoneResult?.messageId ?? m.id,
+                  content: uploadDoneResult?.text ?? uploadAccText,
+                  metadata: {
+                    mcp_chat: true,
+                    tool_calls: uploadDoneResult?.toolCalls?.map(
+                      (c: { name: string; ok: boolean; durationMs?: number; error?: string }) => ({
+                        name: c.name, ok: c.ok, duration_ms: c.durationMs,
+                        ...(c.error ? { error: c.error } : {}),
+                      }),
+                    ) ?? uploadToolCalls,
+                    staged_actions: (uploadDoneResult?.stagedActions?.length ?? uploadStagedActions.length) > 0
+                      ? uploadDoneResult?.stagedActions ?? uploadStagedActions : undefined,
+                    iterations: uploadDoneResult?.iterations,
+                    truncated: uploadDoneResult?.truncated,
+                    stop_reason: uploadDoneResult?.stopReason,
+                    processing_status: "completed",
+                  },
+                }
+              : m,
+          ));
         } else {
           // === REGULAR CHAT PATH ===
           // Send page_context with EVERY message so Claude always sees the
@@ -353,6 +701,163 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           };
           if (pageContext) {
             body.page_context = pageContext;
+          }
+
+          // MCP streaming chat path — tokens stream as they arrive, tool-call
+          // indicators update in real-time, staged-action summaries appear
+          // progressively. The approval card renders after the done event.
+          if (mcpEnabled) {
+            const res = await fetch("/api/chat", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            });
+            if (!res.body) throw new Error("No response body");
+
+            const placeholderId = `temp-assistant-${Date.now()}`;
+            const placeholderMsg: ChatMessage = {
+              id: placeholderId,
+              session_id: sessionId,
+              role: "assistant",
+              content: "",
+              metadata: { mcp_chat: true, processing_status: "streaming" },
+              created_at: new Date().toISOString(),
+            };
+            setMessages((prev) => [...prev, placeholderMsg]);
+
+            let accText = "";
+            const streamToolCalls: Array<{
+              name: string;
+              ok: boolean;
+              duration_ms?: number;
+              error?: string;
+            }> = [];
+            const streamStagedActions: NonNullable<ChatMessageMetadata["staged_actions"]> = [];
+            let doneResult: (StreamEvent & { type: "done" }) | null = null;
+            // Captured as primitives so the post-stream auto-continue check
+            // doesn't have to cope with TypeScript's flow analysis losing
+            // sight of doneResult after the closure assignment.
+            let doneTruncated = false;
+            let doneStopReason: string | null = null;
+
+            await readStreamEvents(res.body, {
+              onTextDelta: (d) => {
+                accText += d.text;
+                setStreamingText(accText);
+              },
+              onToolStart: (d) => {
+                streamToolCalls.push({ name: d.name, ok: false });
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === placeholderId
+                      ? {
+                          ...m,
+                          metadata: {
+                            ...m.metadata,
+                            tool_calls: [...streamToolCalls],
+                          },
+                        }
+                      : m,
+                  ),
+                );
+              },
+              onToolComplete: (d) => {
+                const tc = streamToolCalls[d.index];
+                if (tc) {
+                  tc.ok = d.ok;
+                  tc.duration_ms = d.durationMs;
+                  if (d.error) tc.error = d.error;
+                }
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === placeholderId
+                      ? {
+                          ...m,
+                          metadata: {
+                            ...m.metadata,
+                            tool_calls: [...streamToolCalls],
+                          },
+                        }
+                      : m,
+                  ),
+                );
+              },
+              onToolStaged: (d) => {
+                streamStagedActions.push({
+                  id: d.id,
+                  tool: d.tool,
+                  input: {},
+                  summary: d.summary,
+                  resource_preview: d.resource_preview,
+                });
+              },
+              onError: () => {
+                // Error is in the streamed text — handled by done or
+                // partial content.
+              },
+              onDone: (d) => {
+                doneResult = d;
+                doneTruncated = d.truncated;
+                doneStopReason = d.stopReason;
+              },
+            });
+
+            // Replace placeholder with final message.
+            setStreamingText("");
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === placeholderId
+                  ? {
+                      ...m,
+                      id: doneResult?.messageId ?? m.id,
+                      content: doneResult?.text ?? accText,
+                      metadata: {
+                        mcp_chat: true,
+                        tool_calls: doneResult?.toolCalls?.map(
+                          (c: { name: string; ok: boolean; durationMs?: number; error?: string }) => ({
+                            name: c.name,
+                            ok: c.ok,
+                            duration_ms: c.durationMs,
+                            ...(c.error ? { error: c.error } : {}),
+                          }),
+                        ) ?? streamToolCalls,
+                        staged_actions:
+                          (doneResult?.stagedActions?.length ?? streamStagedActions.length) > 0
+                            ? doneResult?.stagedActions ?? streamStagedActions
+                            : undefined,
+                        iterations: doneResult?.iterations,
+                        truncated: doneResult?.truncated,
+                        stop_reason: doneResult?.stopReason,
+                        processing_status: "completed",
+                      },
+                    }
+                  : m,
+              ),
+            );
+            fetchSessions();
+
+            // Auto-continue when the model ran out of output tokens
+            // mid-thought without producing anything actionable. Same
+            // contract as the apply-actions follow_up: each iteration
+            // (including this auto-fired one) gets a fresh max_tokens
+            // budget, so resuming gives Claude room to finish staging.
+            // Skip when actions DID get staged — the user should approve
+            // those before any further work; the existing apply-actions
+            // follow_up handles continuation after that.
+            if (
+              doneTruncated &&
+              doneStopReason === "max_tokens" &&
+              streamStagedActions.length === 0
+            ) {
+              setTimeout(
+                () =>
+                  sendMessage(
+                    "[Continuing after truncation] Your previous turn was cut off mid-output by the max_tokens limit. Continue from where you left off. If you were about to stage actions, stage them now without re-narrating the inputs (you've already explained them; just emit the tool calls).",
+                  ),
+                500,
+              );
+            }
+            return;
           }
 
           const res = await fetch("/api/chat", {
@@ -441,16 +946,15 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         setSending(false);
       }
     },
-    [activeSessionId, sending, drawerFiles, fetchSessions, pageContext]
+    [activeSessionId, sending, drawerFiles, fetchSessions, pageContext, mcpEnabled]
   );
 
   // -------------------------------------------------------------------
   // Auto-scroll
   // -------------------------------------------------------------------
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamingText]);
+  // Auto-scroll moved to DrawerMessages where the scroll container lives.
+  // See the smart-scroll logic inside DrawerMessages.
 
   // -------------------------------------------------------------------
   // Close session picker on outside click
@@ -601,6 +1105,12 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
             refs={refs}
             messagesEndRef={messagesEndRef}
             onSendPrompt={sendMessage}
+            onApplyComplete={(confirmMsg, followUp) => {
+              setMessages((prev: ChatMessage[]) => [...prev, confirmMsg]);
+              if (followUp) {
+                setTimeout(() => sendMessage("[Continuing after approval] " + followUp), 500);
+              }
+            }}
             onClick={handleContentClick}
             compact
             currentPageContext={pageContext}
@@ -706,6 +1216,12 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           refs={refs}
           messagesEndRef={messagesEndRef}
           onSendPrompt={sendMessage}
+          onApplyComplete={(confirmMsg, followUp) => {
+            setMessages((prev: ChatMessage[]) => [...prev, confirmMsg]);
+            if (followUp) {
+              setTimeout(() => sendMessage("[Continuing after approval] " + followUp), 500);
+            }
+          }}
           onClick={handleContentClick}
           compact
           currentPageContext={pageContext}
@@ -968,6 +1484,7 @@ function DrawerMessages({
   refs,
   messagesEndRef,
   onSendPrompt,
+  onApplyComplete,
   onClick,
   compact,
   currentPageContext,
@@ -978,10 +1495,49 @@ function DrawerMessages({
   refs: LinkableRef[];
   messagesEndRef: React.RefObject<HTMLDivElement | null>;
   onSendPrompt: (text: string) => void;
+  onApplyComplete: (confirmMsg: ChatMessage, followUp?: string) => void;
   onClick: (e: React.MouseEvent) => void;
   compact?: boolean;
   currentPageContext: PageContext | null;
 }) {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isUserNearBottomRef = useRef(true);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+
+  // Track whether the user is near the bottom of the scroll container.
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isUserNearBottomRef.current = distanceFromBottom < 150;
+    if (isUserNearBottomRef.current) setShowJumpToBottom(false);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
+
+  // Smart auto-scroll: only scroll if the user hasn't scrolled up.
+  // State updates deferred via queueMicrotask to avoid the cascading-render
+  // lint rule (setState synchronously in an effect body).
+  useEffect(() => {
+    if (isUserNearBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      queueMicrotask(() => setShowJumpToBottom(false));
+    } else if (streamingText || messages.length > 0) {
+      queueMicrotask(() => setShowJumpToBottom(true));
+    }
+  }, [messages, streamingText, messagesEndRef]);
+
+  const jumpToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    isUserNearBottomRef.current = true;
+    setShowJumpToBottom(false);
+  }, [messagesEndRef]);
+
   if (messages.length === 0 && !streamingText && !sending) {
     // Empty state with suggested prompts
     return (
@@ -1046,14 +1602,18 @@ function DrawerMessages({
   }
 
   return (
-    <div
-      onClick={onClick}
-      style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 12px 8px" }}
-    >
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {messages.map((msg, idx) => {
+    <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div
+        ref={scrollContainerRef}
+        onClick={onClick}
+        style={{ height: "100%", overflowY: "auto", padding: "12px 12px 8px" }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {messages.map((msg, idx) => {
           const meta = msg.metadata as ChatMessageMetadata | null;
-          const hasActions = meta?.proposed_actions && meta.proposed_actions.length > 0;
+          const hasActions =
+            (meta?.proposed_actions && meta.proposed_actions.length > 0) ||
+            (meta?.staged_actions && meta.staged_actions.length > 0);
           const hasAttachments = meta?.attachments && meta.attachments.length > 0;
 
           // Page context divider — show when this message's page_context
@@ -1076,37 +1636,60 @@ function DrawerMessages({
               {msg.role === "assistant" && (hasActions || (hasAttachments && meta?.processing_status === "completed")) && (
                 <ChatApprovalCard
                   messageId={msg.id}
+                  sessionId={msg.session_id}
                   metadata={meta!}
                   onActionsApplied={(summary) => {
-                    // Refresh messages to show updated state
+                    const confirmText = summary.failed > 0
+                      ? `Applied ${summary.applied} action${summary.applied !== 1 ? "s" : ""}, ${summary.failed} failed.`
+                      : summary.applied > 0
+                        ? `Applied ${summary.applied} action${summary.applied !== 1 ? "s" : ""} successfully.`
+                        : "Skipped all actions.";
                     const confirmMsg: ChatMessage = {
                       id: `confirm-${Date.now()}`,
                       session_id: msg.session_id,
                       role: "assistant",
-                      content: (() => {
-                        let msg = summary.failed > 0
-                          ? `Done — ${summary.applied} action${summary.applied !== 1 ? "s" : ""} applied, ${summary.failed} failed.`
-                          : summary.applied > 0
-                            ? `Done — ${summary.applied} action${summary.applied !== 1 ? "s" : ""} applied successfully.`
-                            : "Skipped all actions. Documents filed without changes.";
-                        if (summary.follow_up) msg += "\n\n" + summary.follow_up;
-                        return msg;
-                      })(),
-                      metadata: null,
+                      content: confirmText,
+                      metadata: { type: "apply_confirmation" },
                       created_at: new Date().toISOString(),
                     };
-                    // Can't easily add to messages from here without prop drilling
-                    // The message is added but we need a callback
+                    onApplyComplete(confirmMsg, summary.follow_up);
                   }}
                 />
               )}
             </div>
           );
         })}
-        {streamingText && <StreamingBubble text={streamingText} compact={compact} />}
-        {sending && !streamingText && <ThinkingBubble />}
-        <div ref={messagesEndRef} />
+          {streamingText && <StreamingBubble text={streamingText} compact={compact} />}
+          {sending && !streamingText && <ThinkingBubble />}
+          <div ref={messagesEndRef} />
+        </div>
       </div>
+
+      {showJumpToBottom && (
+        <button
+          onClick={jumpToBottom}
+          style={{
+            position: "absolute",
+            bottom: 12,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "#1a1a1a",
+            color: "#fff",
+            border: "none",
+            borderRadius: 16,
+            padding: "6px 14px",
+            fontSize: 12,
+            cursor: "pointer",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+            zIndex: 10,
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+          }}
+        >
+          <span style={{ fontSize: 14 }}>↓</span> New messages
+        </button>
+      )}
     </div>
   );
 }
@@ -1349,7 +1932,15 @@ function DrawerInput({
         <textarea
           ref={inputRef}
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            requestAnimationFrame(() => {
+              const el = inputRef.current;
+              if (!el) return;
+              el.style.height = "auto";
+              el.style.height = `${Math.min(el.scrollHeight, 140)}px`;
+            });
+          }}
           onKeyDown={onKeyDown}
           placeholder="Ask Rhodes..."
           rows={1}
@@ -1364,10 +1955,11 @@ function DrawerInput({
             outline: "none",
             resize: "none",
             minHeight: 40,
-            maxHeight: 100,
+            maxHeight: 140,
             lineHeight: 1.5,
             boxSizing: "border-box",
             background: "#f5f4f0",
+            overflow: "auto",
           }}
           onFocus={(e) => {
             e.currentTarget.style.borderColor = "#2d5a3d";

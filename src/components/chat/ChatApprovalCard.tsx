@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect, useMemo } from "react";
 import type { ChatProposedAction, ChatAttachment, ChatMessageMetadata } from "@/lib/types/chat";
+import { StagedActionsList } from "@/components/shared/StagedActionsList";
+import { ACTION_LABELS, humanizeKey } from "@/lib/chat/action-labels";
+
+// When the orchestrator stages more than this many actions in a single turn,
+// the in-chat checkbox list becomes a wall of UI. Above the threshold we
+// render a compact summary card and route the user to /review for the full
+// list with detail and bulk controls.
+const ACTION_THRESHOLD = 8;
 
 interface Props {
   messageId: string;
+  sessionId: string;
   metadata: ChatMessageMetadata;
   onActionsApplied: (summary: { applied: number; failed: number; follow_up?: string }) => void;
 }
@@ -135,33 +143,79 @@ const REQUIRES_EXPLICIT_APPROVAL = new Set([
   "update_entity",
 ]);
 
-const ACTION_LABELS: Record<string, { label: string; color: string }> = {
-  create_entity: { label: "Create Entity", color: "#2d5a3d" },
-  update_entity: { label: "Update Entity", color: "#3366a8" },
-  create_investment: { label: "Create Investment", color: "#2d5a3d" },
-  link_document_to_investment: { label: "Link to Investment", color: "#6b6b76" },
-  create_relationship: { label: "Create Relationship", color: "#7b4db5" },
-  add_member: { label: "Add Member", color: "#2d8a4e" },
-  add_manager: { label: "Add Manager", color: "#2d5a3d" },
-  update_cap_table: { label: "Update Cap Table", color: "#3366a8" },
-  create_directory_entry: { label: "Create Directory Entry", color: "#2d8a4e" },
-  set_investment_allocations: { label: "Set Allocations", color: "#3366a8" },
-  record_investment_transaction: { label: "Record Transaction", color: "#2d5a3d" },
-};
-
-export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Props) {
+export function ChatApprovalCard({ messageId, sessionId, metadata, onActionsApplied }: Props) {
   const actions = metadata.proposed_actions || [];
+  const stagedActions = metadata.staged_actions || [];
+  const isMcp = stagedActions.length > 0;
   const attachments = metadata.attachments || [];
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(
-    new Set(actions.filter((a) => a.status === "pending" && a.confidence === "high" && !REQUIRES_EXPLICIT_APPROVAL.has(a.action)).map((a) => a.id))
-  );
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {
+    if (isMcp) return new Set(stagedActions.map((a) => a.id));
+    return new Set(actions.filter((a) => a.status === "pending" && a.confidence === "high" && !REQUIRES_EXPLICIT_APPROVAL.has(a.action)).map((a) => a.id));
+  });
   const [applying, setApplying] = useState(false);
-  const [appliedStatuses, setAppliedStatuses] = useState<Record<string, string>>(
-    Object.fromEntries(actions.filter((a) => a.status !== "pending").map((a) => [a.id, a.status]))
-  );
+  const [appliedStatuses, setAppliedStatuses] = useState<Record<string, string>>(() => {
+    const persisted = metadata.applied_statuses as Record<string, string> | undefined;
+    if (persisted && Object.keys(persisted).length > 0) return persisted;
+    if (isMcp) return {};
+    return Object.fromEntries(actions.filter((a) => a.status !== "pending").map((a) => [a.id, a.status]));
+  });
+  // Resolve doc names for grouping. Each staged action that touches a
+  // document (link_document_to_*, update_document, update_investment_
+  // transaction with document_id) gets bucketed by document_id; we hit
+  // /api/documents/[id] once per unique id so the group header reads
+  // "📄 2024SilverhawkDistribution10.pdf" instead of "Document a8f1…".
+  // Falls back to the truncated id while the fetch is in flight.
+  const docIdsInStaged = useMemo(() => {
+    const ids = new Set<string>();
+    for (const a of stagedActions) {
+      const id = (a.input as { document_id?: string } | undefined)?.document_id;
+      if (id && typeof id === "string") ids.add(id);
+    }
+    return Array.from(ids);
+  }, [stagedActions]);
+  const [docNameMap, setDocNameMap] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (docIdsInStaged.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const updates: Record<string, string> = {};
+      await Promise.all(
+        docIdsInStaged.map(async (id) => {
+          if (docNameMap[id]) return;
+          try {
+            const res = await fetch(`/api/documents/${id}`);
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data?.name) updates[id] = data.name;
+          } catch {
+            /* ignore */
+          }
+        }),
+      );
+      if (!cancelled && Object.keys(updates).length > 0) {
+        setDocNameMap((prev) => ({ ...prev, ...updates }));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docIdsInStaged.join("|")]);
 
-  const allApplied = actions.every((a) => appliedStatuses[a.id] === "applied" || appliedStatuses[a.id] === "rejected");
-  const pendingActions = actions.filter((a) => !appliedStatuses[a.id] || appliedStatuses[a.id] === "pending");
+  // When pendingItems > ACTION_THRESHOLD, we hide the full checkbox list
+  // by default and show a compact summary card. Clicking "Review & Approve"
+  // expands the same card in-place — no navigation, since these are
+  // chat-message-scoped staged actions, not pipeline queue items, and the
+  // /review aggregated page wouldn't show them.
+  const [compactExpanded, setCompactExpanded] = useState(false);
+
+  const allItems = isMcp ? stagedActions : actions;
+  const allApplied = allItems.every((a) => appliedStatuses[a.id] === "applied" || appliedStatuses[a.id] === "rejected");
+  const pendingItems = allItems.filter((a) => !appliedStatuses[a.id] || appliedStatuses[a.id] === "pending");
+
+  if (pendingItems.length > ACTION_THRESHOLD && !compactExpanded) {
+    return <CompactActionSummary pending={pendingItems} onExpand={() => setCompactExpanded(true)} />;
+  }
 
   const toggleAction = (id: string) => {
     setCheckedIds((prev) => {
@@ -178,28 +232,62 @@ export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Prop
     setApplying(true);
 
     try {
-      const res = await fetch("/api/chat/apply-actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message_id: messageId,
-          approved_action_ids: approved,
-        }),
-      });
+      let res: Response;
+      if (isMcp) {
+        // MCP staged actions → send { session_id, actions: [...] } shape.
+        const approvedActions = stagedActions.filter((a) => approved.includes(a.id));
+        res = await fetch("/api/chat/apply-actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: sessionId,
+            actions: approvedActions,
+          }),
+        });
+      } else {
+        // Legacy proposed actions → send { message_id, approved_action_ids } shape.
+        res = await fetch("/api/chat/apply-actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message_id: messageId,
+            approved_action_ids: approved,
+          }),
+        });
+      }
 
       if (res.ok) {
         const data = await res.json();
         const newStatuses: Record<string, string> = { ...appliedStatuses };
-        for (const result of data.results || []) {
-          newStatuses[result.action_id] = result.status;
-        }
-        // Mark unchecked as rejected
-        for (const action of actions) {
-          if (!approved.includes(action.id) && !newStatuses[action.id]) {
-            newStatuses[action.id] = "rejected";
+        if (isMcp) {
+          // Results come back in the same order as the approved actions we
+          // sent. Match by index — NOT by tool name, because multiple actions
+          // can have the same tool (e.g., 3× link_document_to_entity).
+          const approvedActions = stagedActions.filter((a) => approved.includes(a.id));
+          const results = (data.results || []) as Array<{ tool: string; status: string; error?: string }>;
+          for (let i = 0; i < results.length && i < approvedActions.length; i++) {
+            newStatuses[approvedActions[i].id] = results[i].status;
+          }
+          for (const a of stagedActions) {
+            if (!approved.includes(a.id) && !newStatuses[a.id]) newStatuses[a.id] = "rejected";
+          }
+        } else {
+          for (const result of data.results || []) {
+            newStatuses[result.action_id] = result.status;
+          }
+          for (const action of actions) {
+            if (!approved.includes(action.id) && !newStatuses[action.id]) {
+              newStatuses[action.id] = "rejected";
+            }
           }
         }
         setAppliedStatuses(newStatuses);
+        // Persist to DB so the state survives navigation/reload.
+        fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ metadata_merge: { applied_statuses: newStatuses } }),
+        }).catch(() => {/* non-fatal */});
         onActionsApplied({ applied: data.applied || 0, failed: data.failed || 0, follow_up: data.follow_up });
       } else {
         alert("Failed to apply actions");
@@ -215,14 +303,22 @@ export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Prop
   const handleSkipAll = async () => {
     setApplying(true);
     try {
-      await fetch("/api/chat/apply-actions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message_id: messageId, skip_all: true }),
-      });
+      if (!isMcp) {
+        await fetch("/api/chat/apply-actions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message_id: messageId, skip_all: true }),
+        });
+      }
       const newStatuses: Record<string, string> = {};
-      for (const a of actions) newStatuses[a.id] = "rejected";
+      const items = isMcp ? stagedActions : actions;
+      for (const a of items) newStatuses[a.id] = "rejected";
       setAppliedStatuses(newStatuses);
+      fetch(`/api/chat/sessions/${sessionId}/messages/${messageId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata_merge: { applied_statuses: newStatuses } }),
+      }).catch(() => {/* non-fatal */});
       onActionsApplied({ applied: 0, failed: 0 });
     } catch (err) {
       console.error(err);
@@ -251,8 +347,67 @@ export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Prop
         </div>
       )}
 
-      {/* Proposed actions */}
-      {actions.length > 0 && (
+      {/* MCP staged actions — rendering via the shared StagedActionsList
+          primitive so /review's ReviewCard can use the same component.
+          We own the submit / persistence logic up here. */}
+      {isMcp && stagedActions.length > 0 && (
+        <>
+          <StagedActionsList
+            actions={stagedActions.map((s) => ({
+              id: s.id,
+              tool: s.tool,
+              summary: s.summary,
+              status: appliedStatuses[s.id],
+            }))}
+            checkedIds={checkedIds}
+            onToggle={toggleAction}
+            disabled={applying}
+            // Group actions by document. Actions touching the same doc
+            // (e.g. update_document + link_document_to_investment +
+            // update_investment_transaction with document_id) collapse
+            // under one header instead of being spread across the list.
+            // Actions without a document_id (create_entity, etc.) fall
+            // into the "Other" bucket via key = __other__.
+            groupBy={(action) => {
+              const staged = stagedActions.find((s) => s.id === action.id);
+              const docId = (staged?.input as { document_id?: string } | undefined)
+                ?.document_id;
+              if (!docId || typeof docId !== "string") return null;
+              const name = docNameMap[docId] ?? `Document ${docId.slice(0, 8)}…`;
+              return { key: docId, label: `📄 ${name}` };
+            }}
+          />
+          {!allApplied && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <button
+                onClick={handleApply}
+                disabled={applying || checkedIds.size === 0}
+                style={{
+                  flex: 1, padding: "8px 12px", fontSize: 13, fontWeight: 600,
+                  background: "#2d5a3d", color: "white", border: "none", borderRadius: 6,
+                  cursor: applying ? "wait" : "pointer", opacity: applying || checkedIds.size === 0 ? 0.5 : 1,
+                }}
+              >
+                {applying ? "Applying..." : `Approve ${checkedIds.size} action${checkedIds.size !== 1 ? "s" : ""}`}
+              </button>
+              <button
+                onClick={handleSkipAll}
+                disabled={applying}
+                style={{
+                  padding: "8px 12px", fontSize: 13, fontWeight: 500,
+                  background: "white", color: "#6b6b76", border: "1px solid #d0d0d8", borderRadius: 6,
+                  cursor: applying ? "wait" : "pointer",
+                }}
+              >
+                Skip All
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Legacy proposed actions (pipeline format) */}
+      {!isMcp && actions.length > 0 && (
         <div style={{
           background: "#f8f7f4", borderRadius: 10, padding: 12,
           border: "1px solid #e8e6df",
@@ -444,7 +599,7 @@ export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Prop
           })}
 
           {/* Buttons */}
-          {pendingActions.length > 0 && !allApplied && (
+          {pendingItems.length > 0 && !allApplied && (
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}>
               <button
                 onClick={handleSkipAll}
@@ -479,6 +634,98 @@ export function ChatApprovalCard({ messageId, metadata, onActionsApplied }: Prop
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  CompactActionSummary                                               */
+/* ------------------------------------------------------------------ */
+
+// Renders when the number of pending staged actions exceeds ACTION_THRESHOLD.
+// Groups actions by tool/action key and shows counts using the existing
+// ACTION_LABELS map; falls back to a humanized version of the raw key for
+// any tool we haven't labeled. The "Review & Approve" CTA expands the same
+// card in-place into the full checkbox list rather than navigating away —
+// these are chat-message-scoped staged actions, not pipeline queue items,
+// so the global /review page would have nothing to show.
+
+type CompactItem =
+  | { tool: string; id: string }
+  | { action: string; id: string };
+
+function compactKey(item: CompactItem): string {
+  return ("tool" in item ? item.tool : item.action) || "unknown";
+}
+
+function CompactActionSummary({
+  pending,
+  onExpand,
+}: {
+  pending: CompactItem[];
+  onExpand: () => void;
+}) {
+  const counts = new Map<string, number>();
+  for (const item of pending) {
+    const key = compactKey(item);
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  // Sort by count desc, then by label asc for stable display.
+  const groups = Array.from(counts.entries())
+    .map(([key, count]) => {
+      const label = ACTION_LABELS[key]?.label ?? humanizeKey(key);
+      const color = ACTION_LABELS[key]?.color ?? "#6b6b76";
+      return { key, label, color, count };
+    })
+    .sort((a, b) => (b.count - a.count) || a.label.localeCompare(b.label));
+
+  return (
+    <div style={{
+      background: "#fff",
+      border: "1px solid #e8e6df",
+      borderRadius: 10,
+      padding: 16,
+      marginTop: 8,
+      display: "flex", flexDirection: "column", gap: 12,
+    }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f" }}>
+        {pending.length} actions ready for review
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {groups.map((g) => (
+          <div key={g.key} style={{
+            display: "flex", alignItems: "center", gap: 8,
+            fontSize: 13, color: "#1a1a1f",
+          }}>
+            <span style={{
+              width: 24, textAlign: "right", fontWeight: 600, color: "#6b6b76",
+            }}>{g.count}×</span>
+            <span style={{
+              padding: "2px 8px", borderRadius: 4,
+              fontSize: 11, fontWeight: 600,
+              background: `${g.color}14`,
+              color: g.color,
+            }}>
+              {g.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <button
+        onClick={onExpand}
+        style={{
+          alignSelf: "flex-start",
+          padding: "8px 14px",
+          fontSize: 13, fontWeight: 600,
+          color: "#fff", background: "#2d5a3d",
+          border: "none", borderRadius: 6, cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        Review &amp; Approve →
+      </button>
     </div>
   );
 }

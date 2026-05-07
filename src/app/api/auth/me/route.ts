@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/utils/auth";
+import { z } from "zod";
 
 export async function GET() {
   try {
@@ -9,6 +10,14 @@ export async function GET() {
     const currentUser = await getCurrentUser();
 
     if (currentUser) {
+      // Fetch primary_entity_id from user_profiles.
+      const admin = createAdminClient();
+      const { data: profile } = await admin
+        .from("user_profiles")
+        .select("primary_entity_id")
+        .eq("id", currentUser.id)
+        .maybeSingle();
+
       return NextResponse.json({
         id: currentUser.id,
         email: currentUser.email,
@@ -17,6 +26,7 @@ export async function GET() {
         orgId: currentUser.orgId,
         orgRole: currentUser.orgRole,
         orgName: currentUser.orgName,
+        primary_entity_id: profile?.primary_entity_id ?? null,
       });
     }
 
@@ -50,6 +60,53 @@ export async function GET() {
     });
   } catch (err) {
     console.error("GET /api/auth/me error:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+  }
+}
+
+const patchSchema = z.object({
+  primary_entity_id: z.string().uuid().nullable().optional(),
+});
+
+export async function PATCH(request: Request) {
+  try {
+    const currentUser = await getCurrentUser();
+    if (!currentUser) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await request.json().catch(() => ({}));
+    const parsed = patchSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json({ error: "Invalid input" }, { status: 400 });
+    }
+
+    const admin = createAdminClient();
+
+    // Validate the entity belongs to the user's org if setting (not clearing).
+    if (parsed.data.primary_entity_id) {
+      const { data: entity } = await admin
+        .from("entities")
+        .select("id")
+        .eq("id", parsed.data.primary_entity_id)
+        .eq("organization_id", currentUser.orgId)
+        .maybeSingle();
+      if (!entity) {
+        return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+      }
+    }
+
+    const { error } = await admin
+      .from("user_profiles")
+      .update({ primary_entity_id: parsed.data.primary_entity_id ?? null })
+      .eq("id", currentUser.id);
+    if (error) {
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("PATCH /api/auth/me error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

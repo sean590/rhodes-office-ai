@@ -4,6 +4,9 @@ import { memo } from "react";
 import { renderMarkdown } from "@/lib/utils/markdown";
 import { linkifyReferences, LinkableRef } from "@/lib/utils/linkify";
 import type { ChatMessage } from "@/lib/types/chat";
+import { ToolCallTrace } from "./ToolCallTrace";
+import { MessageFeedback } from "./MessageFeedback";
+import { BatchHandoffCard } from "./BatchHandoffCard";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -12,6 +15,54 @@ interface MessageBubbleProps {
 }
 
 export const MessageBubble = memo(function MessageBubble({ message, refs, compact }: MessageBubbleProps) {
+  // Synthetic applied-message from the MCP approval flow. Rendered as a
+  // faint divider instead of a full bubble — the approval card already
+  // confirmed the action; this is just context for the next turn.
+  if (message.metadata?.synthetic) {
+    const applied = (message.metadata.applied_actions ?? []) as Array<{ summary: string }>;
+    const failed = (message.metadata.failed_actions ?? []) as Array<{ summary: string; error: string }>;
+    const count = applied.length + failed.length;
+    return (
+      <div
+        data-testid="synthetic-divider"
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          padding: "8px 0",
+          fontSize: 11,
+          color: "#8a8a92",
+          fontStyle: "italic",
+        }}
+      >
+        {failed.length === 0
+          ? `✓ Applied ${count} change${count !== 1 ? "s" : ""}`
+          : `✓ Applied ${applied.length}, ✗ ${failed.length} failed`}
+      </div>
+    );
+  }
+
+  // Batch-handoff message: the chat-drawer routed 6+ uploads to the pipeline
+  // and emitted this system-style assistant note. The card has its own
+  // Realtime subscription on the batch row, so headline + CTA stay live.
+  if (message.metadata?.type === "batch_handoff" && message.metadata.batch_id) {
+    const meta = message.metadata as {
+      batch_id: string;
+      file_count?: number;
+      filenames?: string[];
+    };
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-start" }}>
+        <BatchHandoffCard
+          metadata={{
+            batch_id: meta.batch_id,
+            file_count: meta.file_count ?? 0,
+            filenames: Array.isArray(meta.filenames) ? meta.filenames : [],
+          }}
+        />
+      </div>
+    );
+  }
+
   const isUser = message.role === "user";
 
   const bubbleStyle: React.CSSProperties = isUser
@@ -43,6 +94,11 @@ export const MessageBubble = memo(function MessageBubble({ message, refs, compac
     justifyContent: isUser ? "flex-end" : "flex-start",
   };
 
+  // Hide the placeholder message while streaming — StreamingBubble renders
+  // the progressive text instead. The placeholder gets replaced with the
+  // final content when the stream closes.
+  if (message.metadata?.processing_status === "streaming") return null;
+
   if (isUser) {
     return (
       <div style={alignStyle}>
@@ -57,10 +113,18 @@ export const MessageBubble = memo(function MessageBubble({ message, refs, compac
     html = linkifyReferences(html, refs);
   }
 
+  // If this was an MCP v2 response (or legacy message carrying the same
+  // metadata shape), render the collapsed tool-use trace underneath the
+  // prose. Legacy messages without tool_calls render exactly as before.
+  const toolCalls = message.metadata?.tool_calls;
+  const showTrace = Array.isArray(toolCalls) && toolCalls.length > 0;
+
   return (
     <div style={alignStyle}>
-      <div style={bubbleStyle}>
+      <div style={{ ...bubbleStyle, display: "flex", flexDirection: "column" }}>
         <div dangerouslySetInnerHTML={{ __html: html }} />
+        {showTrace && <ToolCallTrace calls={toolCalls} />}
+        <MessageFeedback message={message} />
       </div>
     </div>
   );
