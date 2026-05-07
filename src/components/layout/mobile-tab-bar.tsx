@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   BuildingIcon, ChartIcon, DocIcon, PeopleIcon, ChatIcon,
-  LinkIcon, GearIcon, EllipsisIcon,
+  GearIcon, EllipsisIcon,
 } from "../ui/icons";
 
 const PRIMARY_TABS = [

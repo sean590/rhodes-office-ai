@@ -95,7 +95,7 @@ function DownIcon({ size = 12 }: { size?: number }) {
   );
 }
 
-export function DocumentsTab({ investmentId, isMobile }: Props) {
+export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);

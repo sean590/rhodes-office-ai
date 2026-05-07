@@ -64,7 +64,7 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
 
   // Step 1: Basics
   const [name, setName] = useState("");
-  const [shortName, setShortName] = useState("");
+  const [shortName] = useState("");
   const [investmentType, setInvestmentType] = useState<InvestmentType>("real_estate");
   const [formationState, setFormationState] = useState("");
   const [dateInvested, setDateInvested] = useState("");

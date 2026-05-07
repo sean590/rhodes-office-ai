@@ -10,8 +10,6 @@
  * - apply.ts update_entity case (MCP write tools)
  */
 
-import type { SupabaseClient } from "@supabase/supabase-js";
-
 /**
  * Deactivate compliance tracking for a dissolved/inactive entity.
  * Completed obligations and satisfied expectations are preserved as

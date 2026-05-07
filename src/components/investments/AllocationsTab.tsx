@@ -53,7 +53,7 @@ function fmtDollars(n: number): string {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-export function AllocationsTab({ investmentId, investors, coInvestors, preferredReturnPct, preferredReturnBasis, totalContributed, isMobile, onCoInvestorsChanged }: Props) {
+export function AllocationsTab({ investmentId, investors, coInvestors, preferredReturnPct, preferredReturnBasis, totalContributed, isMobile: _isMobile, onCoInvestorsChanged }: Props) {
   // Track allocations per investor
   const [allocsByInvestor, setAllocsByInvestor] = useState<Record<string, Allocation[]>>({});
   const [membersByInvestor, setMembersByInvestor] = useState<Record<string, Member[]>>({});
@@ -189,11 +189,6 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
   const totalPct = editAllocations.filter(a => a.checked).reduce((s, a) => s + (Number(a.allocation_pct) || 0), 0);
   const totalCommitted = editAllocations.filter(a => a.checked).reduce((s, a) => s + (Number(a.committed_amount) || 0), 0);
 
-  // Investor contribution total for the investor being edited
-  const editingInvestorContrib = editingInvestorId
-    ? investors.find(i => i.id === editingInvestorId)
-    : null;
-
   if (loading) return <div style={{ color: "#9494a0", fontSize: 13, padding: "20px 0" }}>Loading allocations...</div>;
 
   // === Ownership table ===
@@ -216,7 +211,6 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
   }, 0) + coInvestors.reduce((s, c) => s + (Number(c.capital_pct) || 0), 0);
   const totalProfit = investors.reduce((s, i) => s + (Number(i.profit_pct) || 0), 0) + coInvestors.reduce((s, c) => s + (Number(c.profit_pct) || 0), 0);
   const showProfit = investors.some(i => i.profit_pct != null) || coInvestors.some(c => c.profit_pct != null);
-  const showCommitted = investors.some(i => i.committed_capital != null);
   const totalCommittedCapital = investors.reduce((s, i) => s + (Number(i.committed_capital) || 0), 0);
   const totalCalledCapital = investors.reduce((s, i) => s + (Number(i.called_capital) || 0), 0);
 

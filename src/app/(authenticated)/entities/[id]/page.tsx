@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
-import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, ChatIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
+import { BuildingIcon, PlusIcon, XIcon, CheckIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, ChatIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
@@ -4246,7 +4246,7 @@ function DocumentsTab({
   const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
 
   // AI processing state
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processingId] = useState<string | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
   const [aiActions, setAiActions] = useState<Record<string, ProposedAction[]>>({});
   const [aiReviewDocId, setAiReviewDocId] = useState<string | null>(null);
@@ -4422,48 +4422,6 @@ function DocumentsTab({
       onRefresh();
     } catch (err) {
       console.error("Delete error:", err);
-    }
-  };
-
-  /* ---- AI Process ---- */
-  const handleProcess = async (docId: string) => {
-    setProcessingId(docId);
-    setProcessError(null);
-    setApplyResult(null);
-    try {
-      const res = await fetch(`/api/documents/${docId}/process`, { method: "POST" });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const msg = errData.error || "Processing failed";
-        // Friendly message for known limits
-        if (msg.includes("100 PDF pages")) {
-          throw new Error("This PDF exceeds the 100-page limit for AI processing. Try uploading a shorter version of the document.");
-        }
-        throw new Error(msg);
-      }
-      const data = await res.json();
-      if (data.actions && data.actions.length > 0) {
-        setAiActions((prev) => ({ ...prev, [docId]: data.actions }));
-        setAiReviewDocId(docId);
-        // Default: select high confidence, deselect low
-        const defaults: Record<number, boolean> = {};
-        const edits: Record<number, ProposedAction> = {};
-        const indices: number[] = [];
-        data.actions.forEach((action: ProposedAction, idx: number) => {
-          defaults[idx] = action.confidence === "high" || action.confidence === "medium";
-          edits[idx] = { ...action };
-          indices.push(idx);
-        });
-        setSelectedActions(defaults);
-        setEditedActions(edits);
-        setOriginalIndicesMap((prev) => ({ ...prev, [docId]: indices }));
-      }
-      onRefresh();
-    } catch (err) {
-      console.error("Process error:", err);
-      setProcessError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessingId(null);
     }
   };
 
@@ -5767,7 +5725,7 @@ function EntityActionMenu({ entityId, entityName, entityStatus, router, isMobile
   );
 }
 
-function EntityStatusBanner({ status, entityName, entityId, onReactivate }: {
+function EntityStatusBanner({ status, entityName: _entityName, entityId: _entityId, onReactivate }: {
   status: string; entityName: string; entityId: string; onReactivate: () => void;
 }) {
   if (status === "active") return null;
@@ -5936,16 +5894,18 @@ export default function EntityDetailPage() {
 
   // Register page context for chat drawer
   const setPageContext = useSetPageContext();
+  const entityIdForContext = entity?.id;
+  const entityNameForContext = entity?.name;
   useEffect(() => {
-    if (entity) {
+    if (entityIdForContext && entityNameForContext) {
       setPageContext({
         page: "entity_detail",
-        entityId: entity.id,
-        entityName: entity.name,
+        entityId: entityIdForContext,
+        entityName: entityNameForContext,
       });
     }
     return () => setPageContext(null);
-  }, [entity?.id, entity?.name, setPageContext]);
+  }, [entityIdForContext, entityNameForContext, setPageContext]);
 
   /* ---- Loading state ---- */
   if (loading) {
@@ -5995,7 +5955,6 @@ export default function EntityDetailPage() {
   // Detect parent investor entity from cap table (entity-type investors with investor_entity_id)
   const parentInvestor = entity.cap_table.find((c) => c.investor_entity_id);
   const parentEntityId = parentInvestor?.investor_entity_id || null;
-  const parentEntityName = parentInvestor?.investor_name || null;
 
   /* ---- Build tabs ---- */
   const isPerson = entity.type === "person";

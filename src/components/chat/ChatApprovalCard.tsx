@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import type { ChatProposedAction, ChatAttachment, ChatMessageMetadata } from "@/lib/types/chat";
+import type { ChatProposedAction, ChatMessageMetadata } from "@/lib/types/chat";
 import { StagedActionsList } from "@/components/shared/StagedActionsList";
 import { ACTION_LABELS, humanizeKey } from "@/lib/chat/action-labels";
 
@@ -145,7 +145,10 @@ const REQUIRES_EXPLICIT_APPROVAL = new Set([
 
 export function ChatApprovalCard({ messageId, sessionId, metadata, onActionsApplied }: Props) {
   const actions = metadata.proposed_actions || [];
-  const stagedActions = metadata.staged_actions || [];
+  // Stable reference for the staged_actions list so downstream useMemo /
+  // useEffect deps don't re-fire on every render (the `|| []` fallback
+  // would otherwise allocate a new empty array each time).
+  const stagedActions = useMemo(() => metadata.staged_actions || [], [metadata.staged_actions]);
   const isMcp = stagedActions.length > 0;
   const attachments = metadata.attachments || [];
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => {

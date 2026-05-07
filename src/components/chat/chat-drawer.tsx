@@ -1269,7 +1269,7 @@ function DrawerHeader({
   onLoadSession,
   onClose,
   onExpand,
-  isMobile,
+  isMobile: _isMobile,
 }: {
   sessions: ChatSession[];
   activeSessionId: string | null;

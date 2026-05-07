@@ -85,8 +85,6 @@ export async function fetchOrgContext(
     patterns: fetchPatterns = false,
     suggestions: fetchSuggestions = false,
     signals: fetchSignals = false,
-    entityId,
-    investmentId,
   } = options;
 
   const admin = createAdminClient();

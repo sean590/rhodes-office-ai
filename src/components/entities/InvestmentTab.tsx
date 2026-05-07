@@ -70,7 +70,7 @@ const inputStyle: React.CSSProperties = {
 /*  Main Component                                                     */
 /* ------------------------------------------------------------------ */
 
-export function InvestmentTab({ entityId, entityName, parentEntityId, parentEntityName, isMobile }: InvestmentTabProps) {
+export function InvestmentTab({ entityId, entityName: _entityName, parentEntityId, parentEntityName, isMobile }: InvestmentTabProps) {
   const [allocations, setAllocations] = useState<InvestmentAllocation[]>([]);
   const [transactions, setTransactions] = useState<InvestmentTransaction[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);

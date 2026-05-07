@@ -25,7 +25,7 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function ResourceIcon({ type, action }: { type: string; action: string }) {
+function ResourceIcon({ type, action: _action }: { type: string; action: string }) {
   const size = 16;
   const iconMap: Record<string, { icon: React.ReactNode; color: string }> = {
     entity: { icon: <BuildingIcon size={size} color="#2d5a3d" />, color: "rgba(45,90,61,0.08)" },

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { BuildingIcon, ChartIcon, PeopleIcon, LinkIcon, DocIcon, ChatIcon, GearIcon } from "../ui/icons";
+import { BuildingIcon, ChartIcon, PeopleIcon, DocIcon, GearIcon } from "../ui/icons";
 import { UserMenu } from "./user-menu";
 import { NotificationBell } from "./NotificationBell";
 import { useChatPanel } from "../chat/chat-panel-provider";

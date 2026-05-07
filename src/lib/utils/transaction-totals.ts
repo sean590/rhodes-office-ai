@@ -80,13 +80,10 @@ export function deriveTotalsFromTransactions(rows: TransactionTotalRow[]): Deriv
         totalDistributedNet += amount;
       } else {
         let gross = 0;
-        let reductions = 0;
         for (const li of lineItems) {
           const liAmount = Number(li.amount) || 0;
           if (li.category === GROSS_DISTRIBUTION_CATEGORY) {
             gross += liAmount;
-          } else {
-            reductions += liAmount;
           }
         }
         totalDistributedGross += gross;

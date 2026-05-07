@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 // StatCard available for future use
 // import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
-import { DocIcon, SearchIcon, XIcon, SparkleIcon, PlusIcon, DownIcon, ChatIcon } from "@/components/ui/icons";
+import { DocIcon, SearchIcon, XIcon, SparkleIcon, DownIcon, ChatIcon } from "@/components/ui/icons";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";

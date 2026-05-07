@@ -16,7 +16,7 @@ import * as Sentry from "@sentry/nextjs";
  */
 export async function processQueueItem(
   itemId: string,
-  options?: { password?: string },
+  _options?: { password?: string },
 ): Promise<void> {
   const admin = createAdminClient();
 

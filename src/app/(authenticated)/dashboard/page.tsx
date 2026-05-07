@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { SparkleIcon, ChartIcon, BuildingIcon, DocIcon, AlertIcon, UploadIcon, XIcon } from "@/components/ui/icons";
+import { SparkleIcon, ChartIcon, BuildingIcon, DocIcon, AlertIcon, UploadIcon } from "@/components/ui/icons";
 import { validateUploadedFile } from "@/lib/validations";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useIsMobile } from "@/hooks/use-mobile";

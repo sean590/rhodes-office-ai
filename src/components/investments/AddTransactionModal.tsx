@@ -215,7 +215,7 @@ export function AddTransactionModal({
     }
 
     return { ok: true, message: "" };
-  }, [amount, lineItems, txnType, isAdjust]);
+  }, [amount, lineItems, txnType]);
 
   const canSave = !!investorId && !!date && validation.ok && !saving;
 
