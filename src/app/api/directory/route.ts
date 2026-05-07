@@ -23,6 +23,7 @@ export async function GET(request: Request) {
       .from("directory_entries")
       .select("*")
       .eq("organization_id", orgId)
+      .is("deleted_at", null)
       .order("name")
       .range(offset, offset + limit - 1);
 

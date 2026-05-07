@@ -7,6 +7,7 @@ import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@
 import { updateEntitySchema } from "@/lib/validations";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { refreshEntityExpectations } from "@/lib/utils/document-expectations";
+import { syncComplianceForEntity } from "@/lib/utils/compliance-sync";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -111,10 +112,11 @@ export async function GET(
         .select("*")
         .eq("entity_id", id)
         .order("next_due_date", { ascending: true, nullsFirst: false }),
-      // Document completeness expectations
+      // Document completeness expectations (joined with satisfying doc metadata
+      // so the checklist UI can link "✓ Operating Agreement" to the filename).
       supabase
         .from("entity_document_expectations")
-        .select("*")
+        .select("*, satisfied_doc:documents!satisfied_by(id, name, document_type, year, created_at)")
         .eq("entity_id", id)
         .order("document_category")
         .order("is_required", { ascending: false })
@@ -236,7 +238,8 @@ export async function GET(
       const { data: refDirectory } = await supabase
         .from("directory_entries")
         .select("id, name")
-        .in("id", Array.from(directoryIdsToResolve));
+        .in("id", Array.from(directoryIdsToResolve))
+        .is("deleted_at", null);
 
       if (refDirectory) {
         for (const d of refDirectory) {
@@ -327,7 +330,8 @@ export async function GET(
       const { data: invDir } = await supabase
         .from("directory_entries")
         .select("id, name")
-        .in("id", Array.from(capInvestorDirIds));
+        .in("id", Array.from(capInvestorDirIds))
+        .is("deleted_at", null);
 
       if (invDir) {
         for (const d of invDir) {
@@ -465,10 +469,24 @@ export async function PUT(
       );
     }
 
-    // If legal_structure or type changed, refresh document expectations
+    // If legal_structure or type changed, refresh document expectations.
     if ("legal_structure" in updates || "type" in updates) {
       refreshEntityExpectations(id).catch((err) =>
         console.error("Failed to refresh expectations after entity update:", err)
+      );
+    }
+
+    // If legal_structure, formation_state, or tax_classification changed on
+    // an active entity, re-sync compliance obligations. These three fields
+    // drive state / federal rule matching, so a change means the set of
+    // applicable obligations has shifted. Same hook as apply.ts update_entity.
+    if (
+      entity &&
+      entity.status === "active" &&
+      ("legal_structure" in updates || "formation_state" in updates || "tax_classification" in updates)
+    ) {
+      syncComplianceForEntity(id, orgId).catch((err) =>
+        console.error("Failed to sync compliance after entity update:", err)
       );
     }
 

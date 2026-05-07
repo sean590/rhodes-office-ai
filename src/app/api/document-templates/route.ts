@@ -1,3 +1,16 @@
+/**
+ * @deprecated Superseded by /api/documents/overrides and /api/documents/profiles
+ * (PR 4 of the compliance redesign). The refreshEntityExpectations engine no
+ * longer reads from document_expectation_templates, so writes through this
+ * route have no effect on entity expectations. No frontend code calls it as
+ * of PR 4.4a. Kept for one release cycle as a rollback fallback, then deleted
+ * along with the underlying table.
+ *
+ * Only remaining caller: the inference engine's "promote pattern to template"
+ * action (lib/utils/inference-engine.ts). That path needs rewiring to write
+ * to document_profiles — tracked as part of the inference engine activation
+ * (original spec's PR 6).
+ */
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";

@@ -1,4 +1,4 @@
-import { EntityType, EntityStatus, Jurisdiction, TrustType, TrustRoleType, RelationshipType, PaymentFrequency, RelationshipStatus, InvestorType, CustomFieldType, FilingStatus, DocumentType, LegalStructure, QueueStatus, BatchStatus, BatchContext } from './enums';
+import { EntityType, EntityStatus, Jurisdiction, TrustType, TrustRoleType, RelationshipType, PaymentFrequency, RelationshipStatus, InvestorType, CustomFieldType, FilingStatus, DocumentType, LegalStructure, TaxClassification, QueueStatus, BatchStatus, BatchContext } from './enums';
 
 export interface Entity {
   id: string;
@@ -13,6 +13,10 @@ export interface Entity {
   registered_agent: string | null;
   parent_entity_id: string | null;
   legal_structure: LegalStructure | null;
+  // IRS tax election. Separate from legal_structure because an LLC can be
+  // taxed as any of partnership/s_corp/c_corp/disregarded. Drives federal
+  // compliance rule matching. NULL = not yet determined.
+  tax_classification: TaxClassification | null;
   notes: string | null;
   business_purpose: string | null;
   ssn_last_4: string | null;
@@ -287,6 +291,12 @@ export interface QueueItem {
 
   // Result
   document_id: string | null;
+
+  // Review/chat unification (migration 057): link to the chat session the
+  // worker created when the agent deferred. /review's ReviewCard reads from
+  // this; "Open in chat" reuses the same session. Null on legacy items
+  // and on items that auto-ingested (the agent didn't defer).
+  chat_session_id: string | null;
 
   source_type: string;
   source_ref: string | null;

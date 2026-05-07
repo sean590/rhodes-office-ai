@@ -13,11 +13,12 @@ import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocI
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
+import { DocumentChecklist, type ChecklistExpectation } from "@/components/entities/DocumentChecklist";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS, groupTaxDocuments } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
-import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure } from "@/lib/types/enums";
+import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure, TaxClassification } from "@/lib/types/enums";
 import type {
   EntityDetail,
   EntityRegistration,
@@ -105,6 +106,46 @@ const LEGAL_STRUCTURE_LABELS: Record<string, string> = {
   series_llc: "Series LLC",
   other: "Other",
 };
+
+// Tax classification options surfaced per legal structure. An LLC can be
+// taxed several ways (partnership/s_corp/c_corp/disregarded); a corporation
+// is always a c_corp or s_corp; trusts are grantor vs non-grantor for tax.
+// The dropdown filters options using this map so users see only plausible
+// elections for the legal structure they already picked.
+const TAX_CLASSIFICATION_LABELS: Record<string, string> = {
+  partnership: "Partnership (Form 1065)",
+  s_corp: "S Corporation (Form 1120-S)",
+  c_corp: "C Corporation (Form 1120)",
+  disregarded: "Disregarded Entity (Single-Member LLC)",
+  sole_prop: "Sole Proprietorship (Schedule C)",
+  trust_grantor: "Grantor Trust",
+  trust_non_grantor: "Non-Grantor Trust (Form 1041)",
+  tax_exempt: "Tax-Exempt (Form 990)",
+};
+
+const TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE: Record<string, TaxClassification[]> = {
+  llc: ["partnership", "s_corp", "c_corp", "disregarded"],
+  corporation: ["c_corp", "s_corp"],
+  lp: ["partnership"],
+  gp: ["partnership"],
+  grantor_trust: ["trust_grantor", "trust_non_grantor"],
+  non_grantor_trust: ["trust_non_grantor", "trust_grantor"],
+  trust: ["trust_grantor", "trust_non_grantor"],
+  sole_prop: ["sole_prop"],
+  series_llc: ["partnership", "s_corp", "c_corp", "disregarded"],
+  other: ["partnership", "s_corp", "c_corp", "disregarded", "sole_prop", "trust_grantor", "trust_non_grantor", "tax_exempt"],
+};
+
+const ALL_TAX_CLASSIFICATIONS: TaxClassification[] = [
+  "partnership",
+  "s_corp",
+  "c_corp",
+  "disregarded",
+  "sole_prop",
+  "trust_grantor",
+  "trust_non_grantor",
+  "tax_exempt",
+];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -341,6 +382,178 @@ function LegalStructureRow({
         </div>
       )}
     </>
+  );
+}
+
+/* ---- Tax Classification Row (inline editable) ---- */
+function TaxClassificationRow({
+  entityId,
+  currentValue,
+  legalStructure,
+  onUpdate,
+}: {
+  entityId: string;
+  currentValue: TaxClassification | null;
+  legalStructure: LegalStructure | null;
+  onUpdate: (val: TaxClassification | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState<TaxClassification | "">(currentValue || "");
+  const [saving, setSaving] = useState(false);
+
+  // Filter options by the entity's legal structure, but always include
+  // whatever's currently set (in case it was chosen under a different
+  // structure) so the user can still see and unset it.
+  const options: TaxClassification[] = (() => {
+    const filtered =
+      legalStructure && TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE[legalStructure]
+        ? [...TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE[legalStructure]]
+        : [...ALL_TAX_CLASSIFICATIONS];
+    if (currentValue && !filtered.includes(currentValue)) filtered.push(currentValue);
+    return filtered;
+  })();
+
+  async function doSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tax_classification: value || null }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      onUpdate((value || null) as TaxClassification | null);
+      setEditing(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayLabel = currentValue
+    ? (TAX_CLASSIFICATION_LABELS[currentValue] || currentValue)
+    : "—";
+
+  // Inline nudge when the user has a legal_structure but no tax_classification.
+  // Drives federal compliance rule matching, so absence = missing deadlines.
+  const showNudge = !currentValue && !!legalStructure && !editing;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px 0",
+        borderBottom: "1px solid #f0eee8",
+        fontSize: 13,
+      }}
+    >
+      <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>Tax Classification</span>
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <select
+            value={value}
+            onChange={(e) => setValue(e.target.value as TaxClassification | "")}
+            style={{
+              fontSize: 13,
+              padding: "4px 8px",
+              border: "1px solid #ddd9d0",
+              borderRadius: 6,
+              background: "#fff",
+              color: "#1a1a1f",
+              fontFamily: "inherit",
+            }}
+          >
+            <option value="">Not set</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>{TAX_CLASSIFICATION_LABELS[opt] || opt}</option>
+            ))}
+          </select>
+          <button
+            onClick={doSave}
+            disabled={saving}
+            style={{
+              background: "#2d5a3d",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {saving ? "..." : "Save"}
+          </button>
+          <button
+            onClick={() => { setEditing(false); setValue(currentValue || ""); }}
+            style={{
+              background: "none",
+              border: "1px solid #e8e6df",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 500,
+              color: "#6b6b76",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : showNudge ? (
+        <button
+          onClick={() => { setValue(""); setEditing(true); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "rgba(196,117,32,0.08)",
+            border: "1px solid rgba(196,117,32,0.3)",
+            borderRadius: 6,
+            padding: "4px 10px",
+            cursor: "pointer",
+            fontSize: 12,
+            fontFamily: "inherit",
+            color: "#8b4f15",
+          }}
+          title="Set tax classification so federal deadlines appear on the compliance tab"
+        >
+          Set tax classification
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0 }}>
+            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          onClick={() => { setValue(currentValue || ""); setEditing(true); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: currentValue ? "none" : "1px dashed #ddd9d0",
+            borderRadius: currentValue ? 0 : 6,
+            padding: currentValue ? 0 : "3px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontFamily: "inherit",
+            color: currentValue ? "#1a1a1f" : "#9494a0",
+            textAlign: "right",
+          }}
+          title="Click to edit"
+        >
+          {currentValue ? displayLabel : "Not set"}
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: "#9494a0", flexShrink: 0 }}>
+            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -2996,6 +3209,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
 /* ---- Compliance Tab ---- */
 function ComplianceTab({
   entityId,
+  entityType,
   formationState,
   registrations,
   formedDate,
@@ -3006,6 +3220,7 @@ function ComplianceTab({
   onRefresh,
 }: {
   entityId: string;
+  entityType: string;
   formationState: string;
   registrations: EntityRegistration[];
   formedDate: string | null;
@@ -3056,6 +3271,24 @@ function ComplianceTab({
     }
   }
 
+  // Federal jurisdiction. The engine generates federal obligations
+  // (1120/1120-S/1065/1041/990, 1040/1040-ES, BOI, 8822-B) with
+  // jurisdiction="federal" — no entity registration is involved, so this
+  // entry isn't tied to any row in entity_registrations. Only render when
+  // there are federal obligations to display.
+  const hasFederalObligations = obligations.some((o) => o.jurisdiction === "federal");
+  if (hasFederalObligations) {
+    jurisdictions.push({
+      code: "federal",
+      isFormation: false,
+      registrationId: null,
+      qualificationDate: null,
+      lastFilingDate: null,
+      stateId: null,
+      filingExempt: false,
+    });
+  }
+
   async function handleSync() {
     setSyncing(true);
     setSyncMessage(null);
@@ -3080,7 +3313,11 @@ function ComplianceTab({
     }
   }
 
-  if (!legalStructure) {
+  // Person entities don't use legal_structure — they generate obligations via
+  // the person scope (federal 1040/1040-ES + state personal income tax rules).
+  // Only show the "Set legal structure" banner when the guard is actually
+  // relevant to rule matching.
+  if (!legalStructure && entityType !== "person") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Card>
@@ -3177,7 +3414,10 @@ function ComplianceCard({
   const [exempt, setExempt] = useState(jur.filingExempt);
   const [saving, setSaving] = useState(false);
 
-  const stateName = getStateLabel(jur.code as Jurisdiction);
+  // Federal cards aren't tied to a state registration — render "Federal" as
+  // the heading and skip the formation/qualification badge + edit fields.
+  const isFederal = jur.code === "federal";
+  const stateName = isFederal ? "Federal" : getStateLabel(jur.code as Jurisdiction);
 
   // Calculate worst status across all obligations for the card badge
   const displayStatuses = obligations.map((o) =>
@@ -3274,12 +3514,14 @@ function ComplianceCard({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: "#1a1a1f" }}>{stateName}</span>
-          <Badge
-            label={jur.isFormation ? "Formation" : "Qualification"}
-            color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
-            bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
-          />
-          {!editing && (
+          {!isFederal && (
+            <Badge
+              label={jur.isFormation ? "Formation" : "Qualification"}
+              color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
+              bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
+            />
+          )}
+          {!editing && !isFederal && (
             <button
               onClick={handleStartEdit}
               style={{
@@ -3319,13 +3561,16 @@ function ComplianceCard({
         </div>
       </div>
 
-          {/* Sub-header: State ID + Formed/Qualified date */}
-          <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
-            {jur.stateId && (
-              <>STATE ID #: <span style={{ fontFamily: "'DM Mono', monospace", color: "#1a1a1f" }}>{jur.stateId}</span> &middot; </>
-            )}
-            {jur.isFormation ? "FORMED" : "QUALIFIED"}: <span style={{ color: "#1a1a1f" }}>{formatDate(jur.isFormation ? jur.qualificationDate : jur.qualificationDate)}</span>
-          </div>
+          {/* Sub-header: State ID + Formed/Qualified date — state cards only.
+              Federal cards have no registration metadata to show here. */}
+          {!isFederal && (
+            <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+              {jur.stateId && (
+                <>STATE ID #: <span style={{ fontFamily: "'DM Mono', monospace", color: "#1a1a1f" }}>{jur.stateId}</span> &middot; </>
+              )}
+              {jur.isFormation ? "FORMED" : "QUALIFIED"}: <span style={{ color: "#1a1a1f" }}>{formatDate(jur.isFormation ? jur.qualificationDate : jur.qualificationDate)}</span>
+            </div>
+          )}
 
           {/* Edit mode for registration fields */}
           {editing && (
@@ -3924,22 +4169,9 @@ function DocumentsTab({
 }) {
   const [showUpload, setShowUpload] = useState(false);
 
-  // Document completeness expectations — loaded from entity data
-  const initialExpectations = (entityData?.expectations || []) as Array<{
-    id: string;
-    document_type: string;
-    document_category: string;
-    is_required: boolean;
-    is_satisfied: boolean;
-    is_not_applicable: boolean;
-    is_suggestion: boolean;
-    source: string;
-    notes: string | null;
-    satisfied_doc: { id: string; name: string; document_type: string; year: number | null; created_at: string } | null;
-    confidence: number | null;
-    inference_reason: string | null;
-  }>;
-  const [expectations, setExpectations] = useState(initialExpectations);
+  // Document completeness expectations — loaded from entity data.
+  const initialExpectations = (entityData?.expectations || []) as ChecklistExpectation[];
+  const [expectations, setExpectations] = useState<ChecklistExpectation[]>(initialExpectations);
   const expectationsLoaded = true;
 
   // Sync with entity data when it changes (e.g. after entity refresh)
@@ -4177,15 +4409,8 @@ function DocumentsTab({
   };
 
   /* ---- Download ---- */
-  const handleDownload = async (docId: string) => {
-    try {
-      const res = await fetch(`/api/documents/${docId}/download`);
-      if (!res.ok) throw new Error("Download failed");
-      const data = await res.json();
-      window.open(data.url, "_blank");
-    } catch (err) {
-      console.error("Download error:", err);
-    }
+  const handleDownload = (docId: string) => {
+    window.open(`/api/documents/${docId}/download`, "_blank");
   };
 
   /* ---- Delete ---- */
@@ -4971,6 +5196,16 @@ function DocumentsTab({
         </div>
       )}
 
+      {/* Consolidated checklist: required / missing / suggestions / N/A. */}
+      <DocumentChecklist
+        entityName={entityName}
+        expectations={expectations}
+        onConfirmSuggestion={handleConfirmSuggestion}
+        onDismissSuggestion={handleDismissSuggestion}
+        onMarkNA={handleMarkNA}
+        onMarkNeeded={handleMarkNeeded}
+      />
+
       {/* Document list grouped by category */}
       {documents.length === 0 && expectations.filter((e) => !e.is_not_applicable && !e.is_suggestion && !e.is_satisfied).length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
@@ -4986,15 +5221,9 @@ function DocumentsTab({
         <div style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative" }}>
           {Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([catKey, cat]) => {
             const catDocs = grouped[catKey] || [];
-            const catExpectations = expectations.filter(
-              (e) => e.document_category === catKey && !e.is_not_applicable && !e.is_suggestion
-            );
-            const catMissing = catExpectations.filter((e) => !e.is_satisfied);
-            const catSatisfied = catExpectations.filter((e) => e.is_satisfied).length;
-            const catTotal = catExpectations.length;
 
-            // Show category if it has docs OR missing expectations
-            if (catDocs.length === 0 && catMissing.length === 0) return null;
+            // Expectations are shown in the top-level checklist, not per-category.
+            if (catDocs.length === 0) return null;
             const collapsed = collapsedCats.has(catKey);
             const allCatDocIds = catDocs.map((d) => d.id);
             const allCatSelected = allCatDocIds.length > 0 && allCatDocIds.every((id) => selectedDocIds.has(id));
@@ -5202,33 +5431,18 @@ function DocumentsTab({
                     )}
                     <FolderIcon size={14} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>{cat.label}</span>
-                    {catTotal > 0 ? (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: catSatisfied === catTotal ? "#2d5a3d" : "#c47520",
-                          background: catSatisfied === catTotal ? "rgba(45,90,61,0.08)" : "rgba(196,117,32,0.08)",
-                          padding: "1px 7px",
-                          borderRadius: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {catSatisfied}/{catTotal}
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#9494a0",
-                          background: "#f0eee8",
-                          padding: "1px 7px",
-                          borderRadius: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {catDocs.length}
-                      </span>
-                    )}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "#9494a0",
+                        background: "#f0eee8",
+                        padding: "1px 7px",
+                        borderRadius: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {catDocs.length}
+                    </span>
                   </div>
                   <DownIcon size={14} className="" />
                 </div>
@@ -5236,58 +5450,6 @@ function DocumentsTab({
                 {/* Documents in this category */}
                 {!collapsed && (
                   <div>
-                    {/* Missing expectations at the top */}
-                    {catMissing.map((exp) => (
-                      <div
-                        key={exp.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: "10px 18px",
-                          borderBottom: "1px solid #f8f7f4",
-                          fontSize: 13,
-                        }}
-                      >
-                        <span style={{ color: "#c47520", fontSize: 14, flexShrink: 0 }}>&#9675;</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontWeight: 500, color: "#6b6b76" }}>
-                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                          </span>
-                        </div>
-                        <span style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: exp.is_required ? "#c47520" : "#9494a0",
-                          background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(0,0,0,0.04)",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                        }}>
-                          {exp.is_required ? "Required" : "Recommended"}
-                        </span>
-                        {exp.source === "template" && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4 }}>
-                            Template
-                          </span>
-                        )}
-                        <button
-                          onClick={() => handleMarkNA(exp.id)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            fontSize: 11,
-                            color: "#9494a0",
-                            cursor: "pointer",
-                            padding: "2px 6px",
-                            fontFamily: "inherit",
-                          }}
-                          title="Mark as not applicable"
-                        >
-                          N/A
-                        </button>
-                      </div>
-                    ))}
-
                     {/* Tax: year → bucket sub-grouping */}
                     {isTax && taxGrouped ? (
                       sortedYears.map((year) => {
@@ -5386,131 +5548,6 @@ function DocumentsTab({
                       catDocs.map((doc) => renderDocRow(doc))
                     )}
 
-                    {/* AI Suggestions */}
-                    {(() => {
-                      const suggestions = expectations.filter(
-                        (e) => e.document_category === catKey && e.is_suggestion && !e.is_not_applicable
-                      );
-                      if (suggestions.length === 0) return null;
-                      return (
-                        <>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "8px 18px 4px",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: "#8b6914",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.5px",
-                            }}
-                          >
-                            <SparkleIcon size={11} />
-                            Suggestions
-                          </div>
-                          {suggestions.map((exp) => (
-                            <div
-                              key={exp.id}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 12,
-                                padding: "8px 18px",
-                                borderBottom: "1px solid #f8f7f4",
-                                fontSize: 13,
-                                background: "rgba(139,105,20,0.03)",
-                              }}
-                            >
-                              <span style={{ color: "#8b6914", fontSize: 14, flexShrink: 0 }}>&#9671;</span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <span style={{ color: "#1a1a1f" }}>
-                                  {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                                </span>
-                                {exp.inference_reason && (
-                                  <div style={{ fontSize: 11, color: "#8b6914", marginTop: 2 }}>
-                                    {exp.inference_reason}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => handleConfirmSuggestion(exp.id)}
-                                style={{
-                                  background: "rgba(45,90,61,0.08)",
-                                  border: "none",
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: "#2d5a3d",
-                                  cursor: "pointer",
-                                  padding: "3px 10px",
-                                  borderRadius: 4,
-                                  fontFamily: "inherit",
-                                }}
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                onClick={() => handleDismissSuggestion(exp.id)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  fontSize: 11,
-                                  color: "#9494a0",
-                                  cursor: "pointer",
-                                  padding: "2px 6px",
-                                  fontFamily: "inherit",
-                                }}
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          ))}
-                        </>
-                      );
-                    })()}
-
-                    {/* N/A items (collapsed by default) */}
-                    {(() => {
-                      const naItems = expectations.filter(
-                        (e) => e.document_category === catKey && e.is_not_applicable && !e.is_suggestion
-                      );
-                      if (naItems.length === 0) return null;
-                      return naItems.map((exp) => (
-                        <div
-                          key={exp.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            padding: "8px 18px",
-                            borderBottom: "1px solid #f8f7f4",
-                            fontSize: 13,
-                            opacity: 0.5,
-                          }}
-                        >
-                          <span style={{ color: "#9494a0", fontSize: 14, flexShrink: 0 }}>&#8212;</span>
-                          <span style={{ flex: 1, color: "#9494a0", textDecoration: "line-through" }}>
-                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                          </span>
-                          <button
-                            onClick={() => handleMarkNeeded(exp.id)}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              fontSize: 11,
-                              color: "#9494a0",
-                              cursor: "pointer",
-                              textDecoration: "underline",
-                              padding: "2px 6px",
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            Mark as needed
-                          </button>
-                        </div>
-                      ));
-                    })()}
                   </div>
                 )}
               </Card>
@@ -5560,14 +5597,32 @@ function DocumentsTab({
 }
 
 /* ---- Entity Action Menu (three-dot dropdown with Edit / Delete) ---- */
-function EntityActionMenu({ entityId, entityName, router, isMobile }: { entityId: string; entityName: string; router: ReturnType<typeof useRouter>; isMobile: boolean }) {
+const ENTITY_STATUSES = [
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+  { value: "dissolved", label: "Dissolved" },
+  { value: "suspended", label: "Suspended" },
+  { value: "pending_formation", label: "Pending Formation" },
+  { value: "converting", label: "Converting" },
+];
+const TERMINAL_STATUSES = ["dissolved", "inactive"];
+
+function EntityActionMenu({ entityId, entityName, entityStatus, router, isMobile, onStatusChange }: {
+  entityId: string; entityName: string; entityStatus: string;
+  router: ReturnType<typeof useRouter>; isMobile: boolean;
+  onStatusChange: (s: string) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [showStatusSub, setShowStatusSub] = useState(false);
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowStatusSub(false); }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -5575,68 +5630,172 @@ function EntityActionMenu({ entityId, entityName, router, isMobile }: { entityId
 
   const handleDelete = async () => {
     setOpen(false);
-    if (!confirm(`Delete "${entityName}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${entityName}" and all its related data? This cannot be undone.`)) return;
     try {
       const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || "Failed to delete entity");
-        return;
-      }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed"); return; }
       router.push("/entities");
-    } catch {
-      alert("Failed to delete entity");
+    } catch { alert("Failed to delete entity"); }
+  };
+
+  const applyStatus = async (newStatus: string, statusReason?: string) => {
+    setChanging(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}/status`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus, reason: statusReason }),
+      });
+      if (res.ok) onStatusChange(newStatus);
+      else alert("Failed to change status");
+    } catch { alert("Failed to change status"); }
+    finally { setChanging(false); setConfirmStatus(null); setOpen(false); setShowStatusSub(false); setReason(""); }
+  };
+
+  const handleStatusClick = (s: string) => {
+    if (s === entityStatus) return;
+    if (TERMINAL_STATUSES.includes(s) || (s === "active" && TERMINAL_STATUSES.includes(entityStatus))) {
+      setConfirmStatus(s);
+    } else {
+      applyStatus(s);
     }
   };
 
+  const menuBtnStyle = (color?: string): React.CSSProperties => ({
+    display: "flex", alignItems: "center", gap: 8, width: "100%",
+    padding: "10px 14px", background: "none", border: "none",
+    fontSize: 13, color: color || "#1a1a1f", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+  });
+
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((p) => !p)}
-        style={{
+    <>
+      <div ref={ref} style={{ position: "relative" }}>
+        <button onClick={() => setOpen((p) => !p)} style={{
           background: "none", border: "1px solid #ddd9d0", borderRadius: 6,
           padding: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-      >
-        <EllipsisVerticalIcon size={16} color="#6b6b76" />
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", right: 0, marginTop: 4,
-          background: "#ffffff", border: "1px solid #ddd9d0", borderRadius: 8,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 160, zIndex: 20,
-          overflow: "hidden",
         }}>
-          {!isMobile && (
-            <button
-              onClick={() => { setOpen(false); router.push(`/entities/${entityId}/edit`); }}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%",
-                padding: "10px 14px", background: "none", border: "none",
-                fontSize: 13, color: "#1a1a1f", cursor: "pointer", fontFamily: "inherit",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-            >
-              <PencilIcon size={14} color="#6b6b76" /> Edit Entity
+          <EllipsisVerticalIcon size={16} color="#6b6b76" />
+        </button>
+        {open && (
+          <div style={{
+            position: "absolute", top: "100%", right: 0, marginTop: 4,
+            background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 180, zIndex: 20, overflow: "visible",
+          }}>
+            {!isMobile && (
+              <button onClick={() => { setOpen(false); router.push(`/entities/${entityId}/edit`); }}
+                style={menuBtnStyle()}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                <PencilIcon size={14} color="#6b6b76" /> Edit Entity
+              </button>
+            )}
+            <div style={{ position: "relative" }}
+              onMouseEnter={() => setShowStatusSub(true)} onMouseLeave={() => setShowStatusSub(false)}>
+              <button style={{ ...menuBtnStyle(), justifyContent: "space-between" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                Change Status <span style={{ fontSize: 10, color: "#9494a0" }}>▸</span>
+              </button>
+              {showStatusSub && (
+                <div style={{
+                  position: "absolute", left: "100%", top: 0, marginLeft: 2,
+                  background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 170, zIndex: 21, overflow: "hidden",
+                }}>
+                  {ENTITY_STATUSES.map((s) => (
+                    <button key={s.value} onClick={() => handleStatusClick(s.value)} style={{
+                      ...menuBtnStyle(s.value === entityStatus ? "#2d5a3d" : undefined),
+                      fontWeight: s.value === entityStatus ? 600 : 400,
+                      cursor: s.value === entityStatus ? "default" : "pointer",
+                    }}
+                    onMouseEnter={(e) => { if (s.value !== entityStatus) e.currentTarget.style.background = "#f0efe9"; }}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                      {s.value === entityStatus ? "● " : "  "}{s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={handleDelete} style={{ ...menuBtnStyle("#c73e3e"), borderTop: "1px solid #f0eee8" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+              <XIcon size={14} /> Delete Entity
             </button>
-          )}
-          <button
-            onClick={handleDelete}
-            style={{
-              display: "flex", alignItems: "center", gap: 8, width: "100%",
-              padding: "10px 14px", background: "none", border: "none",
-              borderTop: !isMobile ? "1px solid #f0eee8" : "none",
-              fontSize: 13, color: "#c73e3e", cursor: "pointer", fontFamily: "inherit",
-              textAlign: "left",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-          >
-            <XIcon size={14} /> Delete Entity
-          </button>
+          </div>
+        )}
+      </div>
+      {confirmStatus && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 440, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>
+              {confirmStatus === "active" ? `Reactivate ${entityName}?` : `Mark ${entityName} as ${ENTITY_STATUSES.find((s) => s.value === confirmStatus)?.label}?`}
+            </h3>
+            {confirmStatus === "active" ? (
+              <p style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 16px", lineHeight: 1.5 }}>
+                This will restore compliance tracking and document requirements.
+              </p>
+            ) : (
+              <div style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 16px", lineHeight: 1.5 }}>
+                <p style={{ margin: "0 0 8px" }}>This will:</p>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  <li>Exempt all pending compliance obligations</li>
+                  <li>Suppress new document requirements</li>
+                  <li>Hide from active entity lists by default</li>
+                </ul>
+                <p style={{ margin: "8px 0 0" }}>The entity and all its records will be preserved. This can be reversed.</p>
+              </div>
+            )}
+            {confirmStatus !== "active" && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: "#6b6b76", display: "block", marginBottom: 4 }}>Reason / notes (optional)</label>
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+                  style={{ width: "100%", fontSize: 13, padding: "8px 10px", border: "1px solid #ddd9d0", borderRadius: 6, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setConfirmStatus(null); setReason(""); }} disabled={changing}
+                style={{ padding: "8px 16px", fontSize: 13, border: "1px solid #ddd9d0", background: "#fff", borderRadius: 6, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => applyStatus(confirmStatus, reason || undefined)} disabled={changing}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 6, cursor: changing ? "wait" : "pointer", color: "#fff", background: confirmStatus === "active" ? "#2d5a3d" : "#c73e3e" }}>
+                {changing ? "Updating..." : confirmStatus === "active" ? "Reactivate" : `Mark as ${ENTITY_STATUSES.find((s) => s.value === confirmStatus)?.label}`}
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+    </>
+  );
+}
+
+function EntityStatusBanner({ status, entityName, entityId, onReactivate }: {
+  status: string; entityName: string; entityId: string; onReactivate: () => void;
+}) {
+  if (status === "active") return null;
+  const colors: Record<string, { bg: string; border: string; text: string }> = {
+    dissolved: { bg: "#fdf2f2", border: "#f5c6c6", text: "#c73e3e" },
+    inactive: { bg: "#f5f5f5", border: "#ddd9d0", text: "#6b6b76" },
+    suspended: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+    pending_formation: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+    converting: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+  };
+  const c = colors[status] ?? colors.inactive;
+  const label = ENTITY_STATUSES.find((s) => s.value === status)?.label ?? status;
+  const isTerminal = TERMINAL_STATUSES.includes(status);
+  return (
+    <div style={{
+      padding: "10px 16px", background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between",
+      fontSize: 13, color: c.text, marginBottom: 12,
+    }}>
+      <span>
+        {status === "dissolved" ? "⚠ " : ""}
+        This entity is {label.toLowerCase()}. {isTerminal ? "Compliance tracking is paused." : ""}
+      </span>
+      {isTerminal && (
+        <button onClick={onReactivate} style={{
+          background: "none", border: `1px solid ${c.border}`, borderRadius: 6,
+          padding: "4px 12px", fontSize: 12, color: c.text, cursor: "pointer",
+        }}>Reactivate</button>
       )}
     </div>
   );
@@ -5954,7 +6113,8 @@ export default function EntityDetailPage() {
                 </button>
               )}
             </h1>
-            <EntityActionMenu entityId={entityId} entityName={entity.name} router={router} isMobile={isMobile} />
+            <EntityActionMenu entityId={entityId} entityName={entity.name} entityStatus={entity.status} router={router} isMobile={isMobile}
+              onStatusChange={(s) => setEntity((prev) => prev ? { ...prev, status: s as EntityDetail["status"] } : prev)} />
             {!isMobile && (
               <button
                 onClick={() => {
@@ -6012,6 +6172,22 @@ export default function EntityDetailPage() {
           </div>
         </div>
       </div>
+
+      {/* ---- Status Banner ---- */}
+      <EntityStatusBanner
+        status={entity.status}
+        entityName={entity.name}
+        entityId={entityId}
+        onReactivate={async () => {
+          try {
+            const res = await fetch(`/api/entities/${entityId}/status`, {
+              method: "PUT", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "active" }),
+            });
+            if (res.ok) setEntity((prev) => prev ? { ...prev, status: "active" as EntityDetail["status"] } : prev);
+          } catch { /* ignore */ }
+        }}
+      />
 
       {/* ---- Mobile Section Nav (pill bar) ---- */}
       {isMobile && (
@@ -6187,6 +6363,15 @@ export default function EntityDetailPage() {
               )}
 
               {!isPerson && (
+                <TaxClassificationRow
+                  entityId={entityId}
+                  currentValue={entity.tax_classification ?? null}
+                  legalStructure={entity.legal_structure}
+                  onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, tax_classification: val } : prev))}
+                />
+              )}
+
+              {!isPerson && (
                 <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
               )}
 
@@ -6336,6 +6521,7 @@ export default function EntityDetailPage() {
       {activeTab === "compliance" && (
         <ComplianceTab
           entityId={entityId}
+          entityType={entity.type}
           formationState={entity.formation_state || ""}
           registrations={entity.registrations}
           formedDate={entity.formed_date}

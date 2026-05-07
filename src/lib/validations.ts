@@ -46,6 +46,19 @@ export const updateEntitySchema = z.object({
   notes: z.string().max(5000).optional().nullable(),
   status: z.enum(["active", "inactive", "dissolved"]).optional(),
   legal_structure: z.string().optional().nullable(),
+  tax_classification: z
+    .enum([
+      "partnership",
+      "s_corp",
+      "c_corp",
+      "disregarded",
+      "sole_prop",
+      "trust_grantor",
+      "trust_non_grantor",
+      "tax_exempt",
+    ])
+    .optional()
+    .nullable(),
   business_purpose: z.string().max(1000).optional().nullable(),
   aliases: z.array(z.string().max(255)).max(20).optional().nullable(),
   ssn_last_4: z.string().regex(/^\d{4}$/, "SSN Last 4 must be 4 digits").optional().nullable().or(z.literal("")),
@@ -72,13 +85,22 @@ export const chatMessageSchema = z.object({
     documentId: z.string().optional(),
     filters: z.record(z.string(), z.string()).optional(),
   }).optional(),
+  attachments: z.array(z.object({
+    storage_path: z.string(),
+    filename: z.string(),
+    content_type: z.string(),
+    size: z.number(),
+    document_id: z.string().uuid().optional(),
+    batch_id: z.string().uuid().optional(),
+  })).max(10).optional(),
 });
 
 export const createBatchSchema = z.object({
   name: z.string().max(255).optional(),
-  context: z.enum(["global", "entity", "onboarding", "chat"]).default("global"),
+  context: z.enum(["global", "entity", "onboarding", "chat", "review_page"]).default("global"),
   entity_id: z.string().uuid().optional().nullable(),
   entity_discovery: z.boolean().default(false),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 // --- Additional mutation schemas ---

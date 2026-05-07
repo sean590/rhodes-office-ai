@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { BuildingIcon, ChartIcon, DocIcon, PeopleIcon, LinkIcon, GearIcon } from "@/components/ui/icons";
+import { activityTitle } from "@/lib/utils/activity-labels";
 
 interface ActivityItem {
   id: string;
@@ -57,41 +58,24 @@ function ResourceIcon({ type, action }: { type: string; action: string }) {
   );
 }
 
-function fallbackTitle(entry: ActivityItem): string {
-  const a = entry.action;
-  const rt = entry.resource_type;
-  const meta = entry.metadata || {};
-
-  if (a === "create" && rt === "entity") return `Created entity: ${meta.name || meta.entity_name || ""}`;
-  if (a === "edit" && rt === "entity") return `Updated entity${meta.entity_name ? `: ${meta.entity_name}` : ""}`;
-  if (a === "delete" && rt === "entity") return `Deleted entity${meta.entity_name ? `: ${meta.entity_name}` : ""}`;
-  if (a === "create" && rt === "investment") return `Created investment: ${meta.name || meta.investment_name || ""}`;
-  if (a === "edit" && rt === "investment") return `Updated investment${meta.investment_name ? `: ${meta.investment_name}` : ""}`;
-  if (a === "delete" && rt === "investment") return `Deleted investment${meta.investment_name ? `: ${meta.investment_name}` : ""}`;
-  if (a === "create" && rt === "investment_transaction") {
-    const txType = meta.transaction_type ? String(meta.transaction_type).replace(/_/g, " ") : "transaction";
-    const amt = meta.amount ? `$${Number(meta.amount).toLocaleString()}` : "";
-    return `Recorded ${txType}${amt ? ` of ${amt}` : ""}`;
-  }
-  if (a === "create" && rt === "investment_allocation") return `Updated allocations${meta.investment_name ? ` for ${meta.investment_name}` : ""}`;
-  if (a === "upload" && rt === "document") return `Uploaded document: ${meta.document_name || ""}`;
-  if (a === "upload" && rt === "pipeline") return `Uploaded ${meta.file_count || ""} document${(meta.file_count as number) !== 1 ? "s" : ""}`;
-  if (a === "delete" && rt === "document") return `Deleted document: ${meta.document_name || ""}`;
-  if (a === "download" && rt === "document") return `Downloaded: ${meta.name || meta.document_name || ""}`;
-  if (a === "approve" && rt === "pipeline_item") return `Approved: ${meta.document_name || "document"}`;
-  if (a === "ingest" && rt === "pipeline_item") return `Ingested: ${meta.document_name || "document"}`;
-  if (a === "create" && rt === "directory_entry") return `Added to directory: ${meta.name || ""}`;
-  if (a === "create" && rt === "relationship") return `Created relationship`;
-  if (a === "create" && rt === "cap_table_entry") return `Added cap table entry: ${meta.investor_name || ""}`;
-
-  return `${a.charAt(0).toUpperCase() + a.slice(1)} ${rt.replace(/_/g, " ")}`;
-}
-
 export function ActivityEntry({ entry }: { entry: ActivityItem }) {
   const meta = entry.metadata || {};
-  const description = (meta.description as string) || fallbackTitle(entry);
+  const title = activityTitle(entry.action, entry.resource_type, meta);
+  const description = (meta.description as string) || title || "";
+  // Two distinct shapes can drive the expand/collapse drawer:
+  //   - `changes`: field-level diffs ({ field, from, to }) — entity edits
+  //   - `applied_actions`: human-readable strings ("Create entity: …") —
+  //     written by the approve route per applied proposed_action
+  // They render differently; expose both and let the renderer decide.
   const changes = meta.changes as Array<{ field: string; from: unknown; to: unknown }> | undefined;
+  const appliedActions = meta.applied_actions as string[] | undefined;
+  const hasDetails =
+    (changes && changes.length > 0) || (appliedActions && appliedActions.length > 0);
   const [expanded, setExpanded] = useState(false);
+
+  // Suppressed events (create_batch, process_batch) return null. Check AFTER
+  // hooks so React hook order stays stable across renders.
+  if (title === null) return null;
 
   return (
     <div style={{
@@ -107,7 +91,7 @@ export function ActivityEntry({ entry }: { entry: ActivityItem }) {
         <span style={{ fontSize: 12, color: "#9494a0", flexShrink: 0, marginLeft: 4, whiteSpace: "nowrap" }}>
           {relativeTime(entry.created_at)}
         </span>
-        {changes && changes.length > 0 && (
+        {hasDetails && (
           <button
             onClick={() => setExpanded(!expanded)}
             style={{ fontSize: 11, color: "#2d5a3d", background: "none", border: "none", cursor: "pointer", flexShrink: 0 }}
@@ -117,7 +101,7 @@ export function ActivityEntry({ entry }: { entry: ActivityItem }) {
         )}
       </div>
 
-      {expanded && changes && (
+      {expanded && changes && changes.length > 0 && (
         <div style={{ marginTop: 6, marginLeft: 38, fontSize: 12, color: "#6b6b76" }}>
           {changes.map((c, i) => (
             <div key={i} style={{ marginBottom: 2 }}>
@@ -125,6 +109,17 @@ export function ActivityEntry({ entry }: { entry: ActivityItem }) {
               <span style={{ textDecoration: "line-through", opacity: 0.6 }}>{String(c.from ?? "(empty)")}</span>
               {" → "}
               <span style={{ color: "#1a1a1f" }}>{String(c.to ?? "(empty)")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {expanded && appliedActions && appliedActions.length > 0 && (
+        <div style={{ marginTop: 6, marginLeft: 38, fontSize: 12, color: "#6b6b76" }}>
+          {appliedActions.map((line, i) => (
+            <div key={i} style={{ marginBottom: 2, display: "flex", gap: 6 }}>
+              <span style={{ color: "#9494a0" }}>•</span>
+              <span>{line}</span>
             </div>
           ))}
         </div>

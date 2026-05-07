@@ -1,6 +1,6 @@
 import { COMPLIANCE_RULES } from "@/lib/data/compliance-rules";
 import type { ComplianceRule, DueDateFormula, EntityTypeScope } from "@/lib/data/compliance-rules";
-import type { LegalStructure } from "@/lib/types/enums";
+import type { LegalStructure, TaxClassification } from "@/lib/types/enums";
 
 /** Safely parse a date string to a Date, handling both "YYYY-MM-DD" and timestamptz formats. */
 function parseDate(dateStr: string): Date {
@@ -9,7 +9,10 @@ function parseDate(dateStr: string): Date {
 
 export interface EntityComplianceInput {
   id: string;
+  status?: string;
+  type?: string;
   legal_structure: LegalStructure | null;
+  tax_classification: TaxClassification | null;
   formation_state: string;
   formed_date: string | null;
   registrations: { jurisdiction: string }[];
@@ -55,28 +58,63 @@ function toEntityTypeScope(ls: LegalStructure | null): EntityTypeScope | null {
 }
 
 /**
+ * Resolve the scope used for rule matching.
+ *
+ * Persons are routed to the "person" scope so personal income tax rules
+ * (Form 1040, 1040-ES, state personal income tax) match them. For
+ * everything else we fall back to the legal-structure mapping.
+ */
+function resolveEntityScope(entity: EntityComplianceInput): EntityTypeScope | null {
+  if (entity.type === "person") return "person";
+  return toEntityTypeScope(entity.legal_structure);
+}
+
+/**
+ * Default tax_classification used by the engine when one isn't set.
+ *
+ * Person entities default to sole_prop so federal personal-tax rules
+ * (which key on tax_classifications: ["sole_prop"]) match without
+ * requiring users to set a value on every person record.
+ */
+function effectiveTaxClassification(entity: EntityComplianceInput): TaxClassification | null {
+  if (entity.tax_classification) return entity.tax_classification;
+  if (entity.type === "person") return "sole_prop";
+  return null;
+}
+
+/**
  * Given an entity and its registrations, returns all compliance
  * obligations the entity must fulfill.
  */
 export function generateComplianceObligations(
-  entity: EntityComplianceInput
+  entity: EntityComplianceInput,
+  options?: { disabledRuleIds?: Set<string> },
 ): GeneratedObligation[] {
-  const obligations: GeneratedObligation[] = [];
-  const entityScope = toEntityTypeScope(entity.legal_structure);
+  if (entity.status && entity.status !== "active") return [];
 
-  // Collect all jurisdictions: formation state + foreign registrations
+  const disabledRuleIds = options?.disabledRuleIds ?? new Set<string>();
+  const obligations: GeneratedObligation[] = [];
+  const entityScope = resolveEntityScope(entity);
+  const taxClass = effectiveTaxClassification(entity);
+
+  // Collect all jurisdictions: formation state + foreign registrations.
+  // "federal" is always included so federal IRS / FinCEN rules get a chance
+  // to match every entity regardless of state.
   const allJurisdictions = new Set<string>();
-  allJurisdictions.add(entity.formation_state);
+  if (entity.formation_state) allJurisdictions.add(entity.formation_state);
   for (const reg of entity.registrations) {
     allJurisdictions.add(reg.jurisdiction);
   }
+  allJurisdictions.add("federal");
 
   for (const jurisdiction of allJurisdictions) {
-    const isDomestic = jurisdiction === entity.formation_state;
+    const isFederal = jurisdiction === "federal";
+    const isDomestic = !isFederal && jurisdiction === entity.formation_state;
 
-    // Find matching rules
+    // Find matching rules, filtering out org-disabled and profile-disabled rules.
     const matchingRules = COMPLIANCE_RULES.filter((rule) => {
       if (rule.jurisdiction !== jurisdiction) return false;
+      if (disabledRuleIds.has(rule.id)) return false;
 
       // Check entity type scope
       const matchesType =
@@ -84,9 +122,19 @@ export function generateComplianceObligations(
         (entityScope !== null && rule.entity_types.includes(entityScope));
       if (!matchesType) return false;
 
-      // Check domestic/foreign applicability
-      if (isDomestic && rule.applies_to_domestic === false) return false;
-      if (!isDomestic && rule.applies_to_foreign === false) return false;
+      // Federal rules can additionally key on tax classification. Skip the
+      // rule when it specifies tax_classifications and the entity's
+      // (effective) classification doesn't match.
+      if (rule.tax_classifications && rule.tax_classifications.length > 0) {
+        if (!taxClass) return false;
+        if (!rule.tax_classifications.includes(taxClass)) return false;
+      }
+
+      // Domestic/foreign applicability is a state concept — skip for federal.
+      if (!isFederal) {
+        if (isDomestic && rule.applies_to_domestic === false) return false;
+        if (!isDomestic && rule.applies_to_foreign === false) return false;
+      }
 
       return true;
     });

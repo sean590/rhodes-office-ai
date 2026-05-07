@@ -321,6 +321,13 @@ export async function POST(request: Request) {
       }
     }
 
+    // Auto-generate compliance obligations for the new entity (fire-and-forget).
+    if (entity.legal_structure && entity.formation_state && entity.status === "active") {
+      import("@/lib/utils/compliance-sync").then(({ syncComplianceForEntity }) =>
+        syncComplianceForEntity(entity.id, orgId).catch(console.error),
+      );
+    }
+
     // Audit log
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);

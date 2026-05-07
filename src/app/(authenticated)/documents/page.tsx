@@ -270,15 +270,8 @@ export default function DocumentsPage() {
   };
 
   /* ---- Download ---- */
-  const handleDownload = async (docId: string) => {
-    try {
-      const res = await fetch(`/api/documents/${docId}/download`);
-      if (!res.ok) throw new Error("Download failed");
-      const data = await res.json();
-      window.open(data.url, "_blank");
-    } catch (err) {
-      console.error("Download error:", err);
-    }
+  const handleDownload = (docId: string) => {
+    window.open(`/api/documents/${docId}/download`, "_blank");
   };
 
   /* ---- Delete ---- */

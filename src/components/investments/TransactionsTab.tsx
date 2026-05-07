@@ -225,8 +225,27 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                     <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f", marginTop: 2 }}>
                       {fmtSignedDollars(Number(txn.amount))}
                     </div>
-                    {txn.description && <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2 }}>{txn.description}</div>}
-                    {memberSplits.length > 0 && (
+                    {/* Collapsed view = date + type + investor + amount only.
+                        All sub-line info (description, member splits, line items)
+                        belongs in the expand panel. */}
+                    {isExpanded && txn.description && (
+                      <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2 }}>
+                        {txn.document_id ? (
+                          <a
+                            href={`/api/documents/${txn.document_id}/download`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ color: "#3366a8", textDecoration: "underline" }}
+                          >
+                            {txn.description}
+                          </a>
+                        ) : (
+                          txn.description
+                        )}
+                      </div>
+                    )}
+                    {isExpanded && memberSplits.length > 0 && (
                       <div style={{ fontSize: 12, color: "#9494a0", marginTop: 4 }}>
                         Split: {memberSplits.map(c => `${c.member_name || "?"} ${fmtDollars(Number(c.amount))}`).join(" · ")}
                       </div>
@@ -282,22 +301,6 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                             {fmtSignedDollars(Number(txn.amount))}
                           </span>
                         </div>
-                        {txn.document_id && (
-                          <div style={{ marginTop: 8, fontSize: 12 }}>
-                            <span style={{ color: "#9494a0" }}>Source document: </span>
-                            <a
-                              href={`/api/documents/${txn.document_id}/download`}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              style={{ color: "#3366a8", textDecoration: "none" }}
-                              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                            >
-                              📄 {txn.document_name || "View document"}
-                            </a>
-                          </div>
-                        )}
                         {/* Record Amendment — buried inside the expand panel.
                             For after-the-fact financial changes (recall, corrected
                             wire). NOT for typo fixes — those use Edit on the row. */}
@@ -321,22 +324,6 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                             </button>
                           </div>
                         )}
-                      </div>
-                    )}
-                    {/* If row has no line items, still show document link as a one-liner under the row */}
-                    {!hasLineItems && txn.document_id && (
-                      <div style={{ marginTop: 4, fontSize: 12 }}>
-                        <a
-                          href={`/api/documents/${txn.document_id}/download`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ color: "#3366a8", textDecoration: "none" }}
-                          onMouseEnter={(e) => { e.currentTarget.style.textDecoration = "underline"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.textDecoration = "none"; }}
-                        >
-                          📄 {txn.document_name || "Source document"}
-                        </a>
                       </div>
                     )}
                   </div>

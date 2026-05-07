@@ -16,14 +16,14 @@ const PRIMARY_TABS = [
 ];
 
 const MORE_TABS = [
-  { href: "/investments", label: "Investments", Icon: ChartIcon },
-  { href: "/settings", label: "Settings", Icon: GearIcon },
+  { href: "/investments", label: "Investments", Icon: ChartIcon, activeBase: "/investments" },
+  { href: "/settings/profile", label: "Settings", Icon: GearIcon, activeBase: "/settings" },
 ];
 
 export function MobileTabBar() {
   const pathname = usePathname();
   const [moreOpen, setMoreOpen] = useState(false);
-  const isMoreActive = MORE_TABS.some((t) => pathname.startsWith(t.href));
+  const isMoreActive = MORE_TABS.some((t) => pathname.startsWith(t.activeBase));
 
   return (
     <>
@@ -52,7 +52,7 @@ export function MobileTabBar() {
               background: "#ddd9d0", margin: "0 auto 16px",
             }} />
             {MORE_TABS.map((tab) => {
-              const active = pathname.startsWith(tab.href);
+              const active = pathname.startsWith(tab.activeBase);
               return (
                 <Link
                   key={tab.href}

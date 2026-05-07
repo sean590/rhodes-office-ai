@@ -16,6 +16,7 @@ export async function GET() {
         .from("directory_entries")
         .select("id, name, type")
         .eq("organization_id", orgId)
+        .is("deleted_at", null)
         .order("name")
         .limit(500),
       supabase

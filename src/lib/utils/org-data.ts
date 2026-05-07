@@ -1,7 +1,6 @@
 /**
  * Shared org data fetcher — single source of truth for all org context.
- * Used by: buildChatContext, getDbContext (extract.ts), fetchEntityContext (extract-v2.ts),
- * triage rosters (triage.ts).
+ * Used by: buildChatContext, triage rosters (triage.ts).
  *
  * When a new table is added to the data model, add it here once.
  */
@@ -118,7 +117,7 @@ export async function fetchOrgContext(
     investmentsRes,
   ] = await Promise.all([
     fetchDirectory
-      ? admin.from("directory_entries").select("*").eq("organization_id", orgId).order("name")
+      ? admin.from("directory_entries").select("*").eq("organization_id", orgId).is("deleted_at", null).order("name")
       : Promise.resolve({ data: [] }),
     fetchRelationships
       ? admin.from("relationships").select("*").eq("organization_id", orgId)

@@ -22,7 +22,7 @@ export async function GET(
     // Fetch entity
     const { data: entity, error: entityError } = await supabase
       .from("entities")
-      .select("id, legal_structure, formation_state, formed_date")
+      .select("id, type, legal_structure, tax_classification, formation_state, formed_date")
       .eq("id", id)
       .single();
 
@@ -58,7 +58,9 @@ export async function GET(
 
       const generated = generateComplianceObligations({
         id: entity.id,
+        type: entity.type,
         legal_structure: entity.legal_structure,
+        tax_classification: entity.tax_classification ?? null,
         formation_state: entity.formation_state,
         formed_date: entity.formed_date,
         registrations: registrations || [],

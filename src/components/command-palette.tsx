@@ -20,7 +20,7 @@ const PAGES: SearchResult[] = [
   { id: "page-documents", type: "page", name: "Documents", href: "/documents" },
   { id: "page-directory", type: "page", name: "Directory", href: "/directory" },
   { id: "page-chat", type: "page", name: "AI Chat", href: "/chat" },
-  { id: "page-settings", type: "page", name: "Settings", href: "/settings" },
+  { id: "page-settings", type: "page", name: "Settings", href: "/settings/profile" },
 ];
 
 const ACTIONS: SearchResult[] = [

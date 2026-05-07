@@ -32,7 +32,8 @@ export async function POST(
     if (!resolvedDirId) {
       const { data: dirEntries } = await supabase
         .from("directory_entries")
-        .select("id, name, aliases");
+        .select("id, name, aliases")
+        .is("deleted_at", null);
       if (dirEntries) {
         const match = findDirectoryMatch(name, dirEntries);
         if (match) resolvedDirId = match.id;

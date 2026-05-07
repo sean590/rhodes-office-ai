@@ -58,6 +58,7 @@ export async function GET(request: Request) {
             .from("directory_entries")
             .select("id, name")
             .in("id", Array.from(directoryIds))
+            .is("deleted_at", null)
         : Promise.resolve({ data: [], error: null }),
     ]);
 

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { DownIcon } from "../ui/icons";
 
@@ -103,6 +104,18 @@ export function UserMenu({ compact = false }: UserMenuProps) {
               </div>
             </div>
           )}
+          <Link
+            href="/settings/profile"
+            onClick={() => setOpen(false)}
+            style={{
+              display: "flex", alignItems: "center", gap: 8, width: "100%",
+              padding: "8px 12px", borderRadius: 6, border: "none", cursor: "pointer",
+              background: "transparent", color: "#1a1a1f", fontFamily: "inherit", fontSize: 13,
+              textDecoration: "none",
+            }}
+          >
+            Settings
+          </Link>
           <button
             onClick={handleLogout}
             style={{

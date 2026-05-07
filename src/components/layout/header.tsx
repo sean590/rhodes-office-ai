@@ -6,18 +6,21 @@ import { usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { BuildingIcon, ChartIcon, PeopleIcon, LinkIcon, DocIcon, ChatIcon, GearIcon } from "../ui/icons";
 import { UserMenu } from "./user-menu";
+import { NotificationBell } from "./NotificationBell";
+import { useChatPanel } from "../chat/chat-panel-provider";
 
 const NAV_TABS = [
   { href: "/entities", label: "My Entities", Icon: BuildingIcon },
   { href: "/investments", label: "Investments", Icon: ChartIcon },
   { href: "/directory", label: "Directory", Icon: PeopleIcon },
   { href: "/documents", label: "Documents", Icon: DocIcon },
-  { href: "/settings", label: "Settings", Icon: GearIcon },
+  { href: "/compliance", label: "Compliance", Icon: GearIcon },
 ];
 
 export function Header() {
   const pathname = usePathname();
   const isMobile = useIsMobile();
+  const { isOpen: chatOpen, panelWidth } = useChatPanel();
   const [orgName, setOrgName] = useState("");
 
   useEffect(() => {
@@ -54,6 +57,7 @@ export function Header() {
     <header style={{
       display: "flex", alignItems: "center", justifyContent: "space-between",
       padding: "0 24px", height: 54, borderBottom: "1px solid #ddd9d0", background: "#ffffff", flexShrink: 0,
+      position: "relative",
     }}>
       {/* Logo */}
       <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
@@ -77,8 +81,16 @@ export function Header() {
         )}
       </Link>
 
-      {/* Nav */}
-      <nav style={{ display: "flex", gap: 1 }}>
+      {/* Nav — centered over the main content area. When the chat drawer
+          is open, shift left by half the drawer width so the nav stays
+          visually centered over what the user is looking at. */}
+      <nav style={{
+        display: "flex", gap: 1,
+        position: "absolute",
+        left: `calc(50% - ${chatOpen && !isMobile ? panelWidth / 2 : 0}px)`,
+        transform: "translateX(-50%)",
+        transition: "left 0.2s ease",
+      }}>
         {NAV_TABS.map((tab) => {
           const isActive = pathname.startsWith(tab.href);
           return (
@@ -105,8 +117,11 @@ export function Header() {
           quality is properly tested). The CommandPalette component is also
           unmounted at the layout level so the ⌘K shortcut won't fire. */}
 
-      {/* User */}
-      <UserMenu />
+      {/* Right cluster: notifications + user menu */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <NotificationBell />
+        <UserMenu />
+      </div>
     </header>
   );
 }
