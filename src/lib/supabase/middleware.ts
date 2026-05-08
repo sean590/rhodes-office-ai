@@ -53,8 +53,23 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/cron") ||
     request.nextUrl.pathname === "/monitoring";
 
+  // API requests get a 401 JSON; page requests get a redirect. Treating /api/*
+  // identically to page nav (sending a 307 to /login) made expirations look
+  // like silent successes from a fetch caller's perspective: the browser
+  // followed the redirect, the response was the /login HTML at 200, the
+  // SessionGuard's "status === 401" check never tripped, and the upload
+  // pipeline read HTML as JSON and failed inside try/catch with no UI signal.
+  // Returning 401 lets SessionGuard fire its overlay + redirect cleanly.
+  const isApiRequest = request.nextUrl.pathname.startsWith("/api/");
+
   // Protect all routes except public ones
   if (!user && !isPublicRoute) {
+    if (isApiRequest) {
+      return NextResponse.json(
+        { error: "Unauthorized" },
+        { status: 401, headers: { "X-Auth-Reason": "no-user" } },
+      );
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -71,6 +86,14 @@ export async function updateSession(request: NextRequest) {
       const elapsed = now - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_TIMEOUT_MS) {
         await supabase.auth.signOut();
+        if (isApiRequest) {
+          const res = NextResponse.json(
+            { error: "Session expired due to inactivity" },
+            { status: 401, headers: { "X-Auth-Reason": "inactive" } },
+          );
+          res.cookies.delete(ACTIVITY_COOKIE);
+          return res;
+        }
         const url = request.nextUrl.clone();
         url.pathname = "/login";
         url.searchParams.set("reason", "inactive");
