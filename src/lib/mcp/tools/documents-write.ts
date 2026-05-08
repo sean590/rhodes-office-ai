@@ -424,6 +424,24 @@ export const splitDocumentTool = defineTool({
     if (dlErr || !fileData) throw new Error("Could not download document");
     const buffer = Buffer.from(await (fileData as Blob).arrayBuffer());
 
+    // 2b. Encrypted PDFs need to be caught before we create any state.
+    //     Splitting reads the PDF page tree via pdf-lib (analyzePdf +
+    //     extractPageRange), and pdf-lib + ignoreEncryption=true throws
+    //     "Expected instance of PDFDict, but got instance of undefined" on
+    //     encrypted page trees. Throwing here BEFORE the batch and parent
+    //     queue inserts means a failed split doesn't leave a stuck
+    //     "Split: ..." row in /review's PROCESSING NOW (which is what
+    //     happened before this guard). Decrypted-bytes-on-unlock is the
+    //     deeper fix, but it requires picking a JS PDF decryption library
+    //     since pdf-lib 1.17 has no password support; tracked separately.
+    const { probePdfRequiresPassword } = await import("@/lib/pipeline/pdf-processor");
+    const requiresPassword = await probePdfRequiresPassword(buffer);
+    if (requiresPassword) {
+      throw new Error(
+        `"${doc.name}" is password-protected and the splitter cannot read encrypted PDFs. Upload a decrypted version of the document and try again.`,
+      );
+    }
+
     // 3. Create a batch so the children land somewhere reviewable. Tagged
     //    with source_document_id and split_hint so the /review page (and
     //    debug queries) can see this batch came from a split.

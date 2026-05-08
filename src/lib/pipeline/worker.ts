@@ -343,6 +343,21 @@ export async function processQueueItem(
     // updateBatchStats still runs and the batch isn't left half-counted.
     logDbError(markErrorErr, `${itemId}: mark status=error`);
 
+    // Soft-delete the linked document so it doesn't sit forever as an
+    // orphan with status='processing' and deleted_at=null. Without this,
+    // a failed extraction leaves a documents row that silently blocks all
+    // future hash-based dedupe — exactly the case where the user uploads
+    // 6 files, processing fails on every one, and the next upload of the
+    // same files dedupe's to zero queue rows with no UI signal.
+    if (item.document_id) {
+      const { error: docDelErr } = await admin
+        .from("documents")
+        .update({ deleted_at: new Date().toISOString() })
+        .eq("id", item.document_id as string)
+        .is("deleted_at", null);
+      logDbError(docDelErr, `${itemId}: soft-delete linked document on error`);
+    }
+
     await updateBatchStats(admin, item.batch_id);
   }
 }
