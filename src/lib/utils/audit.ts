@@ -18,8 +18,13 @@ interface AuditEvent {
 export async function logAuditEvent(event: AuditEvent): Promise<void> {
   try {
     const supabase = createAdminClient();
+    // user_id is a UUID column. Empty-string callers (notably the document
+    // agent's ToolContext, which uses "" to mean "system did this") would
+    // otherwise fail the insert with 22P02 "invalid input syntax for type
+    // uuid". Coerce here so every caller doesn't have to.
+    const userId = event.userId && event.userId !== "" ? event.userId : null;
     const { error } = await supabase.from("audit_log").insert({
-      user_id: event.userId,
+      user_id: userId,
       action: event.action,
       resource_type: event.resourceType,
       resource_id: event.resourceId ?? null,

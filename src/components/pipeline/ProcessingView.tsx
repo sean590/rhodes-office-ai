@@ -322,10 +322,15 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
               Needs Review
             </div>
             {reviewItems.map((item) => {
-              // Legacy items (pre-agent / pre-unification) won't have a
-              // chat_session_id. Render them as a stub message so they're
-              // not invisible — the user can still reject or open the
-              // doc directly. Drain these via SQL or by re-uploading.
+              // Items without a chat_session_id reach here in two ways:
+              //   1. True legacy rows from before the review/chat unification.
+              //   2. Recent rows where the agent deferred but the worker
+              //      couldn't seed a chat_sessions row — typically because
+              //      the parent batch's created_by is null (auth user not
+              //      synced to public.users).
+              // Either way the user can still see the agent's summary +
+              // proposed actions on the queue row, so render those here as
+              // a fallback rather than just the stub message.
               if (!item.chat_session_id) {
                 return (
                   <div
@@ -343,8 +348,14 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
                     <div style={{ fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>
                       {item.original_filename}
                     </div>
-                    Legacy queue item from before the review/chat unification —
-                    re-upload or reject to clear.
+                    {item.ai_summary ? (
+                      <div style={{ color: "#1a1a1f", marginBottom: 6, whiteSpace: "pre-wrap" }}>
+                        {item.ai_summary}
+                      </div>
+                    ) : null}
+                    <div>
+                      Review session unavailable — re-upload or reject to clear.
+                    </div>
                   </div>
                 );
               }

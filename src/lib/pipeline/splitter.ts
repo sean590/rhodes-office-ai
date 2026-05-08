@@ -247,20 +247,30 @@ export async function splitDocumentIntoChildren(
   // Kick off worker extraction for each child. Without this, children land in
   // status="queued" and nothing picks them up — the old processCompositeV2
   // path did inline extraction, but the new design is "splitter enqueues,
-  // worker processes." Fire-and-forget; failures bubble into queue item
-  // error status via processQueueItem's own catch block.
+  // worker processes."
+  //
+  // Wrapped in next/server's after() so the child runs persist past the
+  // parent's HTTP response. Without after(), Vercel suspends the function
+  // the moment the parent returns; the bare-Promise version stranded
+  // children in status="staged" forever (the 9 stuck "Split: ..." rows the
+  // user hit in production were exactly this). after() extends the runtime
+  // up to the function's maxDuration — long enough for sequential child
+  // agent runs.
   //
   // Dynamic import avoids the circular module ref (worker imports splitter
   // for the composite branch).
   if (children.length > 0) {
     const { processQueueItem } = await import("./worker");
+    const { after } = await import("next/server");
     for (const child of children) {
-      processQueueItem(child.id).catch((err) => {
-        console.error(
-          `[SPLITTER] ${parentItem.id}: kickoff failed for child ${child.id}:`,
-          err instanceof Error ? err.message : err,
-        );
-      });
+      after(
+        processQueueItem(child.id).catch((err) => {
+          console.error(
+            `[SPLITTER] ${parentItem.id}: kickoff failed for child ${child.id}:`,
+            err instanceof Error ? err.message : err,
+          );
+        }),
+      );
     }
   }
 
