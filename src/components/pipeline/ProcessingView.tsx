@@ -101,20 +101,34 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
       setItems(data.items || []);
       setSummary(data.summary || null);
 
-      // Transition to results when no more processing
-      // "staged" = waiting for process endpoint, "extracted" = mid-auto-ingest.
-      // "password_required" must be active too — once the user submits a
-      // password the worker re-runs extraction and flips the row to
-      // auto_ingested/review_ready, and the UI needs polling to catch that
-      // transition. Without this the poll halts the moment all items reach
-      // password_required, the LockedQueueItem stays mounted on stale state,
-      // and a successful unlock looks like a failure on the next click.
+      // Phase and polling are two separate concerns; conflating them was the
+      // root cause of two bugs in 24 hours:
+      //   1. (yesterday) password_required not in the active list ⇒ polling
+      //      stopped the moment all items reached password_required, so a
+      //      successful unlock-then-extract never showed in the UI.
+      //   2. (today) password_required added to the active list to fix #1
+      //      ⇒ phase stayed stuck on "processing" forever, so the
+      //      LockedQueueItem unlock controls (which only render in the
+      //      results phase) never appeared at all.
+      //
+      // ACTIVELY_PROCESSING = items the pipeline is currently working on.
+      // Only these block the transition to results. password_required is
+      // *not* "actively processing"; it's waiting on the user.
+      //
+      // NEEDS_POLLING = items that can still change state, whether by the
+      // pipeline (extracting → auto_ingested) or by user action (password
+      // submitted → extracting again). Polling continues while any of these
+      // exist; it only stops once everything is in a true terminal state.
       const allItems = data.items || [];
-      const ACTIVE_STATUSES = ["staged", "queued", "extracting", "extracted", "password_required"];
-      const stillProcessing = allItems.some(
-        (i: QueueItem) => ACTIVE_STATUSES.includes(i.status)
+      const ACTIVELY_PROCESSING = ["staged", "queued", "extracting", "extracted"];
+      const NEEDS_POLLING = [...ACTIVELY_PROCESSING, "password_required"];
+      const isActivelyProcessing = allItems.some(
+        (i: QueueItem) => ACTIVELY_PROCESSING.includes(i.status)
       );
-      if (!stillProcessing && allItems.length > 0) {
+      const needsPolling = allItems.some(
+        (i: QueueItem) => NEEDS_POLLING.includes(i.status)
+      );
+      if (!isActivelyProcessing && allItems.length > 0) {
         setPhase((prev) => {
           // When transitioning from processing → results, refresh documents
           // (auto-ingested items created documents during processing)
@@ -123,10 +137,10 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
           }
           return "results";
         });
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
+      }
+      if (!needsPolling && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
       }
     } catch {
       // Ignore polling errors
