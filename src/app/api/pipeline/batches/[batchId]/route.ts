@@ -200,6 +200,14 @@ export async function GET(
       });
     }
 
+    // Duplicates detected at register time — persisted to batch.metadata so
+    // they're visible after page reload. Lift onto the summary so the UI
+    // can render "X already filed" without poking into raw metadata.
+    const batchMetadata = (batch.metadata ?? {}) as {
+      duplicates?: Array<{ filename: string; reason: string; existing_document_id?: string | null }>;
+    };
+    const duplicates = Array.isArray(batchMetadata.duplicates) ? batchMetadata.duplicates : [];
+
     const summary = {
       total_items: (items || []).length,
       auto_ingested: (items || []).filter((i) => i.status === "auto_ingested").length,
@@ -208,6 +216,7 @@ export async function GET(
       rejected: (items || []).filter((i) => i.status === "rejected").length,
       errors: errorItems.length,
       processing: (items || []).filter((i) => i.status === "queued" || i.status === "extracting").length,
+      duplicates,
       entities_affected: Object.values(entityGroups).filter((g) => g.entity_id).sort((a, b) => a.entity_name.localeCompare(b.entity_name)),
       unassociated_documents: entityGroups["unassociated"]?.documents || [],
       parent_documents: entityGroups["__parent__"]?.documents || [],

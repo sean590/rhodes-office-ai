@@ -59,6 +59,11 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
   const { batch_id, file_count, filenames } = metadata;
   const [status, setStatus] = useState<BatchStatus>("processing");
   const [expanded, setExpanded] = useState(false);
+  // Duplicates the register endpoint detected by content_hash. We pull these
+  // from batch.metadata.duplicates (persisted by /upload route) so dedupe
+  // never hides — yesterday's K-1 retry silently dropped 5 of 6 files and
+  // looked indistinguishable from a clean upload until the user dug into SQL.
+  const [duplicates, setDuplicates] = useState<Array<{ filename: string; existing_document_id?: string | null }>>([]);
   const supabase = useMemo(() => createClient(), []);
 
   // Initial fetch + Realtime subscription on this batch's row only.
@@ -71,7 +76,10 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
         const res = await fetch(`/api/pipeline/batches/${batch_id}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (!cancelled && data?.status) setStatus(data.status as BatchStatus);
+        if (cancelled) return;
+        if (data?.status) setStatus(data.status as BatchStatus);
+        const dupes = Array.isArray(data?.summary?.duplicates) ? data.summary.duplicates : [];
+        setDuplicates(dupes);
       } catch { /* ignore */ }
     })();
 
@@ -98,9 +106,15 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
     };
   }, [supabase, batch_id]);
 
-  const copy = statusCopy(status, file_count);
+  // file_count is the raw upload count (always == filenames.length). When
+  // dedupe fires, the actual files going through the pipeline is the
+  // difference. Use the post-dedupe count for the headline so "Processing 6"
+  // doesn't lie when 5 of those 6 dedupe'd silently.
+  const newCount = Math.max(0, file_count - duplicates.length);
+  const copy = statusCopy(status, newCount);
   const showAll = expanded || filenames.length <= COLLAPSE_THRESHOLD;
   const visibleFiles = showAll ? filenames : filenames.slice(0, COLLAPSE_THRESHOLD);
+  const dupedFilenames = new Set(duplicates.map((d) => d.filename));
 
   return (
     <div style={{
@@ -124,14 +138,23 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
 
       {filenames.length > 0 && (
         <div style={{ fontSize: 12, color: "#6b6b76" }}>
-          {visibleFiles.map((name, i) => (
-            <div key={i} style={{
-              padding: "2px 0",
-              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-            }}>
-              · {name}
-            </div>
-          ))}
+          {visibleFiles.map((name, i) => {
+            const isDupe = dupedFilenames.has(name);
+            return (
+              <div key={i} style={{
+                padding: "2px 0",
+                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                color: isDupe ? "#9494a0" : "#6b6b76",
+              }}>
+                · {name}
+                {isDupe && (
+                  <span style={{ marginLeft: 6, fontSize: 11, fontStyle: "italic" }}>
+                    already filed
+                  </span>
+                )}
+              </div>
+            );
+          })}
           {!showAll && (
             <button
               onClick={() => setExpanded(true)}
@@ -144,6 +167,17 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
               Show {filenames.length - COLLAPSE_THRESHOLD} more
             </button>
           )}
+        </div>
+      )}
+
+      {duplicates.length > 0 && (
+        <div style={{
+          fontSize: 11, color: "#6b6b76",
+          padding: "6px 8px",
+          background: "#f8f7f4",
+          borderRadius: 6,
+        }}>
+          {duplicates.length} of {file_count} {duplicates.length === 1 ? "was" : "were"} already filed and skipped — only {newCount} {newCount === 1 ? "is" : "are"} being processed.
         </div>
       )}
 

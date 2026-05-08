@@ -228,11 +228,32 @@ export async function POST(
       .eq("batch_id", batchId)
       .eq("status", "staged");
 
+    // Persist duplicate detections onto the batch row so /batches/[id] and
+    // the chat handoff card can show "X already filed" without re-deriving
+    // it from a transient response. Without this, dedupe is invisible after
+    // a page reload — and silently swallowing 5 of 6 files is what made
+    // yesterday's K-1 retry look like "everything auto-ingested" when in
+    // fact only 1 file actually ran through extraction.
+    const { data: existingBatch } = await admin
+      .from("document_batches")
+      .select("metadata")
+      .eq("id", batchId)
+      .single();
+    const mergedMetadata = {
+      ...((existingBatch?.metadata as Record<string, unknown> | null) ?? {}),
+      duplicates: duplicates.map((d) => ({
+        filename: d.filename,
+        reason: d.reason,
+        existing_document_id: d.existing_document_id ?? null,
+      })),
+    };
+
     await admin
       .from("document_batches")
       .update({
         total_documents: totalCount || 0,
         staged_count: stagedCount || 0,
+        metadata: mergedMetadata,
         updated_at: new Date().toISOString(),
       })
       .eq("id", batchId);

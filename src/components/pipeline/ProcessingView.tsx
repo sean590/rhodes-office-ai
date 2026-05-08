@@ -41,6 +41,11 @@ interface BatchSummary {
   rejected: number;
   errors: number;
   processing: number;
+  duplicates?: Array<{
+    filename: string;
+    reason: string;
+    existing_document_id?: string | null;
+  }>;
   entities_affected: Array<{
     entity_id: string | null;
     entity_name: string;
@@ -268,16 +273,28 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   );
 
   // Headline
+  const duplicatesCount = summary?.duplicates?.length ?? 0;
   const totalFileCount = items.filter((i) => !i.parent_queue_id).length;
+  // Raw upload count = files that hit the register endpoint, including the
+  // ones that dedupe'd silently. Surface this so "1 ingested from 1 file"
+  // doesn't quietly hide the fact that the user uploaded 6.
+  const uploadAttemptedCount = totalFileCount + duplicatesCount;
   let headline: string;
   if (reviewItems.length === 0 && errorItems.length === 0 && lockedItems.length === 0) {
-    headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${totalFileCount} file${totalFileCount !== 1 ? "s" : ""}`;
+    if (duplicatesCount > 0 && totalFileCount === 0) {
+      headline = `${duplicatesCount} file${duplicatesCount !== 1 ? "s" : ""} already filed \u2014 nothing new to process`;
+    } else if (duplicatesCount > 0) {
+      headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${uploadAttemptedCount} file${uploadAttemptedCount !== 1 ? "s" : ""} (${duplicatesCount} already filed)`;
+    } else {
+      headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${totalFileCount} file${totalFileCount !== 1 ? "s" : ""}`;
+    }
   } else {
     const parts: string[] = [];
     if (ingestedCount > 0) parts.push(`${ingestedCount} ingested`);
     if (reviewItems.length > 0) parts.push(`${reviewItems.length} need${reviewItems.length === 1 ? "s" : ""} review`);
     if (lockedItems.length > 0) parts.push(`${lockedItems.length} need${lockedItems.length === 1 ? "s" : ""} a password`);
-    headline = `${totalFileCount} file${totalFileCount !== 1 ? "s" : ""} processed \u2014 ${parts.join(", ")}`;
+    if (duplicatesCount > 0) parts.push(`${duplicatesCount} already filed`);
+    headline = `${uploadAttemptedCount} file${uploadAttemptedCount !== 1 ? "s" : ""} processed \u2014 ${parts.join(", ")}`;
   }
 
   return (
@@ -381,6 +398,40 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
                 />
               );
             })}
+          </div>
+        )}
+
+        {/* Already-filed section — duplicates the register endpoint
+            detected by content_hash. Surface them explicitly so the user
+            isn't left wondering why their 6-file upload only produced 1
+            queue row. Each line links back to the existing document. */}
+        {summary?.duplicates && summary.duplicates.length > 0 && (
+          <div style={{ marginBottom: lockedItems.length > 0 || reviewItems.length > 0 || errorItems.length > 0 ? 20 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
+              Already filed — skipped
+            </div>
+            <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 8 }}>
+              These files matched documents already in your library by content. Re-uploading the same file does not create a duplicate.
+            </div>
+            {summary.duplicates.map((dup, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 0",
+                borderBottom: i < summary.duplicates!.length - 1 ? "1px solid #f0eeea" : "none",
+                fontSize: 13,
+              }}>
+                <span style={{ color: "#9494a0", fontSize: 14 }}>&#10005;</span>
+                <span style={{ flex: 1, color: "#1a1a1f" }}>{dup.filename}</span>
+                {dup.existing_document_id && (
+                  <a
+                    href={`/documents/${dup.existing_document_id}`}
+                    style={{ fontSize: 12, color: "#2d5a3d", textDecoration: "none" }}
+                  >
+                    Open existing →
+                  </a>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

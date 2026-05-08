@@ -414,7 +414,14 @@ export default function ReviewPage() {
             Processing now
           </div>
           {inProgressBatches.map((b) => {
-            const sessionId = (b.metadata as { session_id?: string } | null)?.session_id ?? null;
+            const meta = (b.metadata as { session_id?: string; duplicates?: Array<{ filename: string }> } | null);
+            const sessionId = meta?.session_id ?? null;
+            // Duplicate count comes from batch.metadata.duplicates, written
+            // by the upload register endpoint when content_hash matched an
+            // existing document. Surface it inline so a "0 of 1 processed"
+            // batch isn't mysterious when the user uploaded 6 — the dedupe
+            // is shown in the same row.
+            const dupeCount = Array.isArray(meta?.duplicates) ? meta!.duplicates!.length : 0;
             const total = b.progress?.total ?? b.total_documents ?? 0;
             const processed = b.progress?.processed ?? 0;
             const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0;
@@ -442,6 +449,14 @@ export default function ReviewPage() {
                     {b.progress
                       ? `${processed} of ${total} processed`
                       : `${total} document${total === 1 ? "" : "s"}`}
+                    {dupeCount > 0 && (
+                      <>
+                        {" · "}
+                        <span style={{ color: "#9494a0" }}>
+                          {dupeCount} already filed
+                        </span>
+                      </>
+                    )}
                     {" · "}
                     {relativeTime(b.created_at)}
                   </div>
