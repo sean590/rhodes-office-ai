@@ -136,6 +136,15 @@ export async function POST(request: Request) {
     }
   }
 
+  // Build the recent_uploads context block. Aggregates this turn's attachments
+  // plus any from earlier turns in the session (capped) so the orchestrator
+  // has authoritative document_id references at the top of the prompt — not
+  // buried in preamble text inside older messages. Targets the UUID-
+  // hallucination class of bug we saw on the LADD Holdings link: the model
+  // grabbed a doc_id that didn't exist because the real one was in turn 1's
+  // preamble and turn 2 had to reach back into history to find it.
+  const recentUploads = await buildRecentUploadsBlock(admin, session_id, attachments);
+
   // Build user identity for "me"/"my" resolution.
   const userIdentityBlock: {
     name: string;
@@ -202,6 +211,7 @@ export async function POST(request: Request) {
           history,
           attachmentBlocks,
           pageContext: page_context ?? null,
+          recentUploads,
           userIdentity: userIdentityBlock,
           anthropic,
         })) {
@@ -280,4 +290,87 @@ export async function POST(request: Request) {
       Connection: "keep-alive",
     },
   });
+}
+
+const RECENT_UPLOADS_LIMIT = 10;
+
+/**
+ * Pull the most recent upload metadata from this session and merge it with
+ * the current turn's attachments. Returned as an array the orchestrator can
+ * render at the top of the prompt as a <recent_uploads> block.
+ *
+ * Recent attachments live in chat_messages.metadata.attachments on the user
+ * messages that originally carried the upload. We pull the last N messages
+ * with attachments in this session, flatten to a per-file list, dedupe by
+ * document_id, and cap at RECENT_UPLOADS_LIMIT. Current-turn attachments are
+ * merged in upfront — they haven't been persisted yet at the time we build
+ * this block.
+ */
+async function buildRecentUploadsBlock(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  sessionId: string,
+  currentAttachments: Array<{
+    storage_path: string;
+    filename: string;
+    content_type: string;
+    size: number;
+    document_id?: string;
+    batch_id?: string;
+  }> | undefined,
+): Promise<Array<{ filename: string; document_id?: string | null; batch_id?: string | null; uploaded_at?: string }>> {
+  const seen = new Set<string>();
+  const out: Array<{ filename: string; document_id?: string | null; batch_id?: string | null; uploaded_at?: string }> = [];
+
+  // Current turn first — these are about to be the freshest.
+  if (currentAttachments?.length) {
+    for (const a of currentAttachments) {
+      const key = a.document_id || a.storage_path;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        filename: a.filename,
+        document_id: a.document_id ?? null,
+        batch_id: a.batch_id ?? null,
+        uploaded_at: "this turn",
+      });
+    }
+  }
+
+  // Historical uploads from earlier turns in the same session. Pulled
+  // newest-first; we stop appending once we hit the cap.
+  try {
+    const { data: priorMessages } = await admin
+      .from("chat_messages")
+      .select("metadata, created_at")
+      .eq("session_id", sessionId)
+      .eq("role", "user")
+      .not("metadata->attachments", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(RECENT_UPLOADS_LIMIT);
+
+    for (const msg of (priorMessages ?? []) as Array<{
+      metadata: { attachments?: Array<{ filename: string; document_id?: string; batch_id?: string; storage_path?: string }> } | null;
+      created_at: string;
+    }>) {
+      const atts = msg.metadata?.attachments;
+      if (!Array.isArray(atts)) continue;
+      for (const a of atts) {
+        if (out.length >= RECENT_UPLOADS_LIMIT) return out;
+        const key = a.document_id || a.storage_path || a.filename;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          filename: a.filename,
+          document_id: a.document_id ?? null,
+          batch_id: a.batch_id ?? null,
+          uploaded_at: msg.created_at,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[mcp] buildRecentUploadsBlock failed", { session_id: sessionId, error: err });
+  }
+
+  return out;
 }

@@ -113,6 +113,22 @@ export interface OrchestratorInput {
    *  contentBlocksForTurn() — images as base64, PDFs as document/text
    *  blocks, text files inline. Appended after the user's text message. */
   attachmentBlocks?: Array<Record<string, unknown>>;
+  /**
+   * Recent uploads in this chat session — authoritative document_id +
+   * filename references that get rendered as a context block at the top
+   * of the user message. Phase 2 of the chat unification: prevents the
+   * UUID-hallucination class of bug where the orchestrator picks a wrong
+   * doc_id in a follow-up turn because the original upload's preamble is
+   * buried in history. With this block, the orchestrator always has fresh,
+   * structured references for the last few uploads regardless of how deep
+   * into a session it is.
+   */
+  recentUploads?: Array<{
+    filename: string;
+    document_id?: string | null;
+    batch_id?: string | null;
+    uploaded_at?: string;
+  }>;
   /** User identity for "me"/"my" resolution. Appended to the system prompt. */
   userIdentity?: {
     name: string;
@@ -391,6 +407,22 @@ export async function* runOrchestratorStreaming(
     userBlocks.push({
       type: "text",
       text: `<page_context>${JSON.stringify(input.pageContext)}</page_context>`,
+    });
+  }
+  if (input.recentUploads && input.recentUploads.length > 0) {
+    // Authoritative reference for doc_ids the user uploaded recently. Each
+    // line is structured so the model can copy verbatim into write-tool
+    // arguments without scanning history or guessing.
+    const lines = input.recentUploads.map((u) => {
+      const parts = [`- ${u.filename}`];
+      if (u.document_id) parts.push(`document_id: ${u.document_id}`);
+      if (u.batch_id) parts.push(`batch_id: ${u.batch_id}`);
+      if (u.uploaded_at) parts.push(`uploaded: ${u.uploaded_at}`);
+      return parts.join(" · ");
+    });
+    userBlocks.push({
+      type: "text",
+      text: `<recent_uploads>\n${lines.join("\n")}\n</recent_uploads>`,
     });
   }
   userBlocks.push({ type: "text", text: input.userMessage });
