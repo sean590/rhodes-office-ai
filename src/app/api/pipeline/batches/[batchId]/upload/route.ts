@@ -248,12 +248,23 @@ export async function POST(
       })),
     };
 
+    // If every file deduped, there's no actual processing to do. The batch
+    // is "done before it started." Mark it completed immediately so it
+    // doesn't sit in /review's PROCESSING NOW forever — with no queue
+    // rows, no extraction event will ever transition it to a terminal
+    // state otherwise. The dedupe info is still preserved in metadata so
+    // the batch detail page can show "X already filed" if the user opens
+    // it. (Empty status='staging' batches existed in PROCESSING NOW
+    // through several screenshots last week — same root cause.)
+    const allDeduped = uploaded.length === 0 && duplicates.length > 0;
+
     await admin
       .from("document_batches")
       .update({
         total_documents: totalCount || 0,
         staged_count: stagedCount || 0,
         metadata: mergedMetadata,
+        ...(allDeduped ? { status: "completed" as const } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", batchId);
