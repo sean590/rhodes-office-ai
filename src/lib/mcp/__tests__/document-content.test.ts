@@ -48,7 +48,12 @@ function pdfAttachment(overrides: Partial<ChatAttachment> = {}): ChatAttachment 
 // =============================================================================
 
 describe("contentBlocksForTurn — PDF handling", () => {
-  it("small PDF (≤20 pages): calls analyzePdf + buildPdfContent, prepends filename block", async () => {
+  // Phase 1 of the chat unification: PDFs in chat are metadata-only. The
+  // pipeline's document agent is the sole extractor — the orchestrator
+  // never sees PDF bytes in its turn. These tests cover the metadata
+  // preamble; buildPdfContent must NOT be called.
+
+  it("small PDF (≤20 pages): emits metadata-only preamble, never calls buildPdfContent", async () => {
     mockDownload.mockResolvedValue({ data: makeBlob("fake-pdf"), error: null });
     mockAnalyzePdf.mockResolvedValue({
       tier: "short",
@@ -56,26 +61,22 @@ describe("contentBlocksForTurn — PDF handling", () => {
       text_source: "embedded",
       chars_per_page: 500,
     });
-    const pdfBlocks = [
-      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "abc" } },
-    ];
-    mockBuildPdfContent.mockResolvedValue(pdfBlocks);
 
     const result = await contentBlocksForTurn([pdfAttachment()]);
 
     expect(mockAnalyzePdf).toHaveBeenCalledTimes(1);
-    expect(mockBuildPdfContent).toHaveBeenCalledTimes(1);
-    // Preamble text block with filename and page count.
+    expect(mockBuildPdfContent).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
     expect(result[0]).toEqual(
       expect.objectContaining({ type: "text", text: expect.stringContaining("test.pdf") }),
     );
-    expect((result[0] as { text: string }).text).toContain("5 pages");
-    expect((result[0] as { text: string }).text).toContain("short");
-    // Then the PDF content blocks from buildPdfContent.
-    expect(result.slice(1)).toEqual(pdfBlocks);
+    const text = (result[0] as { text: string }).text;
+    expect(text).toContain("5 pages");
+    expect(text).toContain("short");
+    expect(text).toContain("pipeline");
   });
 
-  it("medium PDF (21–100 pages): same flow, tier=medium", async () => {
+  it("medium PDF (21–100 pages): same metadata-only behavior, tier=medium", async () => {
     mockDownload.mockResolvedValue({ data: makeBlob("fake-pdf"), error: null });
     mockAnalyzePdf.mockResolvedValue({
       tier: "medium",
@@ -83,17 +84,18 @@ describe("contentBlocksForTurn — PDF handling", () => {
       text_source: "embedded",
       chars_per_page: 400,
     });
-    mockBuildPdfContent.mockResolvedValue([{ type: "text", text: "extracted" }]);
 
     const result = await contentBlocksForTurn([pdfAttachment()]);
 
     expect(mockAnalyzePdf).toHaveBeenCalledTimes(1);
-    expect(mockBuildPdfContent).toHaveBeenCalledTimes(1);
-    expect((result[0] as { text: string }).text).toContain("45 pages");
-    expect((result[0] as { text: string }).text).toContain("medium");
+    expect(mockBuildPdfContent).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    const text = (result[0] as { text: string }).text;
+    expect(text).toContain("45 pages");
+    expect(text).toContain("medium");
   });
 
-  it("long PDF (>100 pages): buildPdfContent still called (inline even for long tier)", async () => {
+  it("long PDF (>100 pages): metadata-only, tier=long", async () => {
     mockDownload.mockResolvedValue({ data: makeBlob("fake-pdf"), error: null });
     mockAnalyzePdf.mockResolvedValue({
       tier: "long",
@@ -101,24 +103,39 @@ describe("contentBlocksForTurn — PDF handling", () => {
       text_source: "embedded",
       chars_per_page: 300,
     });
-    mockBuildPdfContent.mockResolvedValue([{ type: "text", text: "long doc content" }]);
 
     const result = await contentBlocksForTurn([pdfAttachment()]);
 
-    expect(mockBuildPdfContent).toHaveBeenCalledTimes(1);
-    expect((result[0] as { text: string }).text).toContain("250 pages");
-    expect((result[0] as { text: string }).text).toContain("long");
+    expect(mockBuildPdfContent).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    const text = (result[0] as { text: string }).text;
+    expect(text).toContain("250 pages");
+    expect(text).toContain("long");
   });
 
-  it("stagedDocType is null: analyzePdf called with null as second arg", async () => {
+  it("analyzePdf called with null as second arg (pipeline hasn't classified yet)", async () => {
     mockDownload.mockResolvedValue({ data: makeBlob("fake-pdf"), error: null });
     mockAnalyzePdf.mockResolvedValue({ tier: "short", page_count: 3 });
-    mockBuildPdfContent.mockResolvedValue([]);
 
     await contentBlocksForTurn([pdfAttachment()]);
 
-    // Second argument to analyzePdf must be null (pipeline hasn't classified yet).
     expect(mockAnalyzePdf.mock.calls[0][1]).toBeNull();
+  });
+
+  it("analyzePdf failure (e.g. encrypted PDF) falls through to a softer preamble", async () => {
+    mockDownload.mockResolvedValue({ data: makeBlob("encrypted-pdf"), error: null });
+    mockAnalyzePdf.mockRejectedValue(new Error("Expected instance of PDFDict, but got instance of undefined"));
+
+    const result = await contentBlocksForTurn([pdfAttachment()]);
+
+    // Even when analyzePdf throws, we still emit a preamble (no
+    // outer-catch fallback "couldn't be processed" message), so the
+    // orchestrator knows the file was uploaded.
+    expect(mockBuildPdfContent).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+    const text = (result[0] as { text: string }).text;
+    expect(text).toContain("test.pdf");
+    expect(text).toContain("pipeline");
   });
 });
 
