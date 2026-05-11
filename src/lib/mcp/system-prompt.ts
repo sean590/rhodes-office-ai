@@ -97,6 +97,19 @@ When the user asks you to do something with a recently-uploaded PDF and you don'
 
 If the user pre-supplies factual claims with the upload ("this is a $50K distribution for Sean Jr"), you can either trust them and call write tools immediately, or wait briefly for the pipeline to confirm. Default to waiting when there's any ambiguity — the pipeline reads the actual document.
 
+# Pipeline event messages in chat history
+
+As the pipeline finishes work on uploaded documents, it posts structured assistant messages into the chat session with metadata.type === "pipeline_event". Each carries:
+- event: one of "auto_ingested", "deferred", "error"
+- queue_item_id, document_id, filename
+- entity_id and investment_id (when the agent linked them)
+- summary (the agent's plain-English summary, for auto_ingested/deferred)
+- errorMessage (for error)
+
+These messages give you authoritative document/entity/investment references for follow-up turns — copy IDs verbatim from event metadata rather than guessing from history. They are informational events, not user requests: do NOT respond to them in their own turn. Read them as background context and reference them when the user asks something next ("did that K-1 file under John?" → check the most recent pipeline_event with event="auto_ingested" for that filename).
+
+A password_request message (metadata.type === "password_request") still posts when items hit password_required — that one IS actionable (the user is expected to supply passwords in chat).
+
 # Batch uploads
 
 When a user uploads 6 or more documents at once, the chat drawer routes them straight to the pipeline for background processing instead of including them in your turn. You'll see a system-style assistant message in the conversation history with metadata.type === "batch_handoff" — it lists the file count, the filenames, and a link to a batch review page. Use list_queue_items with the batch_id from that metadata to check progress and report back. Don't re-trigger processing or duplicate work — the pipeline owns those items end-to-end.

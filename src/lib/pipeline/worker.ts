@@ -261,6 +261,59 @@ export async function processQueueItem(
       assertNoDbError(error, `${itemId}: persist agent result`);
     }
 
+    // Post a structured pipeline event into the chat session so the
+    // orchestrator has authoritative context for follow-up turns and the
+    // user sees live progress via Realtime. password_required and the
+    // already-existing "first assistant message" for deferred items have
+    // their own posters elsewhere; this handler covers the auto_ingested
+    // and error paths (terminal states reached by the happy/sad agent
+    // results — not the catch-block-level extraction errors).
+    if (finalStatus === "auto_ingested") {
+      // Look up the investment that the agent linked to, if any. The
+      // document agent persists this via update_document/link_document_to_*,
+      // so we mirror it from the refreshed docRow lookups + a follow-up
+      // investment_id read.
+      let investmentId: string | null = null;
+      if (item.document_id) {
+        const { data: docInv } = await admin
+          .from("documents")
+          .select("investment_id")
+          .eq("id", item.document_id as string)
+          .maybeSingle();
+        investmentId = (docInv?.investment_id as string | null) ?? null;
+      }
+      await postPipelineEvent(admin, {
+        batchId: item.batch_id as string,
+        queueItemId: itemId,
+        event: "auto_ingested",
+        filename: item.original_filename as string,
+        documentId: (item.document_id as string | null) ?? null,
+        entityId: docRow?.entity_id ?? null,
+        investmentId,
+        summary: agentResult.summary,
+      });
+    } else if (finalStatus === "review_ready") {
+      await postPipelineEvent(admin, {
+        batchId: item.batch_id as string,
+        queueItemId: itemId,
+        event: "deferred",
+        filename: item.original_filename as string,
+        documentId: (item.document_id as string | null) ?? null,
+        entityId: docRow?.entity_id ?? null,
+        summary: agentResult.summary,
+        reviewSessionId: chatSessionId,
+      });
+    } else if (finalStatus === "error") {
+      await postPipelineEvent(admin, {
+        batchId: item.batch_id as string,
+        queueItemId: itemId,
+        event: "error",
+        filename: item.original_filename as string,
+        documentId: (item.document_id as string | null) ?? null,
+        errorMessage: extractionError,
+      });
+    }
+
     // 12. If this item is a split child, run sibling dedup. The pass is
     //     idempotent — every child triggers it as it finishes, and the last
     //     one to land has the most complete picture. Without this, two
@@ -358,7 +411,150 @@ export async function processQueueItem(
       logDbError(docDelErr, `${itemId}: soft-delete linked document on error`);
     }
 
+    // Surface the failure in the originating chat session so the user
+    // (and the orchestrator on its next turn) sees what happened, not
+    // just silent absence.
+    await postPipelineEvent(admin, {
+      batchId: item.batch_id as string,
+      queueItemId: itemId,
+      event: "error",
+      filename: item.original_filename as string,
+      documentId: (item.document_id as string | null) ?? null,
+      errorMessage: friendlyMessage,
+    });
+
     await updateBatchStats(admin, item.batch_id);
+  }
+}
+
+/**
+ * Resolve the chat session a pipeline-driven event should post into.
+ * Priority:
+ *   1. batch.metadata.session_id IF the session belongs to this org.
+ *      Metadata is user-supplied at batch creation, so we re-verify org
+ *      ownership — otherwise a tampered session_id could leak a system
+ *      message into a different tenant.
+ *   2. The user's most recent chat_session in this org.
+ *   3. Create a new "Document uploads" session.
+ *
+ * Returns null if even fallback creation fails (no created_by, etc.).
+ */
+async function resolveBatchSession(
+  admin: ReturnType<typeof createAdminClient>,
+  batchId: string,
+): Promise<{ sessionId: string; orgId: string } | null> {
+  const { data: batch } = await admin
+    .from("document_batches")
+    .select("created_by, organization_id, metadata")
+    .eq("id", batchId)
+    .single();
+  if (!batch?.created_by || !batch.organization_id) {
+    return null;
+  }
+
+  const claimedSessionId = (batch.metadata as { session_id?: string } | null)?.session_id;
+  if (claimedSessionId) {
+    const { data: claimed } = await admin
+      .from("chat_sessions")
+      .select("id")
+      .eq("id", claimedSessionId)
+      .eq("organization_id", batch.organization_id)
+      .maybeSingle();
+    if (claimed) return { sessionId: claimed.id as string, orgId: batch.organization_id as string };
+    console.warn(
+      `[PIPELINE] Batch ${batchId}: session_id ${claimedSessionId} from metadata does not belong to org ${batch.organization_id}; falling back to recent/new session`,
+    );
+  }
+
+  const { data: recent } = await admin
+    .from("chat_sessions")
+    .select("id")
+    .eq("user_id", batch.created_by)
+    .eq("organization_id", batch.organization_id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (recent) return { sessionId: recent.id as string, orgId: batch.organization_id as string };
+
+  const { data: created, error: sessionErr } = await admin
+    .from("chat_sessions")
+    .insert({
+      user_id: batch.created_by,
+      organization_id: batch.organization_id,
+      title: "Document uploads",
+    })
+    .select("id")
+    .single();
+  logDbError(sessionErr, `Batch ${batchId}: create fallback chat session`);
+  if (!created) return null;
+  return { sessionId: created.id as string, orgId: batch.organization_id as string };
+}
+
+/**
+ * Post a structured pipeline event into the chat session associated with a
+ * batch. These messages give the chat orchestrator both real-time narration
+ * material AND authoritative document_id / entity_id / investment_id
+ * references in metadata, so it can react to completions on the user's
+ * next turn without polling via tools.
+ *
+ * The chat-drawer's Realtime subscription delivers these messages live —
+ * the user sees pipeline progress in the chat panel without needing to
+ * send anything.
+ *
+ * Best-effort — failures are logged, not surfaced. The pipeline keeps
+ * processing regardless.
+ */
+async function postPipelineEvent(
+  admin: ReturnType<typeof createAdminClient>,
+  params: {
+    batchId: string;
+    queueItemId: string;
+    event: "auto_ingested" | "deferred" | "error";
+    filename: string;
+    documentId?: string | null;
+    entityId?: string | null;
+    investmentId?: string | null;
+    summary?: string | null;
+    errorMessage?: string | null;
+    reviewSessionId?: string | null;
+  },
+): Promise<void> {
+  try {
+    const session = await resolveBatchSession(admin, params.batchId);
+    if (!session) return;
+
+    let content: string;
+    switch (params.event) {
+      case "auto_ingested":
+        content = `Filed: ${params.filename}.${params.summary ? "\n\n" + params.summary : ""}`;
+        break;
+      case "deferred":
+        content = `Needs review: ${params.filename}.${params.summary ? "\n\n" + params.summary : ""}`;
+        break;
+      case "error":
+        content = `Failed to extract ${params.filename}.${params.errorMessage ? "\n\n" + params.errorMessage : ""}`;
+        break;
+    }
+
+    const { error: msgErr } = await admin.from("chat_messages").insert({
+      session_id: session.sessionId,
+      role: "assistant",
+      content,
+      metadata: {
+        type: "pipeline_event",
+        event: params.event,
+        batch_id: params.batchId,
+        queue_item_id: params.queueItemId,
+        document_id: params.documentId ?? null,
+        entity_id: params.entityId ?? null,
+        investment_id: params.investmentId ?? null,
+        filename: params.filename,
+        review_session_id: params.reviewSessionId ?? null,
+      },
+    });
+    logDbError(msgErr, `Batch ${params.batchId}: insert pipeline_event (${params.event})`);
+  } catch (err) {
+    console.error(`[PIPELINE] Batch ${params.batchId}: pipeline_event post failed:`, err);
   }
 }
 
@@ -367,11 +563,6 @@ export async function processQueueItem(
  * the batch so the user can supply passwords without leaving chat. Re-uses
  * the existing chat_messages insert path; Realtime delivers the message to
  * any open drawer instances. No-op when no items are password_required.
- *
- * Resolves a session in priority order:
- *  1. batch.metadata.session_id  (chat-originated upload)
- *  2. user's most recent chat_session in this org
- *  3. create a new session titled "Document uploads"
  *
  * Best-effort — failures are logged, not surfaced. The user can still
  * unlock via the inline UI on /review or /batches/[id] as a fallback.
@@ -388,68 +579,12 @@ async function notifyPasswordRequiredItems(
       .eq("status", "password_required");
     if (!lockedItems || lockedItems.length === 0) return;
 
-    const { data: batch } = await admin
-      .from("document_batches")
-      .select("created_by, organization_id, metadata")
-      .eq("id", batchId)
-      .single();
-    if (!batch?.created_by || !batch.organization_id) {
-      console.warn(`[PIPELINE] Batch ${batchId}: cannot notify on locked files (no creator/org)`);
-      return;
-    }
-
-    // Resolve a session in priority order:
-    //   1. batch.metadata.session_id, IF the session belongs to this org.
-    //      Metadata is user-supplied at batch creation, so we re-verify
-    //      org ownership before posting into it — otherwise a tampered
-    //      session_id could leak a system message into a different tenant.
-    //   2. The user's most recent chat_session in this org.
-    //   3. Create a new "Document uploads" session.
-    let sessionId: string | undefined;
-    const claimedSessionId = (batch.metadata as { session_id?: string } | null)?.session_id;
-    if (claimedSessionId) {
-      const { data: claimed } = await admin
-        .from("chat_sessions")
-        .select("id")
-        .eq("id", claimedSessionId)
-        .eq("organization_id", batch.organization_id)
-        .maybeSingle();
-      if (claimed) sessionId = claimed.id;
-      else {
-        console.warn(
-          `[PIPELINE] Batch ${batchId}: session_id ${claimedSessionId} from metadata does not belong to org ${batch.organization_id}; falling back to recent/new session`,
-        );
-      }
-    }
-    if (!sessionId) {
-      const { data: recent } = await admin
-        .from("chat_sessions")
-        .select("id")
-        .eq("user_id", batch.created_by)
-        .eq("organization_id", batch.organization_id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (recent) {
-        sessionId = recent.id;
-      } else {
-        const { data: created, error: sessionErr } = await admin
-          .from("chat_sessions")
-          .insert({
-            user_id: batch.created_by,
-            organization_id: batch.organization_id,
-            title: "Document uploads",
-          })
-          .select("id")
-          .single();
-        logDbError(sessionErr, `Batch ${batchId}: create fallback chat session`);
-        sessionId = created?.id;
-      }
-    }
-    if (!sessionId) {
+    const session = await resolveBatchSession(admin, batchId);
+    if (!session) {
       console.warn(`[PIPELINE] Batch ${batchId}: could not resolve a session for password notification`);
       return;
     }
+    const sessionId = session.sessionId;
 
     const n = lockedItems.length;
     const fileLines = lockedItems
