@@ -33,6 +33,17 @@ export async function POST(request: Request) {
 
   const admin = createAdminClient();
 
+  // The org_document_overrides.created_by FK references public.users(id).
+  // If the auth user isn't synced (or was synced to a stale id from a
+  // previous org/user migration), the insert fails with a FK violation.
+  // Mirror the defensive pattern used in /api/pipeline/batches/route.ts:
+  // check the public.users row exists first; fall back to null otherwise.
+  const { data: userRow } = await admin
+    .from("users")
+    .select("id")
+    .eq("id", ctx.user.id)
+    .maybeSingle();
+
   // Replace any existing override for this document_type, then insert.
   await admin
     .from("org_document_overrides")
@@ -47,7 +58,7 @@ export async function POST(request: Request) {
       document_type,
       action,
       reason: reason || null,
-      created_by: ctx.user.id,
+      created_by: userRow ? ctx.user.id : null,
     })
     .select()
     .single();
