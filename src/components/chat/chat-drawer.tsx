@@ -42,6 +42,48 @@ const DRAWER_PROMPTS = [
 // All upload sizes flow through the unified inline pipeline+chat path.
 
 /* ------------------------------------------------------------------ */
+/*  Unread tracking                                                    */
+/* ------------------------------------------------------------------ */
+
+// Tracks the last time the user was actively viewing each session, kept
+// in localStorage so it's per-device (matches messenger UX — a session
+// you read on desktop shouldn't auto-clear unread state on your phone).
+// Compared against ChatSession.updated_at to compute the unread badge in
+// the session picker. updated_at gets bumped server-side on every new
+// chat_messages insert (including pipeline_event and batch_summary
+// messages from the auto-summary flow), so the badge surfaces whenever
+// the pipeline reports something into a session the user isn't currently
+// looking at.
+
+const LAST_READ_KEY_PREFIX = "rhodes_chat_lastRead:";
+
+function markSessionRead(sessionId: string): void {
+  if (!sessionId) return;
+  try {
+    localStorage.setItem(LAST_READ_KEY_PREFIX + sessionId, new Date().toISOString());
+  } catch {
+    // private mode / quota — ignore
+  }
+}
+
+function getLastReadAt(sessionId: string): string | null {
+  try {
+    return localStorage.getItem(LAST_READ_KEY_PREFIX + sessionId);
+  } catch {
+    return null;
+  }
+}
+
+function isSessionUnread(session: { id: string; updated_at: string }, activeSessionId: string | null): boolean {
+  // Active session is, by definition, being read — even if updated_at
+  // just bumped, the Realtime delivery handler marks it read.
+  if (session.id === activeSessionId) return false;
+  const lastRead = getLastReadAt(session.id);
+  if (!lastRead) return false; // never opened → no badge (don't shout for stale sessions)
+  return Date.parse(session.updated_at) > Date.parse(lastRead);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Props                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -110,6 +152,12 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
             }
             return [...prev, newMsg];
           });
+          // A message just landed in the session the user is actively
+          // viewing — refresh the read cursor so the unread badge doesn't
+          // appear for a session they're literally watching events stream
+          // into. Without this, every pipeline_event arrival would bump
+          // updated_at and flip the badge on for the active session.
+          if (activeSessionId) markSessionRead(activeSessionId);
         },
       )
       .subscribe();
@@ -118,6 +166,33 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       supabase.removeChannel(channel);
     };
   }, [activeSessionId, supabase]);
+
+  // --- Session-list Realtime subscription -----------------------------------
+  // Listens for UPDATE events on chat_sessions for ANY session (filter is
+  // applied client-side because Supabase Realtime can't easily scope by
+  // "rows the auth user can read" without an RPC). When a session's
+  // updated_at changes (typically because a pipeline_event or batch_summary
+  // message landed in it from the auto-summary flow), refetch the session
+  // list so the unread badge can compute fresh.
+  useEffect(() => {
+    if (!isOpen) return;
+    const channel = supabase
+      .channel(`session-list-updates`)
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "chat_sessions" },
+        () => {
+          // Cheap full refetch; sessions list is capped at 100 server-side.
+          void fetchSessions();
+        },
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // fetchSessions is stable (useCallback with empty deps below).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, supabase]);
 
   // Handle prefill from panel context (dashboard input, command palette,
   // /review's "Open in chat", etc.)
@@ -236,6 +311,8 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
     setStreamingText("");
     setShowSessionPicker(false);
     setSessionLengthDismissed(false);
+    // User is now actively viewing this session — clear any unread state.
+    markSessionRead(sessionId);
     try {
       localStorage.setItem("rhodes_chat_session", sessionId);
     } catch {
@@ -1294,36 +1371,62 @@ function DrawerHeader({
               zIndex: 10,
             }}
           >
-            {sessions.slice(0, 5).map((s) => (
-              <button
-                key={s.id}
-                onClick={() => onLoadSession(s.id)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "10px 12px",
-                  border: "none",
-                  borderBottom: "1px solid #f0eee8",
-                  background: s.id === activeSessionId ? "rgba(45,90,61,0.08)" : "transparent",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                <div
+            {sessions.slice(0, 5).map((s) => {
+              const unread = isSessionUnread(s, activeSessionId);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => onLoadSession(s.id)}
                   style={{
-                    fontSize: 12,
-                    fontWeight: s.id === activeSessionId ? 600 : 400,
-                    color: "#1a1a1f",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
+                    display: "block",
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    border: "none",
+                    borderBottom: "1px solid #f0eee8",
+                    background: s.id === activeSessionId ? "rgba(45,90,61,0.08)" : "transparent",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
                   }}
                 >
-                  {s.title}
-                </div>
-              </button>
-            ))}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 12,
+                      fontWeight: unread || s.id === activeSessionId ? 600 : 400,
+                      color: "#1a1a1f",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {/* Unread dot — sized to match the orange status dots
+                        used elsewhere in /review. */}
+                    {unread && (
+                      <span
+                        aria-label="Unread updates"
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: "50%",
+                          background: "#c47520",
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <span
+                      style={{
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {s.title}
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
             <button
               onClick={onExpand}
               style={{
