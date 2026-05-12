@@ -14,7 +14,10 @@ import type { StreamEvent } from "@/lib/mcp/stream-events";
 import type { LinkableRef } from "@/lib/utils/linkify";
 import type { ChatSession, ChatMessage, ChatMessageMetadata } from "@/lib/types/chat";
 import { validateUploadedFile } from "@/lib/validations";
-import { uploadFilesToBatch } from "@/lib/utils/batch-upload";
+// uploadFilesToBatch was previously used by the BATCH MODE branch for 6+
+// doc uploads; that branch was removed in Phase 3 of the chat unification
+// (all uploads now go through the inline pipeline+chat path below). The
+// /review page still uses uploadFilesToBatch directly.
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                          */
@@ -32,7 +35,11 @@ const DRAWER_PROMPTS = [
 // the corresponding link/update actions in a single turn (tool-call budget).
 // Above the threshold, the files are routed to the pipeline in the background
 // and a system-style "batch handoff" message is posted to the conversation.
-const BATCH_THRESHOLD = 5;
+// BATCH_THRESHOLD = 5 removed in Phase 3 of the chat unification. With the
+// orchestrator now metadata-only (Phase 1) and the pipeline as sole
+// extractor, the original rationale ("Claude can't read 6+ PDFs in one
+// turn") no longer applies — Claude isn't reading any PDFs in any turn.
+// All upload sizes flow through the unified inline pipeline+chat path.
 
 /* ------------------------------------------------------------------ */
 /*  Props                                                              */
@@ -387,108 +394,19 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
 
       try {
         if (hasFiles) {
-          // === BATCH MODE (6+ docs) ===
-          // Above the threshold, skip the MCP orchestrator entirely — Claude
-          // can't reliably read 6+ PDFs in one turn within the tool-call
-          // budget. Files go through the standard pipeline; the user picks
-          // up the work via the notification bell + batch review page.
-          if (currentFiles.length > BATCH_THRESHOLD) {
-            // 1–5. Create batch → presign → upload → register → process.
-            const { batchId } = await uploadFilesToBatch(currentFiles, {
-              context: "chat",
-              name: `Chat upload — ${currentFiles.length} document${currentFiles.length === 1 ? "" : "s"}`,
-              entityId: pageContext?.entityId ?? null,
-              metadata: { session_id: sessionId },
-            });
-
-            // 6. Persist the user's message server-side. We replace the
-            //    optimistic temp message by id (using the inserted row's id)
-            //    rather than relying on the content+role dedupe — the
-            //    optimistic content ("Uploaded N files") and the persisted
-            //    content can diverge, and an id-based swap is unambiguous.
-            //    When the Realtime INSERT for this row arrives a moment
-            //    later, the chat-drawer's existing `prev.some(m => m.id ===
-            //    newMsg.id)` guard treats it as a no-op.
-            const userMsgRes = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                role: "user",
-                content,
-                metadata: {
-                  attachments: currentFiles.map((f) => ({
-                    queue_item_id: "",
-                    document_id: null,
-                    filename: f.name,
-                    status: "queued",
-                  })),
-                  batch_id: batchId,
-                  ...(pageContext ? { page_context: {
-                    page: pageContext.page,
-                    entityId: pageContext.entityId,
-                    entityName: pageContext.entityName,
-                    investmentId: pageContext.investmentId,
-                    investmentName: pageContext.investmentName,
-                  } } : {}),
-                },
-              }),
-            });
-            if (userMsgRes.ok) {
-              const persistedUserMsg = (await userMsgRes.json()) as ChatMessage;
-              setMessages((prev) =>
-                prev.map((m) => (m.id === userMsg.id ? persistedUserMsg : m)),
-              );
-            }
-
-            // 7. Insert the assistant batch-handoff message. Skips the MCP
-            //    orchestrator so Claude never sees these documents — they
-            //    process in the background and the user picks them up via
-            //    the notification bell + batch review page.
-            const handoffText =
-              `I've started processing your ${currentFiles.length} documents in the background. ` +
-              `You'll get a notification when they're ready for review.\n\n` +
-              `[View progress](/batches/${batchId})`;
-
-            // Append the persisted row to local state immediately. The
-            // Realtime subscription would also deliver this INSERT, but
-            // there's a race where the websocket is still mid-handshake
-            // ("Connecting to wss://..." in console) when the row lands —
-            // the event fires before the subscription is live and the user
-            // never sees the handoff. The dedupe guard in the Realtime
-            // handler (chat-drawer.tsx:90) makes the late-arriving event a
-            // no-op.
-            const handoffRes = await fetch(`/api/chat/sessions/${sessionId}/messages`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                role: "assistant",
-                content: handoffText,
-                metadata: {
-                  type: "batch_handoff",
-                  batch_id: batchId,
-                  file_count: currentFiles.length,
-                  filenames: currentFiles.map((f) => f.name),
-                },
-              }),
-            });
-            if (handoffRes.ok) {
-              const persistedHandoff = (await handoffRes.json()) as ChatMessage;
-              setMessages((prev) =>
-                prev.some((m) => m.id === persistedHandoff.id)
-                  ? prev
-                  : [...prev, persistedHandoff],
-              );
-            }
-
-            fetchSessions();
-            return;
-          }
-
-          // === FILE UPLOAD PATH ===
-          // Routes through the pipeline batch API (create → presign → upload
-          // to storage → register → process). The legacy monolithic FormData
-          // path was removed in the Phase 3-4 cutover; this is the unified
-          // upload handler the MCP architecture calls for.
+          // === FILE UPLOAD PATH (unified across all sizes) ===
+          // Phase 3 of the chat unification merged the legacy ≤5-doc inline
+          // path and the >5-doc static-handoff path into this single flow.
+          // Every chat upload now: creates a batch → presigns → uploads to
+          // storage → registers → kicks off processing → sends the chat
+          // message via /api/chat with attachment metadata refs only.
+          //
+          // The orchestrator is metadata-only (Phase 1) — it never sees PDF
+          // bytes, so there's no per-turn budget concern that motivated the
+          // original 6+ cliff. The orchestrator narrates via tools as the
+          // pipeline runs; pipeline events post structured chat messages
+          // (Phase 2b) so the user gets live progress regardless of upload
+          // size.
 
           // 1. Create a chat-context batch.
           const batchRes = await fetch("/api/pipeline/batches", {

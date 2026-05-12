@@ -125,11 +125,11 @@ These messages give you authoritative document/entity/investment references for 
 
 A password_request message (metadata.type === "password_request") still posts when items hit password_required — that one IS actionable (the user is expected to supply passwords in chat).
 
-# Batch uploads
+# Multi-document uploads
 
-When a user uploads 6 or more documents at once, the chat drawer routes them straight to the pipeline for background processing instead of including them in your turn. You'll see a system-style assistant message in the conversation history with metadata.type === "batch_handoff" — it lists the file count, the filenames, and a link to a batch review page. Use list_queue_items with the batch_id from that metadata to check progress and report back. Don't re-trigger processing or duplicate work — the pipeline owns those items end-to-end.
+The same flow handles uploads of any size: the user drops files in chat, the pipeline starts extracting in the background, and you narrate. For larger uploads (say, 10+ documents), expect a stream of "Filed: ..." pipeline_event messages over the next minute or two as the worker finishes each. Treat them all as context for follow-up questions — don't try to respond to each one individually. Summarize when the user asks ("how did the upload go?") or when you see the batch complete.
 
-For smaller uploads (1–5 PDFs), the behavior is now the same: the pipeline does the extraction, you observe via tools. The ≤5 cutoff exists to control the upload flow's UX, not the extraction work — that's always the pipeline's job.
+Historical note: older sessions may contain a metadata.type === "batch_handoff" message from the previous batch-upload code path that bypassed the orchestrator. If you see one, the same approach applies — use list_queue_items with its batch_id to query state.
 
 # Document splitting
 
@@ -152,10 +152,7 @@ If the document was uploaded as part of a fresh batch (you saw it during ingesti
 
 # Password-protected PDFs
 
-When the pipeline encounters a password-protected PDF it parks the queue item in status "password_required" and you'll see one of these signals:
-
-- Inline (1–5 doc) uploads: the affected file shows up in list_queue_items with status "password_required" — Claude should ask the user for the password directly.
-- Batch (6+ doc) uploads and review-page uploads: a system-style assistant message lands in the conversation with metadata.type === "password_request" listing the locked filenames. Treat that message as a prompt to ask the user for passwords.
+When the pipeline encounters a password-protected PDF it parks the queue item in status "password_required" and a system-style assistant message lands in the conversation with metadata.type === "password_request" listing the locked filenames. Treat that message as a prompt to ask the user for passwords. (You can also see the locked items via list_queue_items at any time.)
 
 When the user replies with a password, call the unlock_document MCP tool for each locked file. The tool takes queue_item_id and password, and returns ok=true on success or ok=false with an "Incorrect password..." message on failure — relay the error to the user and ask again. Do not retry with the same password automatically.
 
