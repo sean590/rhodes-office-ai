@@ -15,7 +15,7 @@
 
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { processQueueItem } from "@/lib/pipeline/worker";
+import { processQueueItem, generateBatchSummary } from "@/lib/pipeline/worker";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 // Unlock awaits the full pipeline (download → analyze → agent → write tools).
@@ -92,7 +92,7 @@ export async function POST(
     //   anything else     → genuine success (extracted/review_ready/etc.)
     const { data: refreshed } = await admin
       .from("document_queue")
-      .select("status, extraction_error")
+      .select("status, extraction_error, batch_id")
       .eq("id", itemId)
       .maybeSingle();
     if (refreshed?.status === "password_required") {
@@ -110,6 +110,25 @@ export async function POST(
         },
         { status: 500 },
       );
+    }
+
+    // Auto-summary (phase 2, "post-unlock"): if this unlock finished off
+    // the last password_required item in the batch, fire a summary so the
+    // user gets a "now everything's done" message in the originating chat
+    // session. We check by counting remaining locked items.
+    if (refreshed?.batch_id) {
+      const { count: remainingLocked } = await admin
+        .from("document_queue")
+        .select("id", { count: "exact", head: true })
+        .eq("batch_id", refreshed.batch_id as string)
+        .eq("status", "password_required");
+      if (!remainingLocked || remainingLocked === 0) {
+        // Fire-and-forget; the user shouldn't wait on this for the
+        // unlock response to return.
+        generateBatchSummary(admin, refreshed.batch_id as string, "post-unlock").catch((err) =>
+          console.error(`[UNLOCK] post-unlock summary failed:`, err),
+        );
+      }
     }
 
     return NextResponse.json({ success: true, status: refreshed?.status ?? "unknown" });

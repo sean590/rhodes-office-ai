@@ -6,6 +6,13 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { PdfPasswordRequiredError } from "./pdf-processor";
 import { assertNoDbError, logDbError } from "./db-errors";
 import * as Sentry from "@sentry/nextjs";
+import Anthropic from "@anthropic-ai/sdk";
+import {
+  runOrchestratorStreaming,
+  type AnthropicClientLike,
+  type OrchestratorMessage,
+} from "@/lib/mcp/orchestrator";
+import { redact } from "@/lib/mcp/redact";
 
 /**
  * Process a single queue item via the document agent. The agent is the
@@ -615,6 +622,163 @@ async function notifyPasswordRequiredItems(
 }
 
 /**
+ * Auto-summary: trigger the chat orchestrator to write a synthesized
+ * "here's what just happened" message after a batch reaches end-of-phase.
+ *
+ * Two phase triggers:
+ *   - "initial":    fires from processBatch after the worker is done with
+ *                   the initial pass. Mentions password_required items but
+ *                   doesn't wait for them — phase B per the user spec.
+ *   - "post-unlock": fires from the unlock route after the unlocked item
+ *                   reaches a terminal state. Tells the user "now that's
+ *                   handled too."
+ *
+ * The orchestrator gets a synthetic user message of the form
+ * `[BATCH_SUMMARY:<batch_id>:<reason>]` — its system prompt knows to
+ * interpret this as a system signal (not a real user request) and write
+ * a concise narrative. The message is persisted as an assistant message
+ * in the originating chat session so it lands wherever the upload came
+ * from. Session.updated_at gets bumped so the chat-drawer's session list
+ * floats the originating session to the top.
+ *
+ * Best-effort — failures are logged, not surfaced. The pipeline keeps
+ * working regardless. If the batch wasn't chat-originated (no session
+ * resolvable), we skip cleanly.
+ */
+export async function generateBatchSummary(
+  admin: ReturnType<typeof createAdminClient>,
+  batchId: string,
+  reason: "initial" | "post-unlock" = "initial",
+): Promise<void> {
+  try {
+    const session = await resolveBatchSession(admin, batchId);
+    if (!session) {
+      // No chat session for this batch (e.g., a non-chat /review drop) —
+      // nothing to summarize into. Skip silently.
+      return;
+    }
+
+    // Need at least one queue item to summarize. Filter out null
+    // document_id rows that can show up if a register insert partially
+    // succeeded before the documents row was created.
+    const { data: items } = await admin
+      .from("document_queue")
+      .select("status")
+      .eq("batch_id", batchId);
+    if (!items || items.length === 0) return;
+
+    // Fetch the batch creator's user identity so the orchestrator can
+    // personalize the summary ("I filed X for Sean…"). Falls through
+    // gracefully when created_by is null.
+    const { data: batchMeta } = await admin
+      .from("document_batches")
+      .select("created_by, organization_id")
+      .eq("id", batchId)
+      .single();
+    if (!batchMeta?.organization_id) return;
+    const orgId = batchMeta.organization_id as string;
+
+    type UserIdentity = {
+      name: string;
+      email: string;
+      orgName: string;
+    };
+    let userIdentity: UserIdentity | undefined;
+    if (batchMeta.created_by) {
+      const [userRes, orgRes] = await Promise.all([
+        admin
+          .from("users")
+          .select("name, email")
+          .eq("id", batchMeta.created_by as string)
+          .maybeSingle(),
+        admin
+          .from("organizations")
+          .select("name")
+          .eq("id", orgId)
+          .maybeSingle(),
+      ]);
+      if (userRes.data && orgRes.data) {
+        userIdentity = {
+          name: (userRes.data.name as string | null) ?? (userRes.data.email as string),
+          email: userRes.data.email as string,
+          orgName: orgRes.data.name as string,
+        };
+      }
+    }
+
+    // Recent session history feeds the orchestrator so it can read the
+    // pipeline_event messages and respond cohesively. Cap at 100 to
+    // bound token use; the orchestrator already truncates internally too.
+    const { data: history } = await admin
+      .from("chat_messages")
+      .select("role, content")
+      .eq("session_id", session.sessionId)
+      .order("created_at", { ascending: true })
+      .limit(100);
+
+    const orchestratorHistory: OrchestratorMessage[] = (history ?? []).map((m) => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: m.content as string,
+    }));
+
+    // The system prompt's "Auto-summary mode" section keys on this exact
+    // bracketed pattern. Don't alter it without updating system-prompt.ts.
+    const triggerMessage = `[BATCH_SUMMARY:${batchId}:${reason}]`;
+
+    const anthropic = new Anthropic() as unknown as AnthropicClientLike;
+
+    let finalText = "";
+    for await (const event of runOrchestratorStreaming({
+      ctx: {
+        userId: (batchMeta.created_by as string | null) ?? "",
+        orgId,
+        sessionId: session.sessionId,
+        supabase: admin,
+        redact,
+      },
+      userMessage: triggerMessage,
+      history: orchestratorHistory,
+      pageContext: null,
+      userIdentity,
+      anthropic,
+    })) {
+      if (event.type === "done") {
+        finalText = event.text;
+      }
+    }
+
+    if (!finalText) {
+      console.warn(`[PIPELINE] Batch ${batchId}: orchestrator produced no summary text`);
+      return;
+    }
+
+    const { error: insertErr } = await admin.from("chat_messages").insert({
+      session_id: session.sessionId,
+      role: "assistant",
+      content: finalText,
+      metadata: {
+        type: "batch_summary",
+        batch_id: batchId,
+        reason,
+        mcp_chat: true,
+      },
+    });
+    logDbError(insertErr, `Batch ${batchId}: insert batch_summary message`);
+
+    // Bump session.updated_at so the originating session floats to the
+    // top of any session list sorted by recency. Combined with a
+    // client-side unread badge (separate change), users in a different
+    // session can see "your upload finished — check session X".
+    await admin
+      .from("chat_sessions")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", session.sessionId);
+  } catch (err) {
+    console.error(`[PIPELINE] Batch ${batchId}: generateBatchSummary failed:`, err);
+  }
+}
+
+/**
  * Recalculate and update batch statistics.
  *
  * Called after the worker finishes processing a batch AND after individual
@@ -740,6 +904,13 @@ export async function processBatch(
   // happen after updateBatchStats so the batch's status is settled when the
   // notification fires.
   await notifyPasswordRequiredItems(admin, batchId);
+
+  // Auto-summary (phase 1, "initial"): synthesize a narrative summary of
+  // what just happened and post it back into the originating chat session.
+  // Doesn't wait for password_required items to be unlocked — those get
+  // mentioned in this summary and resolved in the phase-2 summary later.
+  // Best-effort; failures don't block batch completion.
+  await generateBatchSummary(admin, batchId, "initial");
 
   // Fire-and-forget: refresh inferred document patterns across the org.
   // Newly ingested documents may have changed cross-entity patterns
