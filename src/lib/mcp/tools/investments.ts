@@ -56,7 +56,10 @@ const listInvestmentsInput = z.object({
 export const listInvestmentsTool = defineTool({
   name: "list_investments",
   description:
-    "List investments (deals) in the user's organization. Filter params: name_query (substring match on name), investment_type, status, investor_entity_id (deals where a specific internal entity is an active investor). Default limit 25.",
+    "List investments (deals) in the user's organization. Returns id, name, short_name, investment_type, status, date_invested, date_exited, formation_state — DOES NOT return investor information. " +
+    "To see who invests in a deal: call get_investment for that deal, or filter this list with investor_entity_id to find deals a given entity invests in. " +
+    "The absence of investor data in this response does NOT mean a deal has no investors — this tool simply doesn't return that field. " +
+    "Filter params: name_query (substring match on name), investment_type, status, investor_entity_id (deals where a specific internal entity is an active investor). Default limit 25.",
   kind: "read",
   inputSchema: listInvestmentsInput,
   handler: async (args, ctx) => {
@@ -84,7 +87,12 @@ export const listInvestmentsTool = defineTool({
     let query = ctx.supabase
       .from("investments")
       .select(
-        "id, name, short_name, investment_type, status, entity_id, date_invested, date_exited, formation_state",
+        // entity_id (legacy column from before investment_investors existed —
+        // see migration 032) intentionally excluded: it's null on every row
+        // post-migration and the field name was misleading the orchestrator
+        // into inferring "no investor linked" for every deal. Investor info
+        // lives in investment_investors and is exposed via get_investment.
+        "id, name, short_name, investment_type, status, date_invested, date_exited, formation_state",
       )
       .eq("organization_id", ctx.orgId)
       .order("name")
