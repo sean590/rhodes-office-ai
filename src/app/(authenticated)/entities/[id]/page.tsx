@@ -3688,7 +3688,7 @@ function ObligationRow({
     : null;
 
   // Has any detail worth expanding?
-  const hasDetail = obligation.completed_at || obligation.confirmation || obligation.payment_amount || obligation.document_id || obligation.penalty_description || obligation.description;
+  const hasDetail = obligation.completed_at || obligation.confirmation || obligation.payment_amount || obligation.document_id || obligation.penalty_description || obligation.description || (obligation.cycles && obligation.cycles.length > 0);
 
   const linkedDoc = obligation.document_id ? documents.find(d => d.id === obligation.document_id) : null;
 
@@ -3969,6 +3969,33 @@ function ObligationRow({
               >
                 {linkedDoc.name}
               </a>
+            </div>
+          )}
+          {obligation.cycles && obligation.cycles.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #f0ede6" }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                Completion history ({obligation.cycles.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {obligation.cycles.map((cyc) => {
+                  const dueLbl = new Date(cyc.cycle_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                  const completedLbl = new Date(cyc.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                  return (
+                    <div key={cyc.id} style={{ display: "flex", alignItems: "baseline", gap: 12, fontSize: 12, color: "#1a1a1f" }}>
+                      <span style={{ color: "#2d6a45", fontSize: 12, flexShrink: 0 }}>✓</span>
+                      <span style={{ flex: 1 }}>
+                        Cycle due <strong>{dueLbl}</strong> — completed <strong>{completedLbl}</strong>
+                        {cyc.payment_amount != null && cyc.payment_amount > 0 && (
+                          <span style={{ color: "#6b6b76" }}> · ${(cyc.payment_amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                        )}
+                        {cyc.confirmation && (
+                          <span style={{ color: "#6b6b76" }}> · #{cyc.confirmation}</span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

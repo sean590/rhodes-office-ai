@@ -103,7 +103,34 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ obligations }, {
+    // Attach the most recent completion cycles for each obligation so the
+    // UI can show a "completion history" expander without a per-row round
+    // trip. Cap at 10 cycles per obligation — enough to show the
+    // recent history without bloating the response for long-lived
+    // obligations with many cycles.
+    const obligationIds = obligations.map((o) => o.id);
+    let cyclesByObligation: Record<string, Array<Record<string, unknown>>> = {};
+    if (obligationIds.length > 0) {
+      const { data: cycles } = await supabase
+        .from("compliance_obligation_cycles")
+        .select(
+          "id, obligation_id, cycle_due_date, completed_at, completed_by, document_id, payment_amount, confirmation, notes",
+        )
+        .in("obligation_id", obligationIds)
+        .order("completed_at", { ascending: false });
+      cyclesByObligation = (cycles ?? []).reduce<Record<string, Array<Record<string, unknown>>>>((acc, c) => {
+        const oid = c.obligation_id as string;
+        if (!acc[oid]) acc[oid] = [];
+        if (acc[oid].length < 10) acc[oid].push(c as Record<string, unknown>);
+        return acc;
+      }, {});
+    }
+    const obligationsWithCycles = obligations.map((o) => ({
+      ...o,
+      cycles: cyclesByObligation[o.id as string] ?? [],
+    }));
+
+    return NextResponse.json({ obligations: obligationsWithCycles }, {
       headers: { "Cache-Control": "private, max-age=60" },
     });
   } catch (err) {

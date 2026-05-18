@@ -330,6 +330,18 @@ export interface DocumentBatch {
 
 export type ComplianceStatus = 'pending' | 'completed' | 'overdue' | 'exempt' | 'not_applicable';
 
+export interface ComplianceObligationCycle {
+  id: string;
+  obligation_id: string;
+  cycle_due_date: string;
+  completed_at: string;
+  completed_by: string | null;
+  document_id: string | null;
+  payment_amount: number | null;
+  confirmation: string | null;
+  notes: string | null;
+}
+
 export interface ComplianceObligation {
   id: string;
   entity_id: string;
@@ -354,6 +366,9 @@ export interface ComplianceObligation {
   penalty_description: string | null;
   created_at: string;
   updated_at: string;
+  // Recent completion history (most recent first, capped at 10).
+  // Populated by GET /api/entities/[id]/compliance.
+  cycles?: ComplianceObligationCycle[];
 }
 
 export interface ProposedAction {
