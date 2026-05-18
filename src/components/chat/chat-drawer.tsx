@@ -115,6 +115,48 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   // Stable browser Supabase client for Realtime subscriptions.
   const supabase = useMemo(() => createClient(), []);
 
+  // Safety-net refetch for the active session's messages. Used by the
+  // Realtime resilience layer (channel reconnect, tab visibility, BFCache
+  // restore). MERGES results — preserves any optimistic temp messages
+  // currently in flight and upserts whatever came back from the server.
+  //
+  // Why this exists: the chat-drawer's primary delivery is Supabase
+  // Realtime over WebSocket. When that drops silently (browser tab
+  // throttling, idle disconnect, mid-handshake timing, etc.), there's no
+  // recourse without a refetch. Production saw pipeline_event +
+  // batch_summary messages persisted server-side but never displayed
+  // because Realtime didn't deliver them; this is the backstop.
+  const refetchActiveSessionMessages = useCallback(async (sessionId: string | null) => {
+    if (!sessionId) return;
+    try {
+      const res = await fetch(`/api/chat/sessions/${sessionId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const serverMessages: ChatMessage[] = data.messages || [];
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const next = [...prev];
+        let appended = 0;
+        for (const m of serverMessages) {
+          if (!existingIds.has(m.id)) {
+            next.push(m);
+            appended += 1;
+          }
+        }
+        if (appended > 0) {
+          next.sort((a, b) => {
+            const aTime = a.created_at ? Date.parse(a.created_at) : 0;
+            const bTime = b.created_at ? Date.parse(b.created_at) : 0;
+            return aTime - bTime;
+          });
+        }
+        return next;
+      });
+    } catch {
+      // Non-critical — next refetch trigger will retry.
+    }
+  }, []);
+
   // --- Realtime subscription for live message delivery ----------------------
   // Listens for INSERT events on chat_messages for the active session. Picks
   // up pipeline completion notifications, messages from other tabs/devices,
@@ -160,12 +202,56 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           if (activeSessionId) markSessionRead(activeSessionId);
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Resilience layer: when the Realtime channel transitions back
+        // into SUBSCRIBED after any non-SUBSCRIBED state (initial
+        // connect, reconnect after disconnect, recovery after
+        // CHANNEL_ERROR/TIMED_OUT/CLOSED), do a one-shot refetch to
+        // catch any messages that landed during the gap. Without this,
+        // websocket drops produce silent missing messages — exactly the
+        // bug behind the "auto-summary never reached me" reports.
+        if (status === "SUBSCRIBED") {
+          void refetchActiveSessionMessages(activeSessionId);
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [activeSessionId, supabase]);
+  }, [activeSessionId, supabase, refetchActiveSessionMessages]);
+
+  // --- Tab-visibility refetch (Realtime resilience layer #2) ---------------
+  // Browsers throttle and sometimes silently disconnect WebSockets in
+  // backgrounded tabs. When the user comes back, Realtime may not have
+  // delivered events that happened during the gap. Refetch on every
+  // visibilitychange→visible to catch up. Also handle pageshow for
+  // BFCache restores (browser back/forward into a cached page).
+  useEffect(() => {
+    if (!isOpen) return;
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        void refetchActiveSessionMessages(activeSessionId);
+        // Also refresh the session list so unread badges + ordering catch up.
+        void fetchSessions();
+      }
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      // BFCache restores fire pageshow with persisted=true; treat the
+      // same as a visibility transition.
+      if (e.persisted) {
+        void refetchActiveSessionMessages(activeSessionId);
+        void fetchSessions();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+    // fetchSessions is defined later as a useCallback with stable deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, activeSessionId, refetchActiveSessionMessages]);
 
   // --- Session-list Realtime subscription -----------------------------------
   // Listens for UPDATE events on chat_sessions for ANY session (filter is
@@ -186,7 +272,13 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           void fetchSessions();
         },
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Same resilience as the chat_messages channel: refetch on
+        // reconnect to catch any UPDATEs that landed during the gap.
+        if (status === "SUBSCRIBED") {
+          void fetchSessions();
+        }
+      });
     return () => {
       supabase.removeChannel(channel);
     };
@@ -327,6 +419,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       // Non-critical
     }
   }, []);
+
 
   // -------------------------------------------------------------------
   // Initialize on first open: fetch sessions, refs, then resume the saved
