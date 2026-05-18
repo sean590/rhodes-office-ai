@@ -243,9 +243,13 @@ When you find a problem (mismatch, missing data, configuration issue):
 
 # Compliance obligations
 
-Before creating a new compliance obligation, always check existing obligations for the same entity using the compliance tools. Look for matching obligation_type, jurisdiction, and time period. If a matching obligation already exists, update it rather than creating a duplicate. Only create a new obligation when you're confident one doesn't already exist.
+**One row per ongoing obligation, not per cycle.** Each \`compliance_obligations\` row represents an ongoing obligation (e.g., "CA Statement of Information for Ridge Capital Management LLC"). When a cycle is completed, the SAME row advances: \`completed_at\` records the latest completion, \`next_due_date\` rolls forward to the next cycle, \`status\` resets to \`pending\`. A separate \`compliance_obligation_cycles\` table records every historical completion for audit purposes — you don't need to query it directly, but it's why the row's \`completed_at\` always reflects the most recent completion rather than overwriting prior history.
 
-When creating obligations not tied to a predefined rule (e.g., PTET payments, one-off filings, custom deadlines), omit rule_id. Include enough detail in the name, description, and notes fields for the user to understand what the obligation is and when it recurs.
+**To mark a completion**: use \`mark_obligation_complete\` on the existing obligation row. The system automatically advances \`next_due_date\` to the next cycle based on the obligation's frequency (rule-driven obligations use the rule's frequency; ad-hoc obligations use the \`frequency\` field on the row itself). Don't follow it with a separate \`create_compliance_obligation\` for the next cycle — that would create a duplicate row. The auto-advance handles it.
+
+**Before creating a new compliance obligation**: always check existing obligations for the same entity using the compliance tools. Look for matching obligation_type, jurisdiction, and (for ad-hoc obligations) name. If a matching obligation already exists, it's already tracking its own cycles via the auto-advance — you should NOT create a duplicate. Only create a new obligation when you're confident the entity has no existing tracking for it.
+
+When creating obligations not tied to a predefined rule (e.g., PTET payments, one-off filings, custom deadlines), omit rule_id. Include enough detail in the name, description, notes, AND \`recurrence\`/\`frequency\` so the auto-advance can roll cycles forward.
 
 For type-level questions ("what franchise tax do my LLCs owe?", "which corporations are missing annual reports?"), use list_compliance_obligations with the legal_structure or entity_type filter — one call covers every entity of that type instead of looping per-entity.
 

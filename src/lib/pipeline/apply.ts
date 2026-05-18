@@ -851,12 +851,11 @@ export async function applyActions(
 
           const proposedCompletedAt = (item.data.completed_at || new Date().toISOString().split("T")[0]) as string;
 
-          // If obligation is already completed with a more recent date, skip
-          if (
-            currentObligation.status === "completed" &&
-            currentObligation.completed_at &&
-            currentObligation.completed_at >= proposedCompletedAt
-          ) {
+          // Idempotency guard: if this cycle was already completed at the
+          // same or later date, skip. Compare against last_completed_at on
+          // the obligation OR against the most recent cycle row.
+          const lastCompletedAt = currentObligation.completed_at as string | null;
+          if (lastCompletedAt && lastCompletedAt >= proposedCompletedAt && currentObligation.status === "completed") {
             results.push({
               action: "complete_obligation",
               success: true,
@@ -865,16 +864,106 @@ export async function applyActions(
             break;
           }
 
+          // The due date that THIS completion satisfies — it's the
+          // obligation's current next_due_date BEFORE we advance the row.
+          // Captured here so the cycles-history row preserves it.
+          const cycleDueDate = currentObligation.next_due_date as string | null;
+
+          const cycleDocumentId =
+            (item.data.document_id as string | null | undefined) ?? options.documentId ?? null;
+          const cyclePaymentAmount =
+            item.data.payment_amount != null ? (item.data.payment_amount as number) : null;
+          const cycleConfirmation =
+            item.data.confirmation != null ? (item.data.confirmation as string) : null;
+          const cycleNotes = item.data.notes != null ? (item.data.notes as string) : null;
+
+          // Append an immutable history row to compliance_obligation_cycles.
+          // This is the audit log: every completion event for this obligation
+          // is preserved here regardless of how the parent row is updated.
+          if (cycleDueDate) {
+            const { error: cycleErr } = await supabase
+              .from("compliance_obligation_cycles")
+              .insert({
+                obligation_id: obligationId,
+                cycle_due_date: cycleDueDate,
+                completed_at: proposedCompletedAt,
+                completed_by: options.userId ?? null,
+                document_id: cycleDocumentId,
+                payment_amount: cyclePaymentAmount,
+                confirmation: cycleConfirmation,
+                notes: cycleNotes,
+              });
+            if (cycleErr) {
+              // Log loudly but don't block the completion — the row update
+              // below is the user-visible part. The cycles row is auxiliary.
+              console.error(`[apply] failed to insert cycle history for obligation ${obligationId}:`, cycleErr.message);
+            }
+          }
+
+          // Calculate the next cycle's due date. Works for both rule-driven
+          // obligations (uses the rule's frequency) and ad-hoc ones (uses
+          // the obligation's own frequency field). For one_time, leave
+          // next_due_date null and mark status as completed permanently.
+          let nextDueDate: string | null = null;
+          const obligationFrequency = (currentObligation.frequency as string) || "one_time";
+          if (currentObligation.rule_id) {
+            const rule = getRuleById(currentObligation.rule_id as string);
+            if (rule && rule.frequency !== "one_time") {
+              const { data: entity } = await supabase
+                .from("entities")
+                .select("formed_date")
+                .eq("id", currentObligation.entity_id as string)
+                .single();
+              nextDueDate = calculateNextDueDateAfterCompletion(
+                rule,
+                proposedCompletedAt,
+                entity?.formed_date || null,
+              );
+            }
+          } else if (obligationFrequency !== "one_time" && obligationFrequency !== "continuous") {
+            // Ad-hoc obligation with a frequency hint — roll the due date
+            // forward by that frequency. Same calculation the rule-based
+            // path uses, but the rule object is synthesized inline.
+            const synthesizedRule = {
+              id: `ad_hoc_${obligationId}`,
+              frequency: obligationFrequency,
+              // calculateNextDueDateAfterCompletion expects these but they
+              // don't affect the next-due math for most frequencies.
+              jurisdiction: currentObligation.jurisdiction as string,
+              obligation_type: currentObligation.obligation_type as string,
+              name: currentObligation.name as string,
+              description: currentObligation.description as string | null,
+              fee: currentObligation.fee_description as string | null,
+              form_number: currentObligation.form_number as string | null,
+              portal_url: currentObligation.portal_url as string | null,
+              filed_with: currentObligation.filed_with as string | null,
+              penalty_description: currentObligation.penalty_description as string | null,
+            };
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            nextDueDate = calculateNextDueDateAfterCompletion(synthesizedRule as any, proposedCompletedAt, null);
+          }
+
+          // Advance the existing row in place. If there's a next cycle,
+          // status returns to 'pending' with the new next_due_date. If no
+          // further cycle (one_time), the row stays 'completed' with the
+          // completion timestamp preserved.
           const completionUpdates: Record<string, unknown> = {
-            status: "completed",
             completed_at: proposedCompletedAt,
             updated_at: new Date().toISOString(),
           };
-          if (item.data.payment_amount != null) completionUpdates.payment_amount = item.data.payment_amount;
-          if (item.data.confirmation) completionUpdates.confirmation = item.data.confirmation;
-          if (item.data.notes) completionUpdates.notes = item.data.notes;
-          if (item.data.document_id) completionUpdates.document_id = item.data.document_id;
-          else if (options.documentId) completionUpdates.document_id = options.documentId;
+          if (cyclePaymentAmount != null) completionUpdates.payment_amount = cyclePaymentAmount;
+          if (cycleConfirmation != null) completionUpdates.confirmation = cycleConfirmation;
+          if (cycleNotes != null) completionUpdates.notes = cycleNotes;
+          if (cycleDocumentId != null) completionUpdates.document_id = cycleDocumentId;
+          if (options.userId) completionUpdates.completed_by = options.userId;
+
+          if (nextDueDate) {
+            completionUpdates.next_due_date = nextDueDate;
+            completionUpdates.status = "pending";
+          } else {
+            // No further cycles — keep the row as completed.
+            completionUpdates.status = "completed";
+          }
 
           const { data: updatedObligation, error: obligationError } = await supabase
             .from("compliance_obligations")
@@ -883,60 +972,6 @@ export async function applyActions(
             .select()
             .single();
           if (obligationError) throw obligationError;
-
-          // Create next cycle obligation if rule exists
-          if (updatedObligation.rule_id) {
-            const rule = getRuleById(updatedObligation.rule_id);
-            if (rule && rule.frequency !== "one_time") {
-              const { data: entity } = await supabase
-                .from("entities")
-                .select("formed_date")
-                .eq("id", updatedObligation.entity_id)
-                .single();
-
-              const nextDueDate = calculateNextDueDateAfterCompletion(
-                rule,
-                proposedCompletedAt,
-                entity?.formed_date || null
-              );
-
-              if (nextDueDate) {
-                // Don't create a next-cycle obligation if a newer one already exists and is completed
-                const { data: existingNewer } = await supabase
-                  .from("compliance_obligations")
-                  .select("id, status, next_due_date")
-                  .eq("entity_id", updatedObligation.entity_id)
-                  .eq("rule_id", rule.id)
-                  .gte("next_due_date", nextDueDate)
-                  .limit(1)
-                  .maybeSingle();
-
-                if (!existingNewer) {
-                  await supabase
-                    .from("compliance_obligations")
-                    .upsert(
-                      {
-                        entity_id: updatedObligation.entity_id,
-                        rule_id: rule.id,
-                        jurisdiction: updatedObligation.jurisdiction,
-                        obligation_type: rule.obligation_type,
-                        name: rule.name,
-                        description: rule.description,
-                        frequency: rule.frequency,
-                        next_due_date: nextDueDate,
-                        status: "pending",
-                        fee_description: rule.fee,
-                        form_number: rule.form_number || null,
-                        portal_url: rule.portal_url || null,
-                        filed_with: rule.filed_with,
-                        penalty_description: rule.penalty_description || null,
-                      },
-                      { onConflict: "entity_id,rule_id,next_due_date" }
-                    );
-                }
-              }
-            }
-          }
 
           results.push({ action: "complete_obligation", success: true, data: updatedObligation });
           break;
