@@ -416,7 +416,7 @@ async function runDocumentAgentInternal(
       // cached blocks is ~10% of normal input. Net: ~30% cost cut on the
       // worker pipeline, since the static prefix is most of every call.
       response = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
+        model: "claude-sonnet-4-6",
         max_tokens: MAX_OUTPUT_TOKENS,
         system: [
           {
