@@ -133,6 +133,40 @@ export const createDirectoryEntrySchema = z.object({
 
 export const updateDirectoryEntrySchema = createDirectoryEntrySchema.partial();
 
+// --- Service Providers (Phase 1 routing hub) ---
+
+const providerContactSchema = z.object({
+  name: z.string().min(1, "Contact name is required").max(255),
+  email: z.string().email("Invalid contact email"),
+  role: optionalString(100),
+  is_default: z.boolean().optional(),
+});
+
+export const createServiceProviderSchema = z.object({
+  name: z.string().min(1, "Name is required").max(255),
+  disciplines: z.array(z.string().max(100)).max(20).default([]),
+  domains: z.array(z.string().max(255)).max(20).default([]),
+  contacts: z.array(providerContactSchema).max(50).default([]),
+  default_contact_email: z.string().email().optional().nullable().or(z.literal("")),
+  serves_all_entities: z.boolean().default(false),
+  directory_entry_id: z.string().uuid().optional().nullable().or(z.literal("")),
+  notes: optionalString(5000),
+});
+
+export const updateServiceProviderSchema = createServiceProviderSchema.partial();
+
+export const linkProviderEntitySchema = z.object({
+  entity_id: z.string().uuid(),
+});
+
+export const sendDocumentToProviderSchema = z.object({
+  document_id: z.string().uuid(),
+  provider_id: z.string().uuid(),
+  recipient_email: z.string().email().optional().nullable().or(z.literal("")),
+  subject: optionalString(500),
+  message: optionalString(5000),
+});
+
 export const createRegistrationSchema = z.object({
   jurisdiction: z.string().min(1, "Jurisdiction is required").max(100),
 });

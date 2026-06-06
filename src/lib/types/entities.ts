@@ -198,6 +198,7 @@ export interface Document {
   content_hash: string | null;
   jurisdiction: string | null;
   direction: string | null;
+  source_provider_id?: string | null;  // Provenance: which provider this came from (routing veto)
   source_page_range: number[] | null;
   source_document_id: string | null;
   k1_recipient: string | null;
@@ -418,4 +419,77 @@ export interface InvestmentTransaction {
   // Joined fields
   member_name?: string;
   document_name?: string;
+}
+
+// --- Service Providers (Phase 1 routing hub) ---
+
+// Shape of each object in service_providers.contacts (JSONB).
+export interface ProviderContact {
+  name: string;
+  email: string;
+  role?: string;
+  is_default?: boolean;
+}
+
+export interface ServiceProvider {
+  id: string;
+  organization_id: string;
+  name: string;
+  disciplines: string[];
+  domains: string[];
+  contacts: ProviderContact[];
+  default_contact_email: string | null;
+  serves_all_entities: boolean;
+  directory_entry_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  // Joined / enriched fields
+  entity_ids?: string[];
+  entity_count?: number;
+}
+
+export interface ServiceProviderEntity {
+  id: string;
+  organization_id: string;
+  provider_id: string;
+  entity_id: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface OrgProviderRoutingRule {
+  id: string;
+  organization_id: string;
+  document_type: string;
+  provider_id: string;
+  times_confirmed: number;
+  times_dismissed: number;
+  confidence: number;
+  last_sent_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ProviderDocumentSendStatus = 'queued' | 'sent' | 'failed';
+
+export interface ProviderDocumentSend {
+  id: string;
+  organization_id: string;
+  provider_id: string;
+  document_id: string;
+  entity_id: string | null;
+  recipient_email: string;
+  subject: string | null;
+  message: string | null;
+  status: ProviderDocumentSendStatus;
+  delivery_provider: string | null;
+  delivery_ref: string | null;
+  error: string | null;
+  sent_by: string | null;
+  sent_at: string | null;
+  created_at: string;
 }
