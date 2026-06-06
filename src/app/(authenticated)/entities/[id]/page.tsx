@@ -36,6 +36,8 @@ import type {
 } from "@/lib/types/entities";
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
 import { EntityInvestmentsTab } from "@/components/entities/EntityInvestmentsTab";
+import { EntityServiceProvidersTab } from "@/components/entities/EntityServiceProvidersTab";
+import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
 import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
 /* ------------------------------------------------------------------ */
@@ -4563,6 +4565,9 @@ function DocumentsTab({
   /* ---- Expandable row state ---- */
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
 
+  /* ---- Send-to-provider card state ---- */
+  const [sendDocId, setSendDocId] = useState<string | null>(null);
+
   /* ---- Inline rename state ---- */
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
@@ -5381,8 +5386,17 @@ function DocumentsTab({
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
+                        <button onClick={() => setSendDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#2d5a3d", fontWeight: 500, fontFamily: "inherit" }}>Send to provider</button>
                         <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
                       </div>
+                      {sendDocId === doc.id && (
+                        <SendToProviderCard
+                          documentId={doc.id}
+                          documentName={doc.name}
+                          onSubmitted={() => onRefreshQuiet()}
+                          onClose={() => setSendDocId(null)}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -6007,6 +6021,7 @@ export default function EntityDetailPage() {
     tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
   }
   tabs.push({ id: "investments", label: "Investments" });
+  tabs.push({ id: "providers", label: "Providers" });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
   if (!isJointTitle) {
     tabs.push({ id: "activity", label: "Activity" });
@@ -6540,6 +6555,9 @@ export default function EntityDetailPage() {
       {/* Investments Tab */}
       {activeTab === "investments" && (
         <EntityInvestmentsTab entityId={entityId} entityName={entity.name} />
+      )}
+      {activeTab === "providers" && (
+        <EntityServiceProvidersTab entityId={entityId} entityName={entity.name} />
       )}
 
       {/* Documents Tab */}

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   BuildingIcon, ChartIcon, DocIcon, PeopleIcon, ChatIcon,
-  GearIcon, EllipsisIcon,
+  GearIcon, EllipsisIcon, LinkIcon,
 } from "../ui/icons";
 
 const PRIMARY_TABS = [
@@ -17,6 +17,7 @@ const PRIMARY_TABS = [
 
 const MORE_TABS = [
   { href: "/investments", label: "Investments", Icon: ChartIcon, activeBase: "/investments" },
+  { href: "/service-providers", label: "Providers", Icon: LinkIcon, activeBase: "/service-providers" },
   { href: "/settings/profile", label: "Settings", Icon: GearIcon, activeBase: "/settings" },
 ];
 

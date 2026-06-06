@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { BuildingIcon, ChartIcon, PeopleIcon, DocIcon, GearIcon } from "../ui/icons";
+import { BuildingIcon, ChartIcon, PeopleIcon, DocIcon, GearIcon, LinkIcon } from "../ui/icons";
 import { UserMenu } from "./user-menu";
 import { NotificationBell } from "./NotificationBell";
 import { useChatPanel } from "../chat/chat-panel-provider";
@@ -13,6 +13,7 @@ const NAV_TABS = [
   { href: "/entities", label: "My Entities", Icon: BuildingIcon },
   { href: "/investments", label: "Investments", Icon: ChartIcon },
   { href: "/directory", label: "Directory", Icon: PeopleIcon },
+  { href: "/service-providers", label: "Providers", Icon: LinkIcon },
   { href: "/documents", label: "Documents", Icon: DocIcon },
   { href: "/compliance", label: "Compliance", Icon: GearIcon },
 ];
