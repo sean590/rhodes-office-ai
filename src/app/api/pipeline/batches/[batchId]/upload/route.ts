@@ -5,6 +5,7 @@ import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pip
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { registerUploadSchema } from "@/lib/validations";
+import { checkDocumentUploadAbuse } from "@/lib/utils/abuse-alarm";
 
 export const maxDuration = 60;
 
@@ -40,6 +41,23 @@ export async function POST(
     }
 
     const files = parsed.data.files;
+
+    // Abuse alarm: count this user's upload volume in Redis and raise a Sentry
+    // alarm if it crosses the per-user threshold. In 'alert' mode (default) the
+    // upload still proceeds; set ABUSE_ALARM_MODE=block to 429 over-limit users.
+    const abuse = await checkDocumentUploadAbuse({
+      orgId,
+      userId: user.id,
+      count: files.length,
+      context: { batch_id: batchId, route: "pipeline/batches/upload" },
+    });
+    if (!abuse.allowed) {
+      return NextResponse.json(
+        { error: "Upload rate limit exceeded. Please wait a few minutes and try again." },
+        { status: 429 }
+      );
+    }
+
     const expectedPrefix = `${orgId}/queue/${batchId}/`;
 
     // Validate all storage paths belong to this org/batch
