@@ -2392,6 +2392,202 @@ export async function applyActions(
           break;
         }
 
+        case "create_service_provider": {
+          const name = (item.data.name as string)?.trim();
+          if (!name) throw new Error("name is required");
+
+          const { data, error } = await supabase
+            .from("service_providers")
+            .insert({
+              organization_id: options.orgId,
+              name,
+              disciplines: (item.data.disciplines as string[]) ?? [],
+              domains: ((item.data.domains as string[]) ?? []).map((d) => d.trim().toLowerCase()).filter(Boolean),
+              contacts: (item.data.contacts as unknown[]) ?? [],
+              default_contact_email: (item.data.default_contact_email as string) || null,
+              serves_all_entities: (item.data.serves_all_entities as boolean) ?? false,
+              directory_entry_id: (item.data.directory_entry_id as string) || null,
+              notes: (item.data.notes as string) || null,
+              created_by: options.userId ?? null,
+            })
+            .select()
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "create",
+            resourceType: "service_provider",
+            resourceId: data.id,
+            organizationId: options.orgId ?? null,
+            metadata: { name },
+          });
+
+          results.push({ action: "create_service_provider", success: true, data });
+          break;
+        }
+
+        case "update_service_provider": {
+          const providerId = item.data.provider_id as string;
+          if (!providerId) throw new Error("provider_id is required");
+
+          const allowedFields = [
+            "name", "disciplines", "domains", "contacts", "default_contact_email",
+            "serves_all_entities", "directory_entry_id", "notes",
+          ];
+          const updates: Record<string, unknown> = {};
+          for (const field of allowedFields) {
+            if (field in item.data) updates[field] = item.data[field];
+          }
+          if ("domains" in updates && Array.isArray(updates.domains)) {
+            updates.domains = (updates.domains as string[]).map((d) => d.trim().toLowerCase()).filter(Boolean);
+          }
+          if ("default_contact_email" in updates && !updates.default_contact_email) {
+            updates.default_contact_email = null;
+          }
+          if ("directory_entry_id" in updates && !updates.directory_entry_id) {
+            updates.directory_entry_id = null;
+          }
+          updates.updated_at = new Date().toISOString();
+
+          const { data, error } = await supabase
+            .from("service_providers")
+            .update(updates)
+            .eq("id", providerId)
+            .eq("organization_id", options.orgId)
+            .is("deleted_at", null)
+            .select()
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "update",
+            resourceType: "service_provider",
+            resourceId: providerId,
+            organizationId: options.orgId ?? null,
+            metadata: { fields: Object.keys(updates) },
+          });
+
+          results.push({ action: "update_service_provider", success: true, data });
+          break;
+        }
+
+        case "delete_service_provider": {
+          const providerId = item.data.provider_id as string;
+          if (!providerId) throw new Error("provider_id is required");
+
+          const { data, error } = await supabase
+            .from("service_providers")
+            .update({ deleted_at: new Date().toISOString() })
+            .eq("id", providerId)
+            .eq("organization_id", options.orgId)
+            .select("id, deleted_at")
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "archive",
+            resourceType: "service_provider",
+            resourceId: providerId,
+            organizationId: options.orgId ?? null,
+          });
+
+          results.push({ action: "delete_service_provider", success: true, data });
+          break;
+        }
+
+        case "link_provider_entity": {
+          const providerId = item.data.provider_id as string;
+          const entityId = item.data.entity_id as string;
+          if (!providerId) throw new Error("provider_id is required");
+          if (!entityId) throw new Error("entity_id is required");
+
+          // Idempotent: UNIQUE(provider_id, entity_id) — ignore duplicates.
+          const { data, error } = await supabase
+            .from("service_provider_entities")
+            .upsert(
+              {
+                organization_id: options.orgId,
+                provider_id: providerId,
+                entity_id: entityId,
+                created_by: options.userId ?? null,
+              },
+              { onConflict: "provider_id,entity_id", ignoreDuplicates: true },
+            )
+            .select()
+            .maybeSingle();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "link",
+            resourceType: "service_provider_entity",
+            resourceId: providerId,
+            entityId,
+            organizationId: options.orgId ?? null,
+            metadata: { provider_id: providerId, entity_id: entityId },
+          });
+
+          results.push({ action: "link_provider_entity", success: true, data: data ?? { provider_id: providerId, entity_id: entityId } });
+          break;
+        }
+
+        case "unlink_provider_entity": {
+          const providerId = item.data.provider_id as string;
+          const entityId = item.data.entity_id as string;
+          if (!providerId) throw new Error("provider_id is required");
+          if (!entityId) throw new Error("entity_id is required");
+
+          const { error } = await supabase
+            .from("service_provider_entities")
+            .delete()
+            .eq("organization_id", options.orgId)
+            .eq("provider_id", providerId)
+            .eq("entity_id", entityId);
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "unlink",
+            resourceType: "service_provider_entity",
+            resourceId: providerId,
+            entityId,
+            organizationId: options.orgId ?? null,
+            metadata: { provider_id: providerId, entity_id: entityId },
+          });
+
+          results.push({ action: "unlink_provider_entity", success: true, data: { provider_id: providerId, entity_id: entityId } });
+          break;
+        }
+
+        case "revoke_provider_send": {
+          const sendId = item.data.send_id as string;
+          if (!sendId) throw new Error("send_id is required");
+
+          const { data, error } = await supabase
+            .from("provider_document_sends")
+            .update({ revoked_at: new Date().toISOString() })
+            .eq("id", sendId)
+            .eq("organization_id", options.orgId)
+            .select("id, revoked_at, provider_id, document_id")
+            .single();
+          if (error) throw error;
+
+          await logAuditEvent({
+            userId: options.userId ?? null,
+            action: "revoke",
+            resourceType: "provider_document_send",
+            resourceId: sendId,
+            organizationId: options.orgId ?? null,
+            metadata: { provider_id: data.provider_id, document_id: data.document_id },
+          });
+
+          results.push({ action: "revoke_provider_send", success: true, data });
+          break;
+        }
+
         default:
           results.push({ action: item.action, success: false, error: `Unknown action: ${item.action}` });
       }

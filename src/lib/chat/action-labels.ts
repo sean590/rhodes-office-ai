@@ -71,6 +71,12 @@ export const ACTION_LABELS: Record<string, ActionLabel> = {
   refresh_document_expectations: { label: "Refresh Checklist", color: "#3366a8" },
   sync_entity_members: { label: "Sync Members", color: "#3366a8" },
   upsert_state_id: { label: "Update State ID", color: "#3366a8" },
+  create_service_provider: { label: "Create Provider", color: "#2d8a4e" },
+  update_service_provider: { label: "Update Provider", color: "#3366a8" },
+  delete_service_provider: { label: "Delete Provider", color: "#a83333" },
+  link_provider_entity: { label: "Link Provider", color: "#6b6b76" },
+  unlink_provider_entity: { label: "Unlink Provider", color: "#c47520" },
+  send_document_to_provider: { label: "Send to Provider", color: "#2d5a3d" },
   // Read-tool entries kept here so trace renderers stay consistent — these
   // never go through approval; they execute immediately.
   unlock_document: { label: "Unlock Document", color: "#3366a8" },

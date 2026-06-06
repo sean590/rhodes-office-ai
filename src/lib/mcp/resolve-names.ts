@@ -24,6 +24,7 @@ const TABLE_MAP: Record<string, NameTable> = {
   investment_transaction: { table: "investment_transactions", nameColumn: "transaction_type", orgScoped: true },
   compliance_obligation: { table: "compliance_obligations", nameColumn: "name" },
   relationship: { table: "relationships", nameColumn: "description", orgScoped: true },
+  service_provider: { table: "service_providers", nameColumn: "name", orgScoped: true },
 };
 
 /**

@@ -37,7 +37,9 @@ export type ResourceType =
   | "entity_member"
   | "entity_manager"
   | "entity_registration"
-  | "trust_role";
+  | "trust_role"
+  | "service_provider"
+  | "provider_document_send";
 
 // Tables with their own organization_id column → direct lookup.
 const DIRECT_ORG_TABLES: Record<string, string> = {
@@ -50,6 +52,8 @@ const DIRECT_ORG_TABLES: Record<string, string> = {
   directory_entry: "directory_entries",
   document: "documents",
   relationship: "relationships",
+  service_provider: "service_providers",
+  provider_document_send: "provider_document_sends",
 };
 
 // Tables without organization_id — resolve parent entity_id, then verify entity.

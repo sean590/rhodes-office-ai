@@ -6,6 +6,18 @@ const BRAND = {
   border: "#ddd9d0",
 };
 
+// Escape user-provided values before interpolating into email HTML. Used for
+// provider-facing sends where names/messages are free text and must not break
+// (or inject into) the markup.
+function esc(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function layout(content: string) {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -121,6 +133,44 @@ export function orgInviteEmail({
     </a>
     <p style="color:${BRAND.muted};font-size:12px;margin:16px 0 0;line-height:1.5">
       This invite expires in 7 days. If you weren&#39;t expecting this, you can ignore this email.
+    </p>
+  `);
+}
+
+export function documentDeliveryEmail({
+  providerName,
+  senderName,
+  documentName,
+  message,
+  shareUrl,
+}: {
+  providerName: string;
+  senderName: string;
+  documentName: string;
+  message?: string | null;
+  shareUrl: string;
+}) {
+  const greeting = providerName ? `Hi ${esc(providerName)},` : "Hello,";
+  const note = message?.trim()
+    ? `<div style="background:${BRAND.bg};border:1px solid ${BRAND.border};border-radius:6px;padding:14px 16px;margin:0 0 20px;color:${BRAND.text};line-height:1.6;font-size:14px;white-space:pre-wrap">${esc(message.trim())}</div>`
+    : "";
+
+  return layout(`
+    <h2 style="margin:0 0 16px;font-size:18px">Document shared with you</h2>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      ${greeting}
+    </p>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 20px">
+      <strong style="color:${BRAND.text}">${esc(senderName)}</strong> has shared a document with you via Rhodes:
+      <strong style="color:${BRAND.text}">${esc(documentName)}</strong>. Use the secure link below to view and download it.
+    </p>
+    ${note}
+    <a href="${esc(shareUrl)}"
+       style="display:inline-block;background:${BRAND.green};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">
+      View document
+    </a>
+    <p style="color:${BRAND.muted};font-size:12px;line-height:1.5;margin:24px 0 0">
+      This is a secure link that expires. Shared by ${esc(senderName)} via Rhodes — reply to this email to reach them directly.
     </p>
   `);
 }

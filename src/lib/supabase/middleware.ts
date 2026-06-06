@@ -51,6 +51,10 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/waitlist") ||
     request.nextUrl.pathname.startsWith("/api/health") ||
     request.nextUrl.pathname.startsWith("/api/cron") ||
+    // Secure document share links: providers are NOT Rhodes users. Access is
+    // gated by the unguessable token + server-side expiry/revocation checks.
+    request.nextUrl.pathname.startsWith("/share") ||
+    request.nextUrl.pathname.startsWith("/api/share") ||
     request.nextUrl.pathname === "/monitoring";
 
   // API requests get a 401 JSON; page requests get a redirect. Treating /api/*

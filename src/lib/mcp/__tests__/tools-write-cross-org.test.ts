@@ -29,12 +29,14 @@ import { entityWriteTools } from "../tools/entities-write";
 import { directoryWriteTools } from "../tools/directory-write";
 import { investmentWriteTools } from "../tools/investments-write";
 import { documentWriteTools } from "../tools/documents-write";
+import { serviceProviderWriteTools } from "../tools/service-providers-write";
 
 const ALL_WRITE_TOOLS = [
   ...entityWriteTools,
   ...directoryWriteTools,
   ...investmentWriteTools,
   ...documentWriteTools,
+  ...serviceProviderWriteTools,
 ];
 
 // Mock supabase that returns null for every maybeSingle (ownership fails).
@@ -74,7 +76,7 @@ function makeCtx(orgId: string): ToolContext {
 const VALID_UUID = "11111111-1111-4111-8111-111111111111";
 
 // Tools that create new rows (no existing resource id to ownership-check):
-const CREATE_TOOLS = new Set(["create_entity", "create_directory_entry", "create_investment"]);
+const CREATE_TOOLS = new Set(["create_entity", "create_directory_entry", "create_investment", "create_service_provider"]);
 
 // Build a minimal valid input for each tool's schema so Zod parse passes.
 // Fields like entity_id, investment_id, etc. use VALID_UUID (wrong org → ownership fail).

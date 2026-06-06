@@ -31,11 +31,13 @@ import { aggregationTools } from "./tools/aggregations";
 import { auditTools } from "./tools/audit";
 import { documentNavTools } from "./tools/document-nav";
 import { complianceTools } from "./tools/compliance";
+import { serviceProviderTools } from "./tools/service-providers";
 import { entityWriteTools } from "./tools/entities-write";
 import { directoryWriteTools } from "./tools/directory-write";
 import { investmentWriteTools } from "./tools/investments-write";
 import { documentWriteTools } from "./tools/documents-write";
 import { queueWriteTools } from "./tools/queue-write";
+import { serviceProviderWriteTools } from "./tools/service-providers-write";
 
 /**
  * Single registry of every tool, sorted by name. Tests consume this directly
@@ -51,11 +53,13 @@ export function buildToolRegistry(): ToolDefinition[] {
     ...auditTools,
     ...documentNavTools,
     ...complianceTools,
+    ...serviceProviderTools,
     ...entityWriteTools,
     ...directoryWriteTools,
     ...investmentWriteTools,
     ...documentWriteTools,
     ...queueWriteTools,
+    ...serviceProviderWriteTools,
   ];
   return tools.sort((a, b) => a.name.localeCompare(b.name));
 }
