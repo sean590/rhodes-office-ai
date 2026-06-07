@@ -142,20 +142,22 @@ export const unlinkProviderEntityTool = defineTool({
 export const sendDocumentToProviderTool = defineTool({
   name: "send_document_to_provider",
   description:
-    "Email a document Rhodes already holds to a service provider, with the file attached. The recipient defaults to the provider's default contact if not given. Logs the send.",
+    "Send one or more documents Rhodes already holds to a service provider as a single secure, expiring link (no attachment). The recipient defaults to the provider's default contact if not given. Logs the send.",
   kind: "write",
   inputSchema: z.object({
-    document_id: z.string().uuid(),
+    document_ids: z.array(z.string().uuid()).min(1),
     provider_id: z.string().uuid(),
     recipient_email: z.string().email().optional().nullable(),
     subject: z.string().optional().nullable(),
     message: z.string().optional().nullable(),
   }),
   dryRun: async (input, ctx) => {
-    await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: input.document_id });
     await verifyResourceOwnership(ctx, { resourceType: "service_provider", resourceId: input.provider_id });
+    for (const docId of input.document_ids) {
+      await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: docId });
+    }
 
-    const [{ data: provider }, { data: doc }] = await Promise.all([
+    const [{ data: provider }, { data: docs }] = await Promise.all([
       ctx.supabase
         .from("service_providers")
         .select("name, default_contact_email, contacts")
@@ -166,9 +168,8 @@ export const sendDocumentToProviderTool = defineTool({
       ctx.supabase
         .from("documents")
         .select("name")
-        .eq("id", input.document_id)
-        .eq("organization_id", ctx.orgId)
-        .maybeSingle(),
+        .in("id", input.document_ids)
+        .eq("organization_id", ctx.orgId),
     ]);
 
     // Resolve recipient the same way the send service will.
@@ -188,15 +189,17 @@ export const sendDocumentToProviderTool = defineTool({
       );
     }
 
+    const count = input.document_ids.length;
+    const what = count === 1 ? `"${docs?.[0]?.name ?? "document"}"` : `${count} documents`;
     return {
-      summary: `Send "${doc?.name ?? "document"}" to ${provider?.name ?? "provider"} (${recipient})`,
+      summary: `Send ${what} to ${provider?.name ?? "provider"} (${recipient})`,
       preview: { ...input, resolved_recipient: recipient },
     };
   },
   handler: async (input, ctx) => {
     const { data } = await sendDocumentToProvider(
       {
-        document_id: input.document_id,
+        document_ids: input.document_ids,
         provider_id: input.provider_id,
         recipient_email: input.recipient_email,
         subject: input.subject,

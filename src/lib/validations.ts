@@ -160,7 +160,8 @@ export const linkProviderEntitySchema = z.object({
 });
 
 export const sendDocumentToProviderSchema = z.object({
-  document_id: z.string().uuid(),
+  // A send is a bundle: one or more documents share one secure link.
+  document_ids: z.array(z.string().uuid()).min(1, "Pick at least one document").max(50),
   provider_id: z.string().uuid(),
   recipient_email: z.string().email().optional().nullable().or(z.literal("")),
   subject: optionalString(500),

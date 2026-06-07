@@ -41,6 +41,61 @@ export async function lookupValidSend(
   return data as ValidShareSend;
 }
 
+/**
+ * A provider-facing label for who shared the document. Prefers the acting
+ * user's display name, then the organization (family-office) name. Returns null
+ * if neither resolves — callers should fall back to "Shared with you via Rhodes"
+ * rather than ever printing "Rhodes via Rhodes".
+ */
+export async function resolveSenderLabel(
+  admin: SupabaseClient,
+  sentBy: string | null,
+  orgId: string,
+): Promise<string | null> {
+  if (sentBy) {
+    const { data: prof } = await admin
+      .from("user_profiles")
+      .select("display_name")
+      .eq("id", sentBy)
+      .maybeSingle();
+    if (prof?.display_name?.trim()) return prof.display_name.trim();
+  }
+  const { data: org } = await admin
+    .from("organizations")
+    .select("name")
+    .eq("id", orgId)
+    .maybeSingle();
+  return org?.name?.trim() || null;
+}
+
+export interface SendDocument {
+  id: string;
+  name: string;
+  file_path: string;
+}
+
+/**
+ * The documents in a send bundle (from the join table; falls back to the send's
+ * primary document_id for any legacy single-doc row). Order is not guaranteed.
+ */
+export async function getSendDocuments(
+  admin: SupabaseClient,
+  send: ValidShareSend,
+): Promise<SendDocument[]> {
+  const { data: links } = await admin
+    .from("provider_document_send_documents")
+    .select("document_id")
+    .eq("send_id", send.id);
+  let docIds = (links ?? []).map((l) => l.document_id as string);
+  if (docIds.length === 0 && send.document_id) docIds = [send.document_id];
+  if (docIds.length === 0) return [];
+  const { data: docs } = await admin
+    .from("documents")
+    .select("id, name, file_path")
+    .in("id", docIds);
+  return (docs ?? []) as SendDocument[];
+}
+
 export async function logSendAccess(
   admin: SupabaseClient,
   send: ValidShareSend,

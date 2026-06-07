@@ -130,20 +130,34 @@ export const listProviderSendsTool = defineTool({
     const truncated = rows.length > lim;
     const page = truncated ? rows.slice(0, lim) : rows;
 
-    // Join document names.
+    const sendIds = page.map((s) => s.id);
     const docIds = [...new Set(page.map((s) => s.document_id))];
-    const nameById = new Map<string, string>();
-    if (docIds.length > 0) {
-      const { data: docs } = await ctx.supabase
-        .from("documents")
-        .select("id, name")
+
+    // Join the primary document names + bundle size per send (a send may carry
+    // several documents under one link).
+    const [{ data: docs }, { data: bundle }] = await Promise.all([
+      docIds.length
+        ? ctx.supabase.from("documents").select("id, name").eq("organization_id", ctx.orgId).in("id", docIds)
+        : Promise.resolve({ data: [] as { id: string; name: string }[] }),
+      ctx.supabase
+        .from("provider_document_send_documents")
+        .select("send_id")
         .eq("organization_id", ctx.orgId)
-        .in("id", docIds);
-      for (const d of docs ?? []) nameById.set(d.id, d.name);
-    }
+        .in("send_id", sendIds),
+    ]);
+    const nameById = new Map<string, string>();
+    for (const d of docs ?? []) nameById.set(d.id, d.name);
+    const countBySend = new Map<string, number>();
+    for (const b of bundle ?? []) countBySend.set(b.send_id, (countBySend.get(b.send_id) ?? 0) + 1);
 
     return {
-      data: ctx.redact(page.map((s) => ({ ...s, document_name: nameById.get(s.document_id) ?? null }))),
+      data: ctx.redact(
+        page.map((s) => ({
+          ...s,
+          document_name: nameById.get(s.document_id) ?? null,
+          document_count: countBySend.get(s.id) ?? 1,
+        })),
+      ),
       truncated,
     };
   },

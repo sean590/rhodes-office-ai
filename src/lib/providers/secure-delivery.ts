@@ -21,12 +21,17 @@ import { randomBytes } from "crypto";
 import { sendEmail } from "@/lib/email";
 import { documentDeliveryEmail } from "@/lib/email-templates";
 
-export interface SecureDeliveryInput {
-  /** Lazily fetch the file bytes — impls that don't need them at send time (the
-   *  Rhodes link path serves the file at access time) never call this. */
-  getFileBuffer: () => Promise<Buffer>;
+export interface SecureDeliveryFile {
   filename: string;
   mimeType: string;
+  /** Lazily fetch the bytes — impls that don't need them at send time (the
+   *  Rhodes link path serves files at access time) never call this. */
+  getBuffer: () => Promise<Buffer>;
+}
+
+export interface SecureDeliveryInput {
+  /** One or more documents bundled into a single secure delivery. */
+  documents: SecureDeliveryFile[];
   recipientEmail: string;
   senderName: string;
   providerName: string;
@@ -122,17 +127,23 @@ class RhodesLinkDelivery implements SecureDelivery {
     const base = process.env.NEXT_PUBLIC_APP_URL || "https://app.rhodesoffice.ai";
     const shareUrl = `${base.replace(/\/$/, "")}/share/${token}`;
 
+    const documentNames = input.documents.map((d) => d.filename);
     const html = documentDeliveryEmail({
       providerName: input.providerName,
       senderName: input.senderName,
-      documentName: input.filename,
+      documentNames,
       message: input.message,
       shareUrl,
     });
 
+    const subject =
+      input.subject ||
+      (documentNames.length === 1
+        ? `${documentNames[0]} — shared via Rhodes`
+        : `${documentNames.length} documents — shared via Rhodes`);
     const result = await sendEmail({
       to: input.recipientEmail,
-      subject: input.subject || `${input.filename} — shared via Rhodes`,
+      subject,
       html,
       ...(input.replyTo ? { replyTo: input.replyTo, cc: input.replyTo } : {}),
     });

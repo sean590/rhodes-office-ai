@@ -474,6 +474,14 @@ export interface OrgProviderRoutingRule {
   updated_at: string;
 }
 
+export interface ProviderDocumentSendDocument {
+  id: string;
+  organization_id: string;
+  send_id: string;
+  document_id: string;
+  created_at: string;
+}
+
 export type ProviderDocumentSendStatus = 'queued' | 'sent' | 'failed';
 
 export interface ProviderDocumentSend {

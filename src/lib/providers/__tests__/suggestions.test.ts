@@ -61,6 +61,10 @@ describe("getProviderSuggestions", () => {
     expect(result[1].provider.name).toBe("BPW");
     expect(result[1].matched_via).toBe("entity");
     expect(result[1].recommended_recipient_email).toBe("books@bpw.com"); // default_contact_email
+
+    // ★-scope: only the tax firm is discipline-relevant to a K-1, not BPW.
+    expect(result.find((s) => s.provider.name === "Andersen")?.relevant).toBe(true);
+    expect(result.find((s) => s.provider.name === "BPW")?.relevant).toBe(false);
   });
 
   it("returns [] when the document isn't found in the org", async () => {

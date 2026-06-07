@@ -222,6 +222,10 @@ const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
     entity_id: VALID_UUID,
     expectation_id: VALID_UUID,
   },
+  send_document_to_provider: {
+    document_ids: [VALID_UUID],
+    provider_id: VALID_UUID,
+  },
 };
 
 function buildInput(tool: ToolDefinition): Record<string, unknown> {

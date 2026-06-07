@@ -11,9 +11,7 @@ vi.mock("@/lib/email", () => ({
 }));
 
 const baseInput = {
-  getFileBuffer: async () => Buffer.from("PDFBYTES"),
-  filename: "k1.pdf",
-  mimeType: "application/pdf",
+  documents: [{ filename: "k1.pdf", mimeType: "application/pdf", getBuffer: async () => Buffer.from("PDFBYTES") }],
   recipientEmail: "cpa@andersen.com",
   senderName: "sean",
   providerName: "Andersen",
@@ -77,10 +75,31 @@ describe("getSecureDelivery — rhodes_link", () => {
 
   it("does not fetch file bytes at send time", async () => {
     process.env.SECURE_DELIVERY_PROVIDER = "rhodes_link";
-    const getFileBuffer = vi.fn(async () => Buffer.from("x"));
+    const getBuffer = vi.fn(async () => Buffer.from("x"));
     const getSecureDelivery = await freshFactory();
-    await getSecureDelivery().send({ ...baseInput, getFileBuffer });
-    expect(getFileBuffer).not.toHaveBeenCalled();
+    await getSecureDelivery().send({
+      ...baseInput,
+      documents: [{ filename: "k1.pdf", mimeType: "application/pdf", getBuffer }],
+    });
+    expect(getBuffer).not.toHaveBeenCalled();
+  });
+
+  it("lists multiple documents in one email + link", async () => {
+    process.env.SECURE_DELIVERY_PROVIDER = "rhodes_link";
+    const getSecureDelivery = await freshFactory();
+    const result = await getSecureDelivery().send({
+      ...baseInput,
+      documents: [
+        { filename: "k1.pdf", mimeType: "application/pdf", getBuffer: async () => Buffer.from("a") },
+        { filename: "financials.pdf", mimeType: "application/pdf", getBuffer: async () => Buffer.from("b") },
+      ],
+    });
+    expect(result.status).toBe("sent");
+    const arg = sendEmailMock.mock.calls[0][0];
+    expect(arg.html).toContain("k1.pdf");
+    expect(arg.html).toContain("financials.pdf");
+    expect(arg.html).toContain("2 documents");
+    expect(arg.subject).toContain("2 documents");
   });
 
   it("reports failed (but keeps the token) when the notification email fails", async () => {

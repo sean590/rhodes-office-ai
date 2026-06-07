@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/utils/rate-limit";
-import { lookupValidSend, logSendAccess } from "@/lib/providers/share-link";
+import { lookupValidSend, logSendAccess, getSendDocuments } from "@/lib/providers/share-link";
 
 // POST /api/share/[token] — public (providers are not Rhodes users). Validates
 // the token server-side, logs the download with the claimed email, and returns a
@@ -34,17 +34,18 @@ export async function POST(
 
     const body = await request.json().catch(() => ({}));
     const claimedEmail = typeof body.email === "string" ? body.email.trim().slice(0, 320) : null;
+    const requestedDocId = typeof body.document_id === "string" ? body.document_id : null;
 
-    await logSendAccess(admin, send, "downloaded", { claimedEmail, ip, userAgent });
-
-    const { data: doc } = await admin
-      .from("documents")
-      .select("file_path, name")
-      .eq("id", send.document_id)
-      .maybeSingle();
+    // Only documents that are actually part of THIS bundle may be downloaded.
+    const bundle = await getSendDocuments(admin, send);
+    const doc = requestedDocId
+      ? bundle.find((d) => d.id === requestedDocId)
+      : bundle[0]; // single-doc back-compat
     if (!doc) {
       return NextResponse.json(GENERIC, { status: 404 });
     }
+
+    await logSendAccess(admin, send, "downloaded", { claimedEmail, ip, userAgent });
 
     const { data: signed, error: signErr } = await admin.storage
       .from("documents")

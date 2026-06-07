@@ -29,6 +29,10 @@ export interface ProviderSuggestion {
   provider: SuggestedProvider;
   matched_via: "entity" | "all_entities";
   recommended_recipient_email: string | null;
+  /** True when the provider's discipline is actually relevant to the document
+   *  type (drives the ★ "suggested" mark — a bookkeeping firm shouldn't be
+   *  starred for a tax document just because it serves the entity). */
+  relevant: boolean;
 }
 
 // Tolerant document-type → discipline hints. Substring match on a lowercased
@@ -140,6 +144,7 @@ export async function getProviderSuggestions(
         default_contact_email: p.default_contact_email,
         contacts,
       }),
+      relevant: ((p.disciplines as string[]) ?? []).some((d) => wanted.has(d)),
     });
   }
 

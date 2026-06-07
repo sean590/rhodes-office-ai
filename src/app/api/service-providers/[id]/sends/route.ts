@@ -33,8 +33,8 @@ export async function GET(
     const sendIds = sends.map((s) => s.id);
     const docIds = [...new Set(sends.map((s) => s.document_id))];
 
-    // Join document names + the access trail in parallel.
-    const [{ data: docs }, { data: access }] = await Promise.all([
+    // Join document names + the access trail + bundle membership in parallel.
+    const [{ data: docs }, { data: access }, { data: bundle }] = await Promise.all([
       supabase.from("documents").select("id, name").eq("organization_id", orgId).in("id", docIds),
       supabase
         .from("provider_document_send_access")
@@ -42,10 +42,19 @@ export async function GET(
         .eq("organization_id", orgId)
         .in("send_id", sendIds)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("provider_document_send_documents")
+        .select("send_id")
+        .eq("organization_id", orgId)
+        .in("send_id", sendIds),
     ]);
 
     const nameById = new Map<string, string>();
     for (const d of docs ?? []) nameById.set(d.id, d.name);
+
+    // Documents-per-send (bundle size); a legacy single-doc send counts as 1.
+    const docCount = new Map<string, number>();
+    for (const b of bundle ?? []) docCount.set(b.send_id, (docCount.get(b.send_id) ?? 0) + 1);
 
     // Aggregate access per send: counts + the most recent downloader email.
     const trail = new Map<string, { viewed: number; downloaded: number; last_downloaded_email: string | null; last_access_at: string | null }>();
@@ -64,6 +73,7 @@ export async function GET(
       sends.map((s) => ({
         ...s,
         document_name: nameById.get(s.document_id) ?? null,
+        document_count: docCount.get(s.id) ?? 1,
         access: trail.get(s.id) ?? { viewed: 0, downloaded: 0, last_downloaded_email: null, last_access_at: null },
       })),
     );
