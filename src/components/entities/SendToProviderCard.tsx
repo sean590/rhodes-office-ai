@@ -1,13 +1,10 @@
 "use client";
 
 /**
- * Send-to-provider card. Opens from a document row; lets the user pick a
- * service provider + recipient, preview the staged send via the shared
- * StagedActionsList, and fire POST /api/documents/[id]/send.
- *
- * M4: picks from the full provider list. M5 layers ranked suggestions on top
- * (GET /api/documents/[id]/provider-suggestions) — the picker stays as the
- * fallback over all providers.
+ * Send-to-provider card. Sends one OR MORE documents to a service provider as a
+ * single secure link (one email, one share page). Opens from a single document
+ * row or from the Documents-tab multi-select. Previews via StagedActionsList and
+ * posts to /api/provider-sends.
  */
 
 import { useState, useEffect, useMemo, useCallback } from "react";
@@ -34,11 +31,16 @@ interface Suggestion {
   provider: ProviderResponse;
   matched_via: "entity" | "all_entities";
   recommended_recipient_email: string | null;
+  relevant: boolean;
+}
+
+interface SendDoc {
+  id: string;
+  name: string;
 }
 
 interface Props {
-  documentId: string;
-  documentName: string;
+  documents: SendDoc[];
   onSubmitted?: () => void;
   onClose: () => void;
 }
@@ -52,9 +54,10 @@ function defaultRecipient(p: ProviderResponse | undefined): string {
   return first ? first.email.trim() : "";
 }
 
-export function SendToProviderCard({ documentId, documentName, onSubmitted, onClose }: Props) {
+export function SendToProviderCard({ documents, onSubmitted, onClose }: Props) {
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
   const [suggestedIds, setSuggestedIds] = useState<string[]>([]);
+  const [relevantIds, setRelevantIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const [providerId, setProviderId] = useState<string>("");
@@ -65,14 +68,19 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ status: string; error?: string } | null>(null);
 
-  // Load providers + (M5) suggestions for this document's entity.
+  const primaryId = documents[0]?.id;
+  const docCount = documents.length;
+
+  // Load providers + suggestions for the primary document's entity.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const [provRes, sugRes] = await Promise.all([
           fetch("/api/service-providers"),
-          fetch(`/api/documents/${documentId}/provider-suggestions`).catch(() => null),
+          primaryId
+            ? fetch(`/api/documents/${primaryId}/provider-suggestions`).catch(() => null)
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
         const provData: ProviderResponse[] = provRes.ok ? await provRes.json() : [];
@@ -83,7 +91,9 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
           const suggestions: Suggestion[] = await sugRes.json();
           const ids = suggestions.map((s) => s.provider.id);
           setSuggestedIds(ids);
-          if (ids.length > 0) firstId = ids[0];
+          setRelevantIds(new Set(suggestions.filter((s) => s.relevant).map((s) => s.provider.id)));
+          // Prefer the first discipline-relevant suggestion, else first suggestion.
+          firstId = suggestions.find((s) => s.relevant)?.provider.id ?? ids[0] ?? firstId;
         }
         if (firstId) {
           setProviderId(firstId);
@@ -98,50 +108,48 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [primaryId]);
 
   const selectProvider = useCallback(
     (id: string) => {
       setProviderId(id);
-      if (!recipientTouched) {
-        setRecipient(defaultRecipient(providers.find((p) => p.id === id)));
-      }
+      if (!recipientTouched) setRecipient(defaultRecipient(providers.find((p) => p.id === id)));
     },
     [providers, recipientTouched],
   );
 
   const selectedProvider = providers.find((p) => p.id === providerId);
 
-  // Order providers: suggested first, then the rest.
   const orderedProviders = useMemo(() => {
     if (suggestedIds.length === 0) return providers;
-    const sug = suggestedIds
-      .map((id) => providers.find((p) => p.id === id))
-      .filter((p): p is ProviderResponse => !!p);
+    const sug = suggestedIds.map((id) => providers.find((p) => p.id === id)).filter((p): p is ProviderResponse => !!p);
     const rest = providers.filter((p) => !suggestedIds.includes(p.id));
     return [...sug, ...rest];
   }, [providers, suggestedIds]);
+
+  const docLabel = docCount === 1 ? `"${documents[0]?.name}"` : `${docCount} documents`;
 
   const pendingAction = useMemo(
     () => ({
       id: "send-preview",
       tool: "send_document_to_provider",
       summary: selectedProvider
-        ? `Send "${documentName}" to ${selectedProvider.name}${recipient ? ` (${recipient})` : ""}`
+        ? `Send ${docLabel} to ${selectedProvider.name}${recipient ? ` (${recipient})` : ""}`
         : "Pick a provider to send to",
     }),
-    [selectedProvider, documentName, recipient],
+    [selectedProvider, docLabel, recipient],
   );
 
   const handleSend = async () => {
-    if (!providerId || !recipient.trim()) return;
+    if (!providerId || !recipient.trim() || documents.length === 0) return;
     setSending(true);
     setResult(null);
     try {
-      const res = await fetch(`/api/documents/${documentId}/send`, {
+      const res = await fetch(`/api/provider-sends`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          document_ids: documents.map((d) => d.id),
           provider_id: providerId,
           recipient_email: recipient.trim(),
           message: message.trim() || undefined,
@@ -153,9 +161,7 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
         return;
       }
       setResult({ status: data.status, error: data.error });
-      if (data.status === "sent") {
-        onSubmitted?.();
-      }
+      if (data.status === "sent") onSubmitted?.();
     } catch (err) {
       setResult({ status: "failed", error: err instanceof Error ? err.message : "Send failed" });
     } finally {
@@ -190,34 +196,42 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
   return (
     <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 10, padding: 16, marginTop: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#2d5a3d" }}>Send to provider</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#2d5a3d" }}>
+          Send {docCount === 1 ? "to provider" : `${docCount} documents to provider`}
+        </div>
         <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#9494a0", fontFamily: "inherit" }}>Close</button>
       </div>
 
       {loading ? (
         <div style={{ fontSize: 13, color: "#9494a0" }}>Loading providers…</div>
       ) : providers.length === 0 ? (
-        <div style={{ fontSize: 13, color: "#9494a0" }}>
-          No service providers yet. Add one on the Providers page first.
-        </div>
+        <div style={{ fontSize: 13, color: "#9494a0" }}>No service providers yet. Add one on the Providers page first.</div>
       ) : sent ? (
         <div style={{ fontSize: 13, color: "#2d8a4e" }}>
-          ✓ Sent a secure link for {documentName} to {selectedProvider?.name} ({recipient}).
+          ✓ Sent a secure link for {docLabel} to {selectedProvider?.name} ({recipient}).
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Documents in this send */}
+          {docCount > 1 && (
+            <div>
+              <label style={labelStyle}>Documents ({docCount})</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 120, overflowY: "auto" }}>
+                {documents.map((d) => (
+                  <div key={d.id} style={{ fontSize: 12, color: "#1a1a1f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>• {d.name}</div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Provider */}
           <div>
             <label style={labelStyle}>Provider</label>
-            <select
-              style={{ ...inputStyle, cursor: "pointer" }}
-              value={providerId}
-              onChange={(e) => selectProvider(e.target.value)}
-            >
+            <select style={{ ...inputStyle, cursor: "pointer" }} value={providerId} onChange={(e) => selectProvider(e.target.value)}>
               {orderedProviders.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
-                  {suggestedIds.includes(p.id) ? "  ★ suggested" : ""}
+                  {relevantIds.has(p.id) ? "  ★ suggested" : ""}
                 </option>
               ))}
             </select>
@@ -229,10 +243,7 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
             <input
               style={inputStyle}
               value={recipient}
-              onChange={(e) => {
-                setRecipient(e.target.value);
-                setRecipientTouched(true);
-              }}
+              onChange={(e) => { setRecipient(e.target.value); setRecipientTouched(true); }}
               placeholder="recipient@firm.com"
             />
           </div>
@@ -240,24 +251,13 @@ export function SendToProviderCard({ documentId, documentName, onSubmitted, onCl
           {/* Message */}
           <div>
             <label style={labelStyle}>Message (optional)</label>
-            <textarea
-              style={{ ...inputStyle, minHeight: 56, resize: "vertical" }}
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="A short note to include in the email"
-            />
+            <textarea style={{ ...inputStyle, minHeight: 56, resize: "vertical" }} value={message} onChange={(e) => setMessage(e.target.value)} placeholder="A short note to include in the email" />
           </div>
 
           {/* Preview */}
-          <StagedActionsList
-            actions={[pendingAction]}
-            checkedIds={new Set([pendingAction.id])}
-            onToggle={() => {}}
-            disabled
-            heading="Will be sent on confirm"
-          />
+          <StagedActionsList actions={[pendingAction]} checkedIds={new Set([pendingAction.id])} onToggle={() => {}} disabled heading="Will be sent on confirm" />
           <div style={{ fontSize: 11, color: "#9494a0" }}>
-            Delivered as a secure, expiring link — never a plain email attachment.
+            Delivered as one secure, expiring link — never a plain email attachment.
           </div>
 
           {result?.status === "failed" && (

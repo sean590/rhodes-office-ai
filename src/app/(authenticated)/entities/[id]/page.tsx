@@ -4567,6 +4567,8 @@ function DocumentsTab({
 
   /* ---- Send-to-provider card state ---- */
   const [sendDocId, setSendDocId] = useState<string | null>(null);
+  // Multi-select bundle send (from the Documents-tab select mode).
+  const [sendBundle, setSendBundle] = useState<{ id: string; name: string }[] | null>(null);
 
   /* ---- Inline rename state ---- */
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
@@ -4669,6 +4671,15 @@ function DocumentsTab({
           </button>
         )}
       </div>
+
+      {/* Multi-select bundle send */}
+      {sendBundle && (
+        <SendToProviderCard
+          documents={sendBundle}
+          onSubmitted={() => onRefreshQuiet()}
+          onClose={() => setSendBundle(null)}
+        />
+      )}
 
       {/* Pipeline Upload */}
       {showUpload && pipelineBatchId && pipelinePhase === "upload" && (
@@ -5391,8 +5402,7 @@ function DocumentsTab({
                       </div>
                       {sendDocId === doc.id && (
                         <SendToProviderCard
-                          documentId={doc.id}
-                          documentName={doc.name}
+                          documents={[{ id: doc.id, name: doc.name }]}
                           onSubmitted={() => onRefreshQuiet()}
                           onClose={() => setSendDocId(null)}
                         />
@@ -5571,22 +5581,49 @@ function DocumentsTab({
               <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
                 {selectedDocIds.size} selected
               </span>
-              <button
-                onClick={handleBulkDelete}
-                style={{
-                  background: "#c73e3e",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Delete Selected
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={() => {
+                    const ids = Array.from(selectedDocIds);
+                    const bundle = ids
+                      .map((id) => documents.find((d) => d.id === id))
+                      .filter((d): d is DocRecord => !!d)
+                      .map((d) => ({ id: d.id, name: d.name }));
+                    if (bundle.length === 0) return;
+                    setSendBundle(bundle);
+                    exitSelectMode();
+                  }}
+                  style={{
+                    background: "#2d5a3d",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Send to provider
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  style={{
+                    background: "#c73e3e",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Delete Selected
+                </button>
+              </div>
             </div>
           )}
         </div>

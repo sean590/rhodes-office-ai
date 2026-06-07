@@ -52,6 +52,7 @@ interface SendRow {
   id: string;
   document_id: string;
   document_name: string | null;
+  document_count: number;
   recipient_email: string;
   subject: string | null;
   status: "queued" | "sent" | "failed";
@@ -122,7 +123,13 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
   }, [fetchAll]);
 
   const fmtDate = (iso: string | null) =>
-    iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—";
+    iso ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "—";
+
+  // "Doc name" or "Doc name +N more" for a bundle.
+  const docLabel = (s: SendRow) => {
+    const base = s.document_name || "Document";
+    return s.document_count > 1 ? `${base} +${s.document_count - 1} more` : base;
+  };
 
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const handleRevoke = async (sendId: string) => {
@@ -327,7 +334,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
                 <div key={s.id} style={{ border: "1px solid #f0eee8", borderRadius: 8, padding: 12 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                     <Link href={`/api/documents/${s.document_id}/download`} style={{ fontSize: 13, fontWeight: 600, color: "#2d5a3d", textDecoration: "none" }}>
-                      {s.document_name || "Document"}
+                      {docLabel(s)}
                     </Link>
                     <Badge label={s.status} color={sc.color} bg={sc.bg} />
                   </div>
@@ -374,7 +381,7 @@ export default function ServiceProviderDetailPage({ params }: { params: Promise<
                   <tr key={s.id}>
                     <td style={tdStyle}>
                       <Link href={`/api/documents/${s.document_id}/download`} style={{ color: "#2d5a3d", fontWeight: 500, textDecoration: "none" }}>
-                        {s.document_name || "Document"}
+                        {docLabel(s)}
                       </Link>
                     </td>
                     <td style={{ ...tdStyle, color: "#6b6b76" }}>{s.recipient_email}</td>

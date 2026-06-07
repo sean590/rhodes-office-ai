@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/utils/rate-limit";
-import { lookupValidSend, logSendAccess } from "@/lib/providers/share-link";
+import { lookupValidSend, logSendAccess, resolveSenderLabel, getSendDocuments } from "@/lib/providers/share-link";
 import { ShareDownload } from "./ShareDownload";
 
 // Public, unauthenticated share page (providers are not Rhodes users). Lives
@@ -47,28 +47,21 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   const send = allowed ? await lookupValidSend(admin, token) : null;
   if (!send) return <Unavailable />;
 
-  // Document name + a friendly sender label.
-  const { data: doc } = await admin
-    .from("documents")
-    .select("name")
-    .eq("id", send.document_id)
-    .maybeSingle();
-
-  let senderName = "Rhodes";
-  if (send.sent_by) {
-    try {
-      const { data } = await admin.auth.admin.getUserById(send.sent_by);
-      if (data.user?.email) senderName = data.user.email.split("@")[0];
-    } catch {
-      /* best-effort */
-    }
-  }
+  // The bundle's documents + a friendly sender label.
+  const [documents, senderName] = await Promise.all([
+    getSendDocuments(admin, send),
+    resolveSenderLabel(admin, send.sent_by, send.organization_id),
+  ]);
 
   await logSendAccess(admin, send, "viewed", { ip, userAgent: h.get("user-agent") });
 
   return (
     <Shell>
-      <ShareDownload token={token} documentName={doc?.name ?? "a document"} senderName={senderName} />
+      <ShareDownload
+        token={token}
+        documents={documents.map((d) => ({ id: d.id, name: d.name }))}
+        senderName={senderName}
+      />
     </Shell>
   );
 }
