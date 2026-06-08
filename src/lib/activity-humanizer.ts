@@ -26,10 +26,17 @@ export interface HumanActivity {
   id: string;
   actor: ActorKind;
   actorName: string;
+  /** Action phrase, rendered in ink (e.g. "Marked CA Statement of Information filed"). */
+  lead: string;
+  /** Context — entity / provider / confidence — rendered muted (e.g. "Ridge Capital Management LLC"). */
+  detail: string | null;
+  /** Flat fallback (lead + detail) for non-two-tone surfaces. */
   text: string;
   icon: IconName;
   color: string;
   created_at: string;
+  /** Where "View" navigates, if resolvable. */
+  viewHref: string | null;
   entity_id?: string | null;
 }
 
@@ -106,31 +113,41 @@ export function humanizeActivity(row: RawActivity, currentUserId?: string | null
     }
   }
 
-  // Copy — a few special cases, else "<verb> <noun> <name>".
-  let text: string;
+  // Two-tone copy: `lead` (ink action phrase) + `detail` (muted context).
+  const entityName = typeof m.entity_name === "string" ? m.entity_name : null;
+  let lead: string;
+  let detail: string | null;
   if (row.resource_type === "provider_document_send" && row.action === "send") {
-    const to = typeof m.provider_name === "string" ? ` to ${m.provider_name}` : "";
-    text = `Sent ${name ?? "a document"}${to}`;
-  } else if (row.resource_type === "compliance_obligation" && row.action === "complete") {
-    text = `Completed filing${name ? ` ${name}` : ""}${m.entity_name ? ` for ${m.entity_name}` : ""}`;
+    lead = `Sent ${name ?? "a document"} to`;
+    const provider = typeof m.provider_name === "string" ? m.provider_name : null;
+    detail = [provider, entityName].filter(Boolean).join(" · ") || null;
+  } else if (row.resource_type === "compliance_obligation" && (row.action === "complete" || row.action === "update")) {
+    lead = `Marked ${name ?? "filing"} filed`;
+    detail = entityName;
   } else if (name) {
-    text = `${verb} ${noun} ${name}`;
-  } else if (m.entity_name) {
-    text = `${verb} ${noun} on ${m.entity_name}`;
+    lead = `${verb} ${noun}`;
+    detail = entityName ? `${name} · ${entityName}` : name;
   } else {
-    text = `${verb} ${noun}`;
+    lead = `${verb} ${noun}`;
+    detail = entityName;
   }
 
   const visual = ICON[row.resource_type] ?? { icon: "circle-check" as IconName, color: "var(--muted)" };
+
+  // "View" target — entity page where we have one, else null.
+  const viewHref = row.entity_id ? `/entities/${row.entity_id}` : null;
 
   return {
     id: row.id,
     actor,
     actorName,
-    text,
+    lead,
+    detail,
+    text: detail ? `${lead} ${detail}` : lead,
     icon: visual.icon,
     color: visual.color,
     created_at: row.created_at,
+    viewHref,
     entity_id: row.entity_id,
   };
 }
