@@ -9,10 +9,10 @@ export function Card({ children, style, ...props }: CardProps) {
     <div
       {...props}
       style={{
-        background: "#ffffff",
-        border: "1px solid #e8e6df",
-        borderRadius: 12,
-        padding: 22,
+        background: "var(--card)",
+        border: "1px solid var(--line)",
+        borderRadius: "var(--radius)",
+        padding: 20,
         ...style,
       }}
     >

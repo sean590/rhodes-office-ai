@@ -6,11 +6,11 @@
   --color-card: #ffffff;
   --color-hover: #f0efe9;
   --color-active: #e8e6df;
-  --color-border: #ddd9d0;
-  --color-border-light: #e8e6df;
-  --color-text: #1a1a1f;
-  --color-muted: #6b6b76;
-  --color-dim: #9494a0;
+  --color-border: #e4e2da;
+  --color-border-light: #ece9e1;
+  --color-text: #1f2420;
+  --color-muted: #6f726b;
+  --color-dim: #9a9c94;
   --color-accent: #2d5a3d;
   --color-accent-dim: #3d7a53;
   --color-glow: rgba(45, 90, 61, 0.08);
@@ -28,12 +28,53 @@
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 }
 
+/* ── UX refresh tokens (the prototype's design system) ─────────────────────
+   New components (Sidebar, Topbar, ApprovalCard, …) use these semantic tokens;
+   existing components migrate onto them phase by phase. Mirrors
+   mockups/rhodes-prototype.html. */
+:root {
+  --green: #2d5a3d;
+  --green-700: #234a31;
+  --green-50: #e8efe9;
+  --page: #f5f4f0;
+  --card: #ffffff;
+  --ink: #1f2420;
+  --muted: #6f726b;
+  --faint: #9a9c94;
+  --line: #e4e2da;
+  --line-2: #d8d6cc;
+  --hover: #f0efe9;
+  --red: #b3261e;       --red-50: #fbece9;
+  --amber: #9a6a12;     --amber-50: #f7efdd;
+  --blue: #2f5d8a;      --blue-50: #e9f0f7;
+  --purple: #5b4b8a;    --purple-50: #efedf7;
+  --teal: #0f6e56;      --teal-50: #e1f5ee;
+
+  /* Radius + spacing scale */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 16px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+
+  /* App shell dimensions */
+  --topbar-h: 52px;
+  --sidebar-w: 208px;
+  --sidebar-rail-w: 60px;
+}
+
 @layer base {
   body {
     background: var(--color-bg);
     color: var(--color-text);
     font-family: var(--font-sans);
-    font-size: 13px;
+    /* UX refresh: softer base (was 13px) + looser line-height, matching the prototype. */
+    font-size: 15px;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }

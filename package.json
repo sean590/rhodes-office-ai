@@ -17,6 +17,7 @@
     "@sentry/nextjs": "^10.42.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.98.0",
+    "@tabler/icons-react": "^3.44.0",
     "@upstash/redis": "^1.36.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",

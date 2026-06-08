@@ -15,18 +15,20 @@ export function Button({ children, variant = "secondary", size = "md", className
     <button
       {...props}
       style={{
-        display: "flex",
+        display: "inline-flex",
         alignItems: "center",
+        justifyContent: "center",
         gap: 6,
-        padding: isSmall ? "4px 10px" : isPrimary ? "8px 16px" : "5px 12px",
-        background: isPrimary ? "#2d5a3d" : "#e8e6df",
-        color: isPrimary ? "#fff" : "#1a1a1f",
-        border: isPrimary ? "none" : "1px solid #ddd9d0",
-        borderRadius: isPrimary ? 8 : 6,
-        fontSize: isSmall ? 11 : isPrimary ? 13 : 12,
-        fontWeight: 600,
+        padding: isSmall ? "6px 11px" : "8px 14px",
+        background: isPrimary ? "var(--green)" : "var(--card)",
+        color: isPrimary ? "#fff" : "var(--ink)",
+        border: `1px solid ${isPrimary ? "var(--green)" : "var(--line-2)"}`,
+        borderRadius: isSmall ? 8 : 9,
+        fontSize: isSmall ? 12.5 : 13,
+        fontWeight: 500,
         cursor: "pointer",
         fontFamily: "inherit",
+        whiteSpace: "nowrap",
         ...style,
       }}
     >
