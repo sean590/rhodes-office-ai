@@ -34,7 +34,9 @@ export default function AuthenticatedLayout({
 
 function LayoutInner({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
-  const isNarrow = useMediaQuery("(max-width: 1024px)"); // auto-rail tier
+  // Auto-collapse to the icon rail earlier (≤1280) so the rail tier spans a
+  // wide band (769–1280px) and content gets ~148px back across the laptop range.
+  const isNarrow = useMediaQuery("(max-width: 1280px)");
   const pathname = usePathname();
   const isFullChatPage = pathname === "/chat";
   const { isOpen, close, toggle, panelWidth, setPanelWidth } = useChatPanel();

@@ -2,8 +2,8 @@
 
 /**
  * Sidebar — the canonical left nav for the UX refresh. Three responsive tiers:
- *   • > 1024px  — expanded (208px) with labels; user can collapse to a rail
- *   • ≤ 1024px  — icon rail (60px)
+ *   • > 1280px  — expanded (208px) with labels; user can collapse to a rail
+ *   • 769–1280px — icon rail (60px)
  *   • ≤ 768px   — off-canvas drawer (mobile), toggled from the Topbar hamburger
  * Active state lights up on path prefix; Home + People absorb their old routes.
  */
