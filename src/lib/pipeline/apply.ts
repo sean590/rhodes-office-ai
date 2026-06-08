@@ -2562,6 +2562,38 @@ export async function applyActions(
           break;
         }
 
+        case "dismiss_send_suggestion": {
+          const providerId = item.data.provider_id as string;
+          const documentIds = (item.data.document_ids as string[]) ?? [];
+          if (!providerId) throw new Error("provider_id is required");
+          if (documentIds.length === 0) throw new Error("document_ids is required");
+
+          // Suppress these (document, provider) suggestions from resurfacing.
+          const { error } = await supabase.from("provider_send_dismissals").upsert(
+            documentIds.map((d) => ({
+              organization_id: options.orgId,
+              document_id: d,
+              provider_id: providerId,
+              dismissed_by: options.userId ?? null,
+            })),
+            { onConflict: "document_id,provider_id", ignoreDuplicates: true },
+          );
+          if (error) throw error;
+
+          // Decay the learned rule per document type (the user said "not this").
+          const { data: dismissedDocs } = await supabase
+            .from("documents")
+            .select("document_type")
+            .in("id", documentIds)
+            .eq("organization_id", options.orgId);
+          const { recordRoutingDismissal } = await import("@/lib/providers/routing-rules");
+          const types = new Set((dismissedDocs ?? []).map((d) => d.document_type).filter(Boolean) as string[]);
+          for (const t of types) await recordRoutingDismissal(supabase, options.orgId ?? "", t, providerId);
+
+          results.push({ action: "dismiss_send_suggestion", success: true, data: { provider_id: providerId, document_ids: documentIds } });
+          break;
+        }
+
         case "revoke_provider_send": {
           const sendId = item.data.send_id as string;
           if (!sendId) throw new Error("send_id is required");

@@ -228,6 +228,27 @@ export const revokeProviderSendTool = defineTool({
   },
 });
 
+export const dismissSendSuggestionTool = defineTool({
+  name: "dismiss_send_suggestion",
+  description:
+    "Dismiss a proactive 'Suggested send' so it won't resurface, and decay the learned routing rule (teaches Rhodes you don't route these documents to this provider).",
+  kind: "write",
+  inputSchema: z.object({
+    provider_id: z.string().uuid(),
+    document_ids: z.array(z.string().uuid()).min(1),
+  }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "service_provider", resourceId: input.provider_id });
+    const name = await resolveName(ctx, "service_provider", input.provider_id);
+    return { summary: `Dismiss sending ${input.document_ids.length} document(s) to "${name}"` };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "service_provider", resourceId: input.provider_id });
+    const result = await dispatchAction(ctx, "dismiss_send_suggestion", input);
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
 export const serviceProviderWriteTools: ToolDefinition[] = [
   createServiceProviderTool,
   updateServiceProviderTool,
@@ -236,4 +257,5 @@ export const serviceProviderWriteTools: ToolDefinition[] = [
   unlinkProviderEntityTool,
   sendDocumentToProviderTool,
   revokeProviderSendTool,
+  dismissSendSuggestionTool,
 ];

@@ -13,6 +13,7 @@
 import { z } from "zod";
 import { defineTool, MAX_LIST_ROWS, type ToolDefinition } from "../schema";
 import { getProviderSuggestions } from "@/lib/providers/suggestions";
+import { getOrgSendSuggestions } from "@/lib/providers/routing-rules";
 
 // --- list_service_providers --------------------------------------------------
 
@@ -181,9 +182,24 @@ export const getProviderSuggestionsTool = defineTool({
   },
 });
 
+// --- get_send_suggestions ----------------------------------------------------
+
+export const getSendSuggestionsTool = defineTool({
+  name: "get_send_suggestions",
+  description:
+    "Proactive 'Suggested sends': scans the org's recent documents and returns bundle suggestions grouped by provider (e.g. 'send these 3 K-1s to Andersen'), excluding anything already sent, dismissed, or vetoed by provenance. Use to answer 'what should I send out'.",
+  kind: "read",
+  inputSchema: z.object({}),
+  handler: async (_args, ctx) => {
+    const suggestions = await getOrgSendSuggestions(ctx.supabase, ctx.orgId);
+    return { data: ctx.redact(suggestions) };
+  },
+});
+
 export const serviceProviderTools: ToolDefinition[] = [
   listServiceProvidersTool,
   getServiceProviderTool,
   getProviderSuggestionsTool,
   listProviderSendsTool,
+  getSendSuggestionsTool,
 ];

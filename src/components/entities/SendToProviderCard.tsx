@@ -41,6 +41,8 @@ interface SendDoc {
 
 interface Props {
   documents: SendDoc[];
+  /** Pre-select this provider (e.g. when approving a Suggested send). */
+  initialProviderId?: string;
   onSubmitted?: () => void;
   onClose: () => void;
 }
@@ -54,7 +56,7 @@ function defaultRecipient(p: ProviderResponse | undefined): string {
   return first ? first.email.trim() : "";
 }
 
-export function SendToProviderCard({ documents, onSubmitted, onClose }: Props) {
+export function SendToProviderCard({ documents, initialProviderId, onSubmitted, onClose }: Props) {
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
   const [suggestedIds, setSuggestedIds] = useState<string[]>([]);
   const [relevantIds, setRelevantIds] = useState<Set<string>>(new Set());
@@ -95,6 +97,10 @@ export function SendToProviderCard({ documents, onSubmitted, onClose }: Props) {
           // Prefer the first discipline-relevant suggestion, else first suggestion.
           firstId = suggestions.find((s) => s.relevant)?.provider.id ?? ids[0] ?? firstId;
         }
+        // An explicit initial provider (approving a Suggested send) wins.
+        if (initialProviderId && provData.some((p) => p.id === initialProviderId)) {
+          firstId = initialProviderId;
+        }
         if (firstId) {
           setProviderId(firstId);
           setRecipient(defaultRecipient(provData.find((p) => p.id === firstId)));
@@ -108,7 +114,7 @@ export function SendToProviderCard({ documents, onSubmitted, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [primaryId]);
+  }, [primaryId, initialProviderId]);
 
   const selectProvider = useCallback(
     (id: string) => {

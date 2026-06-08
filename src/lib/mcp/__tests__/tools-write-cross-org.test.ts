@@ -226,6 +226,10 @@ const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
     document_ids: [VALID_UUID],
     provider_id: VALID_UUID,
   },
+  dismiss_send_suggestion: {
+    document_ids: [VALID_UUID],
+    provider_id: VALID_UUID,
+  },
 };
 
 function buildInput(tool: ToolDefinition): Record<string, unknown> {

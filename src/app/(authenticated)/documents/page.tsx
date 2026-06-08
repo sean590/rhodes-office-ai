@@ -13,6 +13,7 @@ import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { SuggestedSends } from "@/components/entities/SuggestedSends";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
@@ -357,6 +358,9 @@ export default function DocumentsPage() {
           <ChatIcon size={14} /> Upload via chat
         </button>
       </div>
+
+      {/* Proactive "Suggested sends" — renders nothing when there's nothing to suggest */}
+      <SuggestedSends onSent={() => fetchAll()} />
 
       {/* AI Processing Banner */}
       {processingId && (
