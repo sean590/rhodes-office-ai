@@ -1,13 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Header } from "@/components/layout/header";
+import { Topbar } from "@/components/layout/topbar";
+import { Sidebar } from "@/components/layout/sidebar";
 import { MobileTabBar } from "@/components/layout/mobile-tab-bar";
 import { ChatDrawer } from "@/components/chat/chat-drawer";
 import { ChatDrawerToggle } from "@/components/chat/chat-drawer-toggle";
 import { PageContextProvider } from "@/components/chat/page-context-provider";
 import { ChatPanelProvider, useChatPanel } from "@/components/chat/chat-panel-provider";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { SessionGuard } from "@/components/session-guard";
 import { SessionTimeoutManager } from "@/components/session-timeout-manager";
 // CommandPalette intentionally not mounted — search/⌘K hidden until the
@@ -31,11 +34,18 @@ export default function AuthenticatedLayout({
 
 function LayoutInner({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
+  const isNarrow = useMediaQuery("(max-width: 1024px)"); // auto-rail tier
   const pathname = usePathname();
   const isFullChatPage = pathname === "/chat";
   const { isOpen, close, toggle, panelWidth, setPanelWidth } = useChatPanel();
 
   const showPanel = !isFullChatPage && !isMobile && isOpen;
+
+  // Sidebar state: desktop collapse (rail) + mobile drawer. ≤1024 forces rail.
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const sidebarCollapsed = collapsed || isNarrow;
+  const onToggleNav = () => (isMobile ? setMobileNavOpen((o) => !o) : setCollapsed((c) => !c));
 
   return (
     <>
@@ -59,7 +69,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
         flexDirection: "column",
         overflow: "hidden",
       }}>
-        <Header />
+        <Topbar isMobile={isMobile} onToggleNav={onToggleNav} />
         <div style={{
           flex: 1,
           minHeight: 0,
@@ -67,6 +77,14 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           flexDirection: "row",
           overflow: "hidden",
         }}>
+          {/* Left nav: in-flow on desktop, off-canvas drawer on mobile */}
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            isMobile={isMobile}
+            mobileOpen={mobileNavOpen}
+            onNavigate={() => setMobileNavOpen(false)}
+          />
+
           {/* Main content */}
           <main style={{
             flex: 1,
