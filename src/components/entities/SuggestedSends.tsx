@@ -26,7 +26,17 @@ interface SendSuggestion {
   learned: boolean;
 }
 
-export function SuggestedSends({ onSent }: { onSent?: () => void }) {
+export function SuggestedSends({
+  onSent,
+  onCount,
+  bare = false,
+}: {
+  onSent?: () => void;
+  /** Reports the number of loaded suggestions (e.g. for a lane badge). */
+  onCount?: (n: number) => void;
+  /** Skip the outer "Suggested sends" card chrome (used inside the Home lane). */
+  bare?: boolean;
+}) {
   const [suggestions, setSuggestions] = useState<SendSuggestion[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [openProviderId, setOpenProviderId] = useState<string | null>(null);
@@ -35,13 +45,17 @@ export function SuggestedSends({ onSent }: { onSent?: () => void }) {
   const fetchSuggestions = useCallback(async () => {
     try {
       const res = await fetch("/api/provider-sends/suggestions");
-      if (res.ok) setSuggestions(await res.json());
+      if (res.ok) {
+        const data: SendSuggestion[] = await res.json();
+        setSuggestions(data);
+        onCount?.(data.length);
+      }
     } catch (err) {
       console.error("SuggestedSends load error:", err);
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [onCount]);
 
   useEffect(() => {
     fetchSuggestions();
@@ -66,14 +80,8 @@ export function SuggestedSends({ onSent }: { onSent?: () => void }) {
   // Quiet: nothing to suggest → render nothing.
   if (!loaded || suggestions.length === 0) return null;
 
-  return (
-    <Card style={{ marginBottom: 20, border: "1px solid #d7e3da", background: "#f7faf8" }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#2d5a3d", marginBottom: 4 }}>Suggested sends</div>
-      <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
-        Documents Rhodes thinks should go to a provider. Review before anything is sent.
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+  const list = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {suggestions.map((s) => {
           const n = s.documents.length;
           const isOpen = openProviderId === s.provider.id;
@@ -116,7 +124,18 @@ export function SuggestedSends({ onSent }: { onSent?: () => void }) {
             </div>
           );
         })}
+    </div>
+  );
+
+  if (bare) return list;
+
+  return (
+    <Card style={{ marginBottom: 20, border: "1px solid #d7e3da", background: "#f7faf8" }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "var(--green)", marginBottom: 4 }}>Suggested sends</div>
+      <div style={{ fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
+        Documents Rhodes thinks should go to a provider. Review before anything is sent.
       </div>
+      {list}
     </Card>
   );
 }

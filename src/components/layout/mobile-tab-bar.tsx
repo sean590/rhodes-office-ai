@@ -6,7 +6,7 @@ import { useState } from "react";
 import { Icon, type IconName } from "../ui/icon";
 
 const PRIMARY_TABS: { href: string; label: string; icon: IconName }[] = [
-  { href: "/dashboard", label: "Home", icon: "inbox" },
+  { href: "/home", label: "Home", icon: "inbox" },
   { href: "/entities", label: "Entities", icon: "building" },
   { href: "/documents", label: "Docs", icon: "file-text" },
   { href: "/chat", label: "Chat", icon: "message" },

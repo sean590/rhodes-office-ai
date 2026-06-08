@@ -53,7 +53,7 @@ export function Topbar({
         <Icon name={isMobile ? "menu-2" : "layout-sidebar"} size={19} />
       </button>
 
-      <Link href="/dashboard" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
+      <Link href="/home" style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
         <div
           style={{
             width: 22, height: 22, borderRadius: 6, background: "var(--green)",
