@@ -26,8 +26,9 @@ const NAV: NavItem[] = [
   { href: "/investments", label: "Investments", icon: "chart-pie" },
   { href: "/documents", label: "Documents", icon: "file-text" },
   { href: "/compliance", label: "Compliance", icon: "checklist" },
-  // People = the Directory + Providers merge (full unification lands in Phase 6).
-  { href: "/directory", label: "People", icon: "users", alias: ["/service-providers", "/people"] },
+  // People = the unified Directory + Providers registry (Phase 6a). CRUD still
+  // lives on /directory + /service-providers until Phase 6b absorbs it.
+  { href: "/people", label: "People", icon: "users", alias: ["/directory", "/service-providers"] },
 ];
 
 export function Sidebar({

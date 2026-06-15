@@ -388,22 +388,22 @@ export function AddTransactionModal({
           width: "100%",
           maxHeight: "90vh",
           overflowY: "auto",
-          border: "1px solid #e8e6df",
+          border: "1px solid var(--line)",
           boxShadow: "0 20px 60px rgba(0,0,0,0.25)",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
           <div>
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: "var(--ink)" }}>
               {isEdit ? "Edit Transaction" : isAdjust ? "Record Amendment" : "Record Transaction"}
             </h2>
             {isEdit && editOriginal && (
-              <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
                 Editing the original {editOriginal.transaction_type} row in place. Changes are audited.
               </div>
             )}
             {isAdjust && adjustsOriginal && (
-              <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>
                 Recording an after-the-fact amendment to the {adjustsOriginal.transaction_type} of $
                 {Number(adjustsOriginal.amount).toLocaleString()} on {adjustsOriginal.transaction_date}.
                 Use this for sponsor recalls or corrected wire amounts — NOT for typo fixes (use Edit on the row instead).
@@ -412,7 +412,7 @@ export function AddTransactionModal({
           </div>
           <button
             onClick={onClose}
-            style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 4 }}
+            style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", padding: 4 }}
             aria-label="Close"
           >
             <XIcon size={18} />
@@ -422,14 +422,14 @@ export function AddTransactionModal({
         {/* Investor */}
         {investors.length > 1 && (
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>
               Investing Entity
             </label>
             <select
               value={investorId}
               onChange={(e) => setInvestorId(e.target.value)}
               disabled={isAdjust || isEdit}
-              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }}
+              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
             >
               <option value="">Select investor...</option>
               {investors.map((inv) => (
@@ -443,7 +443,7 @@ export function AddTransactionModal({
 
         {/* Transaction type */}
         <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Type</label>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Type</label>
           <div style={{ display: "flex", gap: 8 }}>
             {(["contribution", "distribution", "return_of_capital"] as const).map((t) => (
               <button
@@ -454,9 +454,9 @@ export function AddTransactionModal({
                   padding: "6px 14px",
                   borderRadius: 6,
                   border: "1px solid",
-                  borderColor: txnType === t ? "#2d5a3d" : "#ddd9d0",
+                  borderColor: txnType === t ? "var(--green)" : "var(--line)",
                   background: txnType === t ? "rgba(45,90,61,0.08)" : "#fff",
-                  color: txnType === t ? "#2d5a3d" : "#6b6b76",
+                  color: txnType === t ? "var(--green)" : "var(--muted)",
                   fontSize: 13,
                   fontWeight: 500,
                   cursor: (isAdjust || isEdit) ? "not-allowed" : "pointer",
@@ -472,7 +472,7 @@ export function AddTransactionModal({
         {/* Amount + Date */}
         <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>
               {txnType === "distribution" ? "Net Amount" : "Total Amount"}
             </label>
             <input
@@ -480,36 +480,36 @@ export function AddTransactionModal({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0"
-              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }}
+              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
             />
           </div>
           <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Date</label>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Date</label>
             <input
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }}
+              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
             />
           </div>
         </div>
 
         {/* Description */}
         <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Description (optional)</label>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Description (optional)</label>
           <input
             type="text"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={txnType === "distribution" ? "e.g., Distribution #11 (Q1 2025)" : "e.g., Capital call #3"}
-            style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }}
+            style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
           />
         </div>
 
         {/* Adjustment reason */}
         {isAdjust && (
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>
               Adjustment Reason
             </label>
             <input
@@ -517,20 +517,20 @@ export function AddTransactionModal({
               value={adjustmentReason}
               onChange={(e) => setAdjustmentReason(e.target.value)}
               placeholder="e.g., Sponsor reduced call by $5,000"
-              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }}
+              style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
             />
           </div>
         )}
 
         {/* Line items */}
         {cats.length > 0 && (
-          <div style={{ marginBottom: 16, padding: 12, background: "#f8f7f4", borderRadius: 8, border: "1px solid #e8e6df" }}>
+          <div style={{ marginBottom: 16, padding: 12, background: "var(--hover)", borderRadius: 8, border: "1px solid var(--line)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76" }}>Line Items {showLineItems ? "" : "(optional)"}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)" }}>Line Items {showLineItems ? "" : "(optional)"}</span>
               {!showLineItems && lineItems.length === 0 && (
                 <button
                   onClick={addLineItem}
-                  style={{ background: "none", border: "1px solid #2d5a3d", color: "#2d5a3d", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer" }}
+                  style={{ background: "none", border: "1px solid var(--green)", color: "var(--green)", borderRadius: 6, padding: "3px 10px", fontSize: 11, cursor: "pointer" }}
                 >
                   + Add line items
                 </button>
@@ -558,7 +558,7 @@ export function AddTransactionModal({
                         padding: "6px 8px",
                         fontSize: 12,
                         borderRadius: 6,
-                        border: "1px solid #ddd9d0",
+                        border: "1px solid var(--line)",
                         background: "#fff",
                         boxSizing: "border-box",
                       }}
@@ -578,7 +578,7 @@ export function AddTransactionModal({
                         padding: "6px 8px",
                         fontSize: 12,
                         borderRadius: 6,
-                        border: "1px solid #ddd9d0",
+                        border: "1px solid var(--line)",
                         background: "#fff",
                         boxSizing: "border-box",
                       }}
@@ -594,7 +594,7 @@ export function AddTransactionModal({
                         padding: "6px 8px",
                         fontSize: 12,
                         borderRadius: 6,
-                        border: "1px solid #ddd9d0",
+                        border: "1px solid var(--line)",
                         background: "#fff",
                         boxSizing: "border-box",
                       }}
@@ -604,7 +604,7 @@ export function AddTransactionModal({
                       style={{
                         background: "none",
                         border: "none",
-                        color: "#9494a0",
+                        color: "var(--faint)",
                         cursor: "pointer",
                         fontSize: 14,
                         padding: 4,
@@ -622,12 +622,12 @@ export function AddTransactionModal({
                 ))}
                 <button
                   onClick={addLineItem}
-                  style={{ background: "none", border: "1px dashed #ddd9d0", color: "#6b6b76", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer", width: "100%", marginTop: 4 }}
+                  style={{ background: "none", border: "1px dashed var(--line)", color: "var(--muted)", borderRadius: 6, padding: "5px 10px", fontSize: 11, cursor: "pointer", width: "100%", marginTop: 4 }}
                 >
                   + Add another line
                 </button>
                 {!validation.ok && (
-                  <div style={{ marginTop: 8, fontSize: 11, color: "#c73e3e" }}>{validation.message}</div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: "var(--red)" }}>{validation.message}</div>
                 )}
               </>
             )}
@@ -635,7 +635,7 @@ export function AddTransactionModal({
         )}
 
         {serverError && (
-          <div style={{ marginBottom: 12, padding: 10, background: "#fbe8e8", border: "1px solid #f4b8b8", borderRadius: 6, color: "#7a1818", fontSize: 12 }}>
+          <div style={{ marginBottom: 12, padding: 10, background: "var(--red-50)", border: "1px solid var(--red)", borderRadius: 6, color: "var(--red)", fontSize: 12 }}>
             {serverError}
           </div>
         )}

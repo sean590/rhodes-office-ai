@@ -37,6 +37,9 @@ import type {
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
 import { EntityInvestmentsTab } from "@/components/entities/EntityInvestmentsTab";
 import { EntityServiceProvidersTab } from "@/components/entities/EntityServiceProvidersTab";
+import { Tabs } from "@/components/ui/tabs";
+import { EntityStateBanner, NeedsAttentionCard } from "@/components/entities/NeedsAttentionCard";
+import { humanizeActivity } from "@/lib/activity-humanizer";
 import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
 import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
@@ -6042,7 +6045,7 @@ export default function EntityDetailPage() {
   ];
   // Joint-title entities have a minimal tab set: Overview, Documents, Investments.
   if (!isJointTitle) {
-    tabs.push({ id: "compliance", label: "Compliance & Filings" });
+    tabs.push({ id: "compliance", label: "Compliance" });
   }
   // Cap Table: only meaningful for business entities that have a cap table.
   if (!isPerson && !isJointTitle) {
@@ -6058,11 +6061,26 @@ export default function EntityDetailPage() {
     tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
   }
   tabs.push({ id: "investments", label: "Investments" });
-  tabs.push({ id: "providers", label: "Providers" });
+  tabs.push({ id: "providers", label: "People" });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
   if (!isJointTitle) {
     tabs.push({ id: "activity", label: "Activity" });
   }
+
+  /* ---- Overview "needs attention" derivations (lead with state) ---- */
+  const overviewObligations = entity.compliance_obligations ?? [];
+  const needsFilings = overviewObligations
+    .filter((o) => o.status === "pending" || o.status === "overdue")
+    .map((o) => ({ id: o.id, name: o.name, next_due_date: o.next_due_date, status: o.status }));
+  const overdueFilingCount = needsFilings.filter(
+    (o) => o.status === "overdue" || (o.next_due_date != null && new Date(o.next_due_date + "T00:00:00Z").getTime() < Date.now()),
+  ).length;
+  const overviewExpectations = (entity.expectations ?? []) as Expectation[];
+  const overviewMissingDocs = overviewExpectations
+    .filter((e) => !e.is_suggestion && !e.is_not_applicable && !e.is_satisfied)
+    .map((e) => ({ document_type: e.document_type, document_category: e.document_category }));
+  const entityTypeLabel = (entity.type || "entity").replace(/_/g, " ");
+  const entityFormedYear = entity.formed_date ? new Date(entity.formed_date).getFullYear() : null;
 
   /* ---- Handlers for sub-components ---- */
   function handleRegistrationsChange(regs: EntityRegistration[]) {
@@ -6075,10 +6093,6 @@ export default function EntityDetailPage() {
 
   function handleManagersChange(managers: (EntityManager | EntityMember)[]) {
     setEntity((prev) => (prev ? { ...prev, managers: managers as EntityManager[] } : prev));
-  }
-
-  function handleMembersChange(members: (EntityManager | EntityMember)[]) {
-    setEntity((prev) => (prev ? { ...prev, members: members as EntityMember[] } : prev));
   }
 
   function handlePartnershipRepsChange(reps: (EntityManager | EntityMember)[]) {
@@ -6227,84 +6241,8 @@ export default function EntityDetailPage() {
         }}
       />
 
-      {/* ---- Mobile Section Nav (pill bar) ---- */}
-      {isMobile && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            background: "#f5f4f0",
-            overflowX: "auto",
-            display: "flex",
-            gap: 6,
-            borderBottom: "1px solid #e8e6df",
-            margin: "0 -16px",
-            paddingLeft: 16,
-            paddingRight: 16,
-            paddingTop: 8,
-            paddingBottom: 8,
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 20,
-                border: activeTab === tab.id ? "1px solid #2d5a3d" : "1px solid #ddd9d0",
-                background: activeTab === tab.id ? "#2d5a3d" : "#fff",
-                color: activeTab === tab.id ? "#fff" : "#1a1a1f",
-                fontSize: 12,
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* ---- Tab Bar (desktop only) ---- */}
-      {!isMobile && (
-        <div
-          style={{
-            borderBottom: "1px solid #e8e6df",
-            marginBottom: 24,
-            display: "flex",
-            gap: 0,
-            overflow: "visible",
-          }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: "10px 20px",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-                border: "none",
-                borderBottom: activeTab === tab.id ? "2px solid #2d5a3d" : "2px solid transparent",
-                background: "transparent",
-                color: activeTab === tab.id ? "#2d5a3d" : "#6b6b76",
-                marginBottom: -1,
-                whiteSpace: "nowrap",
-                fontFamily: "inherit",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ---- Tab Bar (responsive priority + overflow → More) ---- */}
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
       {/* ---- Tab Content ---- */}
       {isMobile && <div style={{ height: 16 }} />}
@@ -6321,6 +6259,19 @@ export default function EntityDetailPage() {
 
       {activeTab === "overview" && !isJointTitle && (
         <>
+          {/* Lead with state, not schema: a plain-language line about what this
+              entity is and whether anything needs attention. */}
+          <EntityStateBanner
+            name={entity.name}
+            typeLabel={entityTypeLabel}
+            status={entity.status}
+            formationState={entity.formation_state ?? null}
+            formedYear={isPerson ? null : entityFormedYear}
+            overdueFilings={overdueFilingCount}
+            openFilings={needsFilings.length}
+            missingDocs={overviewMissingDocs.length}
+            showAttention={!isPerson}
+          />
           {/* See Investments link for parent investor entities */}
           {isParentInvestor && (
             <div style={{
@@ -6347,8 +6298,12 @@ export default function EntityDetailPage() {
               there's no Document Completeness for persons (none of the
               business-entity-driven expectations apply, and personal-doc
               expectations are not yet modelled). */}
-          <div id="overview" style={{ display: "grid", gridTemplateColumns: isPerson || isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
-            {/* Left: Entity Information */}
+          {/* Two independent columns so the cap table isn't pinned to the
+              bottom of the (taller) entity-info card. Left = entity info +
+              relationships; right = needs attention + cap table. */}
+          <div id="overview" style={{ display: "grid", gridTemplateColumns: isPerson || isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20, alignItems: "start" }}>
+            {/* Left column */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
             <Card>
               <SectionHeader>{isPerson ? "Personal Information" : "Entity Information"}</SectionHeader>
 
@@ -6443,18 +6398,8 @@ export default function EntityDetailPage() {
                 />
               )}
 
-              {!isPerson && (
-                <PersonRow
-                  entityId={entityId}
-                  label="Members"
-                  persons={entity.members}
-                  apiPath="members"
-                  deleteIdKey="member_id"
-                  picklist={picklist}
-                  picklistLoading={picklistLoading}
-                  onPersonsChange={handleMembersChange}
-                />
-              )}
+              {/* Members live on the Cap Table (they're the same set of
+                  investors) — not duplicated here. */}
 
               {!isPerson && entity.type !== "trust" && (
                 <PersonRow
@@ -6486,46 +6431,30 @@ export default function EntityDetailPage() {
               )}
             </Card>
 
-            {/* Right: Document Completeness — businesses only. The current
-                expectation engine seeds only entity-formation docs (Cert of
-                Formation, Operating Agreement, EIN Letter), none of which
-                apply to a person. Personal-document expectations (1040, K-1s
-                received, 1099s, W-2s) would need a separate rule set. */}
+            {/* Relationships sits under entity info in the left column. */}
+            <RelationshipsSummaryCard
+              relationships={entity.relationships}
+              entityId={entityId}
+              onViewAll={() => setActiveTab("relationships")}
+            />
+            </div>{/* end left column */}
+
+            {/* Right column: needs attention + cap table (businesses only). */}
             {!isPerson && (
-              <DocumentCompletenessCard
-                entityId={entityId}
-                onNavigateDocs={() => setActiveTab("documents")}
-                initialExpectations={entity?.expectations as Expectation[] | undefined}
-              />
+              <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
+                <NeedsAttentionCard
+                  filings={needsFilings}
+                  missingDocs={overviewMissingDocs}
+                  onNavigateFilings={() => setActiveTab("compliance")}
+                  onNavigateDocs={() => setActiveTab("documents")}
+                />
+                <CapTableSummaryCard
+                  capTable={entity.cap_table}
+                  onViewAll={() => setActiveTab("cap_table")}
+                />
+              </div>
             )}
           </div>
-
-          {/* Second row: Relationships Summary + Cap Table Summary.
-              Cap Table is hidden for persons (already hidden as a tab too).
-              Relationships card is kept since persons can be parties to
-              business relationships. */}
-          {!isPerson && (
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
-              <RelationshipsSummaryCard
-                relationships={entity.relationships}
-                entityId={entityId}
-                onViewAll={() => setActiveTab("relationships")}
-              />
-              <CapTableSummaryCard
-                capTable={entity.cap_table}
-                onViewAll={() => setActiveTab("cap_table")}
-              />
-            </div>
-          )}
-          {isPerson && (
-            <div style={{ marginBottom: 20 }}>
-              <RelationshipsSummaryCard
-                relationships={entity.relationships}
-                entityId={entityId}
-                onViewAll={() => setActiveTab("relationships")}
-              />
-            </div>
-          )}
 
           {/* Trust Details (conditional) */}
           {entity.type === "trust" && entity.trust_details && (
@@ -6599,16 +6528,27 @@ export default function EntityDetailPage() {
 
       {/* Documents Tab */}
       {activeTab === "documents" && (
-        <DocumentsTab
-          entityId={entityId}
-          documents={documents}
-          docsLoading={docsLoading}
-          onRefresh={fetchDocuments}
-          onRefreshQuiet={() => fetchDocuments(true)}
-          onEntityRefresh={fetchEntity}
-          entityName={entity?.name || ""}
-          entityData={entity as unknown as Record<string, unknown>}
-        />
+        <>
+          {!isPerson && (
+            <div style={{ marginBottom: 20 }}>
+              <DocumentCompletenessCard
+                entityId={entityId}
+                onNavigateDocs={() => { /* already on documents */ }}
+                initialExpectations={entity?.expectations as Expectation[] | undefined}
+              />
+            </div>
+          )}
+          <DocumentsTab
+            entityId={entityId}
+            documents={documents}
+            docsLoading={docsLoading}
+            onRefresh={fetchDocuments}
+            onRefreshQuiet={() => fetchDocuments(true)}
+            onEntityRefresh={fetchEntity}
+            entityName={entity?.name || ""}
+            entityData={entity as unknown as Record<string, unknown>}
+          />
+        </>
       )}
 
       {/* Activity Tab */}
@@ -6626,138 +6566,14 @@ export default function EntityDetailPage() {
                 const timeStr = time.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
                   " at " + time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-                // Build a human-readable description of what happened
-                let title = "";
-                let detail = "";
-
-                const a = entry.action;
-                const rt = entry.resource_type;
-
-                if (a === "create" && rt === "entity") {
-                  title = "Entity created";
-                  if (meta.name) detail = `${meta.name} (${meta.type || "entity"})`;
-                } else if (a === "edit" && rt === "entity") {
-                  title = "Entity updated";
-                  if (meta.fields) detail = `Changed: ${(meta.fields as string[]).join(", ")}`;
-                } else if (a === "delete" && rt === "entity") {
-                  title = "Entity deleted";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_role") {
-                  title = `Added role: ${meta.role_title || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_role") {
-                  title = `Removed role: ${meta.role_title || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_member") {
-                  title = "Added member";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_member") {
-                  title = "Removed member";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_manager") {
-                  title = "Added manager";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_manager") {
-                  title = "Removed manager";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_registration") {
-                  title = "Added registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "edit" && rt === "entity_registration") {
-                  title = "Updated registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "delete" && rt === "entity_registration") {
-                  title = "Removed registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "upload" && rt === "document") {
-                  title = "Uploaded document";
-                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
-                } else if (a === "delete" && rt === "document") {
-                  title = "Deleted document";
-                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
-                } else if (a === "download" && rt === "document") {
-                  title = "Downloaded document";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "apply_extraction") {
-                  const applied = meta.applied as number || 0;
-                  const failed = meta.failed as number || 0;
-                  title = `Applied AI extraction (${applied} change${applied !== 1 ? "s" : ""}${failed > 0 ? `, ${failed} failed` : ""})`;
-                  if (Array.isArray(meta.changes) && meta.changes.length > 0) {
-                    // detail handled as expandable list below
-                  }
-                } else if (a === "dismiss_extraction") {
-                  title = "Dismissed AI suggestions";
-                } else if (a === "process") {
-                  title = "Processed document with AI";
-                  if (meta.action_count) detail = `${meta.action_count} changes proposed`;
-                } else if (a === "approve" && rt === "pipeline_item") {
-                  const dName = meta.document_name ? String(meta.document_name) : null;
-                  title = dName ? `Ingested document: ${dName}` : "Approved pipeline item";
-                  const parts: string[] = [];
-                  if (meta.actions_applied) parts.push(`${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`);
-                  if (meta.document_type) parts.push(String(meta.document_type).replace(/_/g, " "));
-                  detail = parts.join(" · ");
-                } else if (a === "ingest" && rt === "pipeline_item") {
-                  const dName = meta.document_name ? String(meta.document_name) : null;
-                  title = dName ? `Ingested document: ${dName}` : "Ingested document (no changes applied)";
-                  if (meta.document_type) detail = String(meta.document_type).replace(/_/g, " ");
-                } else if (a === "edit" && rt === "trust_details") {
-                  title = "Updated trust details";
-                  if (meta.fields_updated) detail = `Changed: ${(meta.fields_updated as string[]).join(", ")}`;
-                } else if (a === "create" && rt === "trust_role") {
-                  title = `Added trust role: ${meta.role || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "trust_role") {
-                  title = `Removed trust role: ${meta.role || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "cap_table_entry") {
-                  title = "Added cap table entry";
-                  if (meta.investor_name) detail = String(meta.investor_name);
-                } else if (a === "delete" && rt === "cap_table_entry") {
-                  title = "Removed cap table entry";
-                  if (meta.investor_name) detail = String(meta.investor_name);
-                } else if (a === "create" && rt === "partnership_rep") {
-                  title = "Added partnership representative";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "partnership_rep") {
-                  title = "Removed partnership representative";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "custom_field") {
-                  title = "Added custom field";
-                  if (meta.field_name) detail = String(meta.field_name);
-                } else if (a === "edit" && rt === "custom_field") {
-                  title = "Updated custom field";
-                } else if (a === "delete" && rt === "custom_field") {
-                  title = "Removed custom field";
-                } else if (a === "update_obligation" || (a === "edit" && rt === "compliance_obligation")) {
-                  title = "Updated compliance obligation";
-                  if (meta.status) detail = `Status: ${meta.status}`;
-                } else if (a === "create" && rt === "investment_allocation") {
-                  title = "Updated investment allocations";
-                  const mc = meta.member_count as number | undefined;
-                  const dc = meta.deactivated_count as number | undefined;
-                  const parts: string[] = [];
-                  if (mc) parts.push(`${mc} member${mc !== 1 ? "s" : ""}`);
-                  if (dc) parts.push(`${dc} deactivated`);
-                  detail = parts.join(", ");
-                } else if (a === "delete" && rt === "investment_allocation") {
-                  title = "Deactivated investment allocation";
-                } else if (a === "create" && rt === "investment_transaction") {
-                  const txnType = meta.transaction_type ? String(meta.transaction_type).replace(/_/g, " ") : "transaction";
-                  const amt = meta.amount as number | undefined;
-                  title = `Recorded ${txnType}`;
-                  if (amt) detail = `$${Number(amt).toLocaleString()} · ${meta.member_count || 0} member splits`;
-                } else if (a === "delete" && rt === "investment_transaction") {
-                  title = "Deleted investment transaction";
-                } else if (a === "create" && rt === "relationship") {
-                  title = "Created relationship";
-                } else if (a === "upload" && rt === "pipeline") {
-                  title = "Uploaded documents via pipeline";
-                  if (meta.file_count) detail = `${meta.file_count} file${meta.file_count !== 1 ? "s" : ""}`;
-                } else {
-                  // Fallback
-                  title = `${a} ${rt}`.replace(/_/g, " ");
-                }
+                // Single source of truth — same humanized copy as Home → Done
+                // and Settings → Activity (see lib/activity-humanizer.ts).
+                const human = humanizeActivity({ ...entry, entity_id: entityId });
+                // Internal pipeline chatter (batch processing, in-review staging
+                // edits) is jargon — skip it here just as the other feeds do.
+                if (human.suppressed) return null;
+                const title = human.lead;
+                const detail = human.detail ?? "";
 
                 const changes = Array.isArray(meta.changes) ? (meta.changes as string[]) : [];
                 const isExpandable = changes.length > 0;

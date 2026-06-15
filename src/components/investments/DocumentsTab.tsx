@@ -72,7 +72,7 @@ function formatRelativeDate(dateStr: string): string {
 
 function DocIcon({ size = 16 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#9494a0" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
       <polyline points="14 2 14 8 20 8" />
     </svg>
@@ -81,7 +81,7 @@ function DocIcon({ size = 16 }: { size?: number }) {
 
 function FolderIcon({ size = 14 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="#6b6b76" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="var(--muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
     </svg>
   );
@@ -137,14 +137,14 @@ export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
   };
 
   if (loading) {
-    return <div style={{ color: "#9494a0", fontSize: 13, padding: "20px 0" }}>Loading documents...</div>;
+    return <div style={{ color: "var(--faint)", fontSize: 13, padding: "20px 0" }}>Loading documents...</div>;
   }
 
   if (documents.length === 0) {
     return (
       <div style={{ textAlign: "center", padding: "40px 0" }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>No documents yet</div>
-        <div style={{ fontSize: 13, color: "#9494a0" }}>Documents linked to this investment will appear here.</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", marginBottom: 4 }}>No documents yet</div>
+        <div style={{ fontSize: 13, color: "var(--faint)" }}>Documents linked to this investment will appear here.</div>
       </div>
     );
   }
@@ -165,7 +165,7 @@ export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
 
   return (
     <div>
-      <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px", color: "#1a1a1f" }}>
+      <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px", color: "var(--ink)" }}>
         Documents ({documents.length})
       </h3>
 
@@ -175,24 +175,24 @@ export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
           const collapsed = collapsedCats.has(cat);
 
           return (
-            <div key={cat} style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 10, overflow: "hidden" }}>
+            <div key={cat} style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
               {/* Category header */}
               <div
                 onClick={() => toggleCategory(cat)}
                 style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between",
                   padding: "12px 18px", cursor: "pointer",
-                  borderBottom: collapsed ? "none" : "1px solid #f0eee8",
+                  borderBottom: collapsed ? "none" : "1px solid var(--hover)",
                 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <FolderIcon />
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>
                     {CATEGORY_LABELS[cat] || cat.charAt(0).toUpperCase() + cat.slice(1)}
                   </span>
-                  <span style={{ fontSize: 11, color: "#9494a0" }}>{docs.length}</span>
+                  <span style={{ fontSize: 11, color: "var(--faint)" }}>{docs.length}</span>
                 </div>
-                <div style={{ color: "#9494a0", transition: "transform 0.15s", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>
+                <div style={{ color: "var(--faint)", transition: "transform 0.15s", transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}>
                   <DownIcon />
                 </div>
               </div>
@@ -211,88 +211,88 @@ export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
                         display: isExpanded ? "none" : "flex",
                         alignItems: "center", gap: 12,
                         padding: "10px 18px",
-                        borderBottom: "1px solid #f8f7f4",
+                        borderBottom: "1px solid var(--hover)",
                         fontSize: 13, cursor: "pointer",
                         transition: "background 0.1s",
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#fafaf7")}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--hover)")}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "")}
                     >
                       <DocIcon />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontWeight: 500, color: "#1a1a1f", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        <div style={{ fontWeight: 500, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {doc.name}
                         </div>
                       </div>
 
                       {doc.document_type && doc.document_type !== "other" && (
-                        <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--blue)", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
                           {DOC_TYPE_LABELS[doc.document_type] || doc.document_type.replace(/_/g, " ")}
                         </span>
                       )}
 
                       {doc.year && (
-                        <span style={{ fontSize: 10, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        <span style={{ fontSize: 10, fontWeight: 600, color: "var(--muted)", background: "rgba(0,0,0,0.05)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
                           {doc.year}
                         </span>
                       )}
 
-                      <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: 11, color: "var(--faint)", whiteSpace: "nowrap" }}>
                         {formatRelativeDate(doc.created_at)}
                       </span>
 
-                      <span style={{ fontSize: 11, color: "#9494a0", minWidth: 50, textAlign: "right" }}>
+                      <span style={{ fontSize: 11, color: "var(--faint)", minWidth: 50, textAlign: "right" }}>
                         {formatFileSize(doc.file_size)}
                       </span>
 
-                      <div style={{ color: "#9494a0", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
+                      <div style={{ color: "var(--faint)", transition: "transform 0.15s", transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}>
                         <DownIcon />
                       </div>
                     </div>
 
                     {/* Expanded detail */}
                     {isExpanded && (
-                      <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid #e8e6df", background: "#fafaf7", position: "relative" }}>
+                      <div style={{ padding: "12px 18px 16px", borderBottom: "1px solid var(--line)", background: "var(--hover)", position: "relative" }}>
                         <button
                           onClick={() => setExpandedDocId(null)}
-                          style={{ position: "absolute", top: 12, right: 18, background: "none", border: "none", cursor: "pointer", color: "#9494a0", padding: 4, display: "flex", alignItems: "center" }}
+                          style={{ position: "absolute", top: 12, right: 18, background: "none", border: "none", cursor: "pointer", color: "var(--faint)", padding: 4, display: "flex", alignItems: "center" }}
                           title="Collapse"
                         >
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 15-6-6-6 6"/></svg>
                         </button>
 
-                        <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 10 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 10 }}>
                           {doc.name}
                         </div>
 
                         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
                           {doc.document_type && doc.document_type !== "other" && (
-                            <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--blue)", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>
                               {DOC_TYPE_LABELS[doc.document_type] || doc.document_type.replace(/_/g, " ")}
                             </span>
                           )}
                           {doc.year && (
-                            <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
+                            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted)", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>
                               {doc.year}
                             </span>
                           )}
                         </div>
 
                         {extraction?.summary && (
-                          <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "#4a4a52", lineHeight: 1.5, marginBottom: 12 }}>
-                            <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>AI Summary</div>
+                          <div style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 14px", fontSize: 12, color: "var(--muted)", lineHeight: 1.5, marginBottom: 12 }}>
+                            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>AI Summary</div>
                             {extraction.summary}
                           </div>
                         )}
 
-                        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
+                        <div style={{ display: "flex", gap: 16, fontSize: 12, color: "var(--muted)", marginBottom: 12 }}>
                           <span>Size: {formatFileSize(doc.file_size)}</span>
                           <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
                         </div>
 
                         <div style={{ display: "flex", gap: 8 }}>
-                          <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
-                          <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
+                          <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "var(--blue)", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
+                          <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "var(--red)", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
                         </div>
                       </div>
                     )}

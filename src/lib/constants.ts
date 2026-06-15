@@ -115,6 +115,10 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   investment_correspondence: 'Investment Correspondence',
   investment_summary: 'Investment Summary',
   distribution_summary: 'Distribution Summary',
+  capital_account_statement: 'Capital Account Statement',
+  financial_statements: 'Financial Statements',
+  services_agreement: 'Services Agreement',
+  tax_payment_confirmation: 'Tax Payment Confirmation',
   other: 'Other',
 };
 

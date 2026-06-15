@@ -26,6 +26,14 @@ export function Topbar({
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (data?.orgName) setOrgName(data.orgName); })
       .catch(() => {});
+    // Reflect an org rename (Settings → Organization → General) immediately,
+    // without a reload, via a lightweight window event.
+    const onRenamed = (e: Event) => {
+      const name = (e as CustomEvent<{ name?: string }>).detail?.name;
+      if (name) setOrgName(name);
+    };
+    window.addEventListener("rhodes:org-renamed", onRenamed);
+    return () => window.removeEventListener("rhodes:org-renamed", onRenamed);
   }, []);
 
   return (

@@ -44,17 +44,12 @@ export default function SettingsProfilePage() {
   const [orgEntities, setOrgEntities] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [savingEntity, setSavingEntity] = useState(false);
 
-  const [orgName, setOrgName] = useState("");
-  const [editingOrgName, setEditingOrgName] = useState(false);
-  const [savingOrg, setSavingOrg] = useState(false);
-
   const fetchCurrentUser = useCallback(async () => {
     try {
       const res = await fetch("/api/auth/me");
       if (!res.ok) return;
       const data = await res.json();
       setCurrentUser(data);
-      if (data.orgName) setOrgName(data.orgName);
       if (data.primary_entity_id !== undefined) setPrimaryEntityId(data.primary_entity_id);
     } catch {
       // Silently fail
@@ -80,26 +75,6 @@ export default function SettingsProfilePage() {
     Promise.all([fetchCurrentUser(), fetchOrgEntities()]).finally(() => setLoading(false));
   }, [fetchCurrentUser, fetchOrgEntities]);
 
-  const handleSaveOrgName = async () => {
-    if (!currentUser?.orgId || !orgName.trim()) return;
-    setSavingOrg(true);
-    try {
-      const res = await fetch(`/api/organizations/${currentUser.orgId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: orgName.trim() }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to update organization");
-      }
-      setEditingOrgName(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update");
-    } finally {
-      setSavingOrg(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -124,7 +99,7 @@ export default function SettingsProfilePage() {
           Profile
         </h1>
         <p style={{ fontSize: 13, color: "#9494a0", margin: "4px 0 0 0" }}>
-          Your account and organization
+          Your account
         </p>
       </div>
 
@@ -338,62 +313,6 @@ export default function SettingsProfilePage() {
           )}
         </SectionCard>
 
-        {currentUser?.orgId && (
-          <SectionCard title="Organization" subtitle="Manage your organization settings" isMobile={isMobile}>
-            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Organization Name
-                </div>
-                {editingOrgName ? (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      value={orgName}
-                      onChange={(e) => setOrgName(e.target.value)}
-                      style={{ flex: 1, padding: "8px 10px", fontSize: 13, border: "1px solid #ddd9d0", borderRadius: 6, background: "#fff", color: "#1a1a1f", fontFamily: "inherit", outline: "none" }}
-                    />
-                    <button
-                      onClick={handleSaveOrgName}
-                      disabled={savingOrg}
-                      style={{ padding: "8px 14px", fontSize: 12, fontWeight: 600, color: "#fff", background: "#2d5a3d", border: "none", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      {savingOrg ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      onClick={() => { setEditingOrgName(false); setOrgName(currentUser?.orgName || ""); }}
-                      style={{ padding: "8px 12px", fontSize: 12, color: "#6b6b76", background: "transparent", border: "1px solid #ddd9d0", borderRadius: 6, cursor: "pointer" }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ fontSize: 13, color: "#1a1a1f" }}>{orgName}</span>
-                    {currentUser?.orgRole === "owner" && (
-                      <button
-                        onClick={() => setEditingOrgName(true)}
-                        style={{ padding: "4px 10px", fontSize: 11, color: "#6b6b76", background: "transparent", border: "1px solid #ddd9d0", borderRadius: 4, cursor: "pointer" }}
-                      >
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-              <div>
-                <div style={{ fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Your Role
-                </div>
-                <span style={{
-                  display: "inline-block", padding: "3px 10px", borderRadius: 10, fontSize: 12, fontWeight: 500,
-                  background: "rgba(45,90,61,0.10)", color: "#2d5a3d", textTransform: "capitalize",
-                }}>
-                  {currentUser?.orgRole || "member"}
-                </span>
-              </div>
-            </div>
-          </SectionCard>
-        )}
       </div>
     </div>
   );

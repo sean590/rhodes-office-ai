@@ -62,9 +62,9 @@ interface Props {
 }
 
 const TXN_TYPE_COLORS: Record<string, { label: string; color: string; bg: string }> = {
-  contribution: { label: "Contribution", color: "#2d8a4e", bg: "rgba(45,138,78,0.10)" },
-  distribution: { label: "Distribution", color: "#3366a8", bg: "rgba(51,102,168,0.10)" },
-  return_of_capital: { label: "Return of Capital", color: "#c47520", bg: "rgba(196,117,32,0.10)" },
+  contribution: { label: "Contribution", color: "var(--green)", bg: "rgba(45,138,78,0.10)" },
+  distribution: { label: "Distribution", color: "var(--blue)", bg: "rgba(51,102,168,0.10)" },
+  return_of_capital: { label: "Return of Capital", color: "var(--amber)", bg: "rgba(196,117,32,0.10)" },
 };
 
 function fmtDollars(n: number): string {
@@ -129,19 +129,19 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
   // Map investor IDs to names
   const investorNameMap = new Map(investors.map(i => [i.id, i.entity_name || "Unknown"]));
 
-  if (loading) return <div style={{ color: "#9494a0", fontSize: 13, padding: "20px 0" }}>Loading transactions...</div>;
+  if (loading) return <div style={{ color: "var(--faint)", fontSize: 13, padding: "20px 0" }}>Loading transactions...</div>;
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>Transaction History</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "var(--ink)" }}>Transaction History</h3>
         <Button variant="primary" onClick={() => setModal({ mode: "create" })}>
           <PlusIcon size={14} /> Record Transaction
         </Button>
       </div>
 
       {parentTxns.length === 0 ? (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#9494a0", fontSize: 13 }}>No transactions recorded yet.</div>
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--faint)", fontSize: 13 }}>No transactions recorded yet.</div>
       ) : (
         <div>
           {parentTxns.map(txn => {
@@ -186,7 +186,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                   marginLeft: -12,
                   marginRight: -12,
                   borderRadius: 8,
-                  borderBottom: "1px solid #e8e6df",
+                  borderBottom: "1px solid var(--line)",
                   cursor: hasLineItems ? "pointer" : "default",
                   transition: "background-color 0.12s",
                 }}
@@ -200,19 +200,19 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                      <span style={{ fontSize: 13, color: "#9494a0" }}>{fmtDate(txn.transaction_date)}</span>
+                      <span style={{ fontSize: 13, color: "var(--faint)" }}>{fmtDate(txn.transaction_date)}</span>
                       <span style={{ fontSize: 12, fontWeight: 500, color: typeInfo.color }}>{typeInfo.label}</span>
                       {investors.length > 1 && investorName && (
-                        <span style={{ fontSize: 11, color: "#9494a0", background: "#f0eee8", padding: "1px 6px", borderRadius: 4 }}>{investorName}</span>
+                        <span style={{ fontSize: 11, color: "var(--faint)", background: "var(--hover)", padding: "1px 6px", borderRadius: 4 }}>{investorName}</span>
                       )}
                       {isAdjustment && (
                         <span
                           title={txn.adjustment_reason || "No reason recorded"}
                           style={{
                             fontSize: 11,
-                            color: "#7a5a18",
-                            background: "#fef6e4",
-                            border: "1px solid #f4d99a",
+                            color: "var(--amber)",
+                            background: "var(--amber-50)",
+                            border: "1px solid var(--amber)",
                             padding: "1px 6px",
                             borderRadius: 4,
                             cursor: "help",
@@ -222,21 +222,21 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f", marginTop: 2 }}>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)", marginTop: 2 }}>
                       {fmtSignedDollars(Number(txn.amount))}
                     </div>
                     {/* Collapsed view = date + type + investor + amount only.
                         All sub-line info (description, member splits, line items)
                         belongs in the expand panel. */}
                     {isExpanded && txn.description && (
-                      <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2 }}>
+                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>
                         {txn.document_id ? (
                           <a
                             href={`/api/documents/${txn.document_id}/download`}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}
-                            style={{ color: "#3366a8", textDecoration: "underline" }}
+                            style={{ color: "var(--blue)", textDecoration: "underline" }}
                           >
                             {txn.description}
                           </a>
@@ -246,7 +246,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                       </div>
                     )}
                     {isExpanded && memberSplits.length > 0 && (
-                      <div style={{ fontSize: 12, color: "#9494a0", marginTop: 4 }}>
+                      <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 4 }}>
                         Split: {memberSplits.map(c => `${c.member_name || "?"} ${fmtDollars(Number(c.amount))}`).join(" · ")}
                       </div>
                     )}
@@ -256,9 +256,9 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                           marginTop: 8,
                           marginLeft: 20,
                           paddingLeft: 12,
-                          borderLeft: "2px solid #e8e6df",
+                          borderLeft: "2px solid var(--line)",
                           fontSize: 12,
-                          color: "#4a4a52",
+                          color: "var(--muted)",
                         }}
                       >
                         {lineItems.map((li, i) => {
@@ -289,11 +289,11 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                           style={{
                             marginTop: 4,
                             paddingTop: 4,
-                            borderTop: "1px solid #e8e6df",
+                            borderTop: "1px solid var(--line)",
                             display: "flex",
                             justifyContent: "space-between",
                             fontWeight: 600,
-                            color: "#1a1a1f",
+                            color: "var(--ink)",
                           }}
                         >
                           <span>{isDistribution ? "Net Distribution" : "Total"}</span>
@@ -305,13 +305,13 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                             For after-the-fact financial changes (recall, corrected
                             wire). NOT for typo fixes — those use Edit on the row. */}
                         {!isAdjustment && (
-                          <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px dashed #e8e6df" }}>
+                          <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px dashed var(--line)" }}>
                             <button
                               onClick={(e) => { e.stopPropagation(); setModal({ mode: "adjust", original: txn }); }}
                               style={{
                                 background: "none",
-                                border: "1px solid #ddd9d0",
-                                color: "#6b6b76",
+                                border: "1px solid var(--line)",
+                                color: "var(--muted)",
                                 fontSize: 11,
                                 padding: "4px 10px",
                                 borderRadius: 6,
@@ -331,7 +331,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                     {!isAdjustment && (
                       <button
                         onClick={(e) => { e.stopPropagation(); setModal({ mode: "edit", original: txn }); }}
-                        style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 12, padding: "4px 8px" }}
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 12, padding: "4px 8px" }}
                         title="Fix a typo or update this transaction"
                       >
                         Edit
@@ -339,7 +339,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                     )}
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDelete(txn.id); }}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", fontSize: 12, padding: "4px 8px" }}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 12, padding: "4px 8px" }}
                       title="Delete"
                     >
                       Delete
@@ -354,7 +354,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                           width: 24,
                           height: 24,
                           marginLeft: 4,
-                          color: "#6b6b76",
+                          color: "var(--muted)",
                           transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
                           transition: "transform 0.15s",
                         }}

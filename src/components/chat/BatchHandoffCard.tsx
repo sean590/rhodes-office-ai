@@ -182,7 +182,7 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
       )}
 
       <Link
-        href={`/batches/${batch_id}`}
+        href="/processing"
         style={{
           alignSelf: "flex-start",
           padding: "6px 12px",

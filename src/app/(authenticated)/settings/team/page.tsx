@@ -281,7 +281,7 @@ export default function SettingsTeamPage() {
             margin: 0,
           }}
         >
-          Team
+          Team &amp; access
         </h1>
         <p style={{ fontSize: 13, color: "#9494a0", margin: "4px 0 0 0" }}>
           Invite users and manage roles

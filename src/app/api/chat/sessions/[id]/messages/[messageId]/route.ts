@@ -52,6 +52,19 @@ export async function PATCH(
   const existing = (msg.metadata ?? {}) as Record<string, unknown>;
   const merged = { ...existing, ...merge };
 
+  // `applied_statuses` is a per-action map; deep-merge it so a caller can persist
+  // a single action's status (Home approve/dismiss) without clobbering the
+  // statuses of sibling actions on the same message. Other keys stay shallow.
+  if (
+    existing.applied_statuses && typeof existing.applied_statuses === "object" &&
+    merge.applied_statuses && typeof merge.applied_statuses === "object"
+  ) {
+    merged.applied_statuses = {
+      ...(existing.applied_statuses as Record<string, unknown>),
+      ...(merge.applied_statuses as Record<string, unknown>),
+    };
+  }
+
   const { error } = await admin
     .from("chat_messages")
     .update({ metadata: merged })

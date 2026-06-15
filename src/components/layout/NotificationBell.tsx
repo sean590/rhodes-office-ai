@@ -169,7 +169,7 @@ export function NotificationBell() {
               batches.map((b) => (
                 <Link
                   key={b.id}
-                  href={`/batches/${b.id}`}
+                  href="/processing"
                   onClick={() => setOpen(false)}
                   style={{
                     display: "block", padding: "10px 14px",
@@ -205,7 +205,7 @@ export function NotificationBell() {
 
           {/* Pinned footer */}
           <Link
-            href="/review"
+            href="/processing"
             onClick={() => setOpen(false)}
             style={{
               flex: "0 0 auto",
@@ -216,7 +216,7 @@ export function NotificationBell() {
               background: "#fff",
             }}
           >
-            Review all pending actions →
+            View all processing →
           </Link>
         </div>
       )}

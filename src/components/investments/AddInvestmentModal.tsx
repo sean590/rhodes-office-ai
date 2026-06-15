@@ -52,10 +52,10 @@ const STEPS = ["Basics", "Ownership", "Contribution", "Allocations"];
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8,
-  border: "1px solid #ddd9d0", background: "#fff",
+  border: "1px solid var(--line)", background: "#fff",
 };
 const labelStyle: React.CSSProperties = {
-  fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4,
+  fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4,
 };
 
 export function AddInvestmentModal({ onClose, onCreated }: Props) {
@@ -226,14 +226,14 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
       <div onClick={e => e.stopPropagation()} style={{ background: "#ffffff", borderRadius: 14, width: "100%", maxWidth: 560, maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px 0" }}>
           <div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "#1a1a1f" }}>Add Investment</div>
-            <div style={{ fontSize: 12, color: "#9494a0", marginTop: 2 }}>Step {step + 1} of {STEPS.length} — {STEPS[step]}</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>Add Investment</div>
+            <div style={{ fontSize: 12, color: "var(--faint)", marginTop: 2 }}>Step {step + 1} of {STEPS.length} — {STEPS[step]}</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><XIcon size={18} /></button>
         </div>
 
         <div style={{ display: "flex", gap: 4, padding: "12px 24px" }}>
-          {STEPS.map((_, i) => (<div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? "#2d5a3d" : "#e8e6df" }} />))}
+          {STEPS.map((_, i) => (<div key={i} style={{ flex: 1, height: 3, borderRadius: 2, background: i <= step ? "var(--green)" : "var(--line)" }} />))}
         </div>
 
         <div style={{ padding: "8px 24px 24px" }}>
@@ -251,9 +251,9 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
                   {INVESTMENT_TYPES.map(t => (
                     <button key={t.value} onClick={() => setInvestmentType(t.value)} style={{
                       padding: "6px 14px", borderRadius: 6,
-                      border: `1px solid ${investmentType === t.value ? "#2d5a3d" : "#ddd9d0"}`,
+                      border: `1px solid ${investmentType === t.value ? "var(--green)" : "var(--line)"}`,
                       background: investmentType === t.value ? "rgba(45,90,61,0.08)" : "#fff",
-                      color: investmentType === t.value ? "#2d5a3d" : "#6b6b76", fontSize: 13, fontWeight: 500, cursor: "pointer",
+                      color: investmentType === t.value ? "var(--green)" : "var(--muted)", fontSize: 13, fontWeight: 500, cursor: "pointer",
                     }}>{t.label}</button>
                   ))}
                 </div>
@@ -262,9 +262,9 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
                 <label style={labelStyle}>Investing Entities *</label>
                 {investorRows.map((inv, i) => (
                   <div key={inv.entity_id} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <span style={{ flex: 1, fontSize: 14, color: "#1a1a1f" }}>{inv.entity_name}</span>
+                    <span style={{ flex: 1, fontSize: 14, color: "var(--ink)" }}>{inv.entity_name}</span>
                     <button onClick={() => setInvestorRows(investorRows.filter((_, j) => j !== i))}
-                      style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", fontSize: 16 }}>&times;</button>
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 16 }}>&times;</button>
                   </div>
                 ))}
                 {availableEntities.length > 0 && (
@@ -297,12 +297,12 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
               <div>
                 <label style={labelStyle}>Investor Positions</label>
                 {investorRows.map((inv, i) => (
-                  <div key={inv.entity_id} style={{ marginBottom: 10, background: "#f8f7f4", borderRadius: 8, padding: 10 }}>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: "#1a1a1f", marginBottom: 6 }}>{inv.entity_name}</div>
+                  <div key={inv.entity_id} style={{ marginBottom: 10, background: "var(--hover)", borderRadius: 8, padding: 10 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginBottom: 6 }}>{inv.entity_name}</div>
                     <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>Committed</span>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>$</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>Committed</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>$</span>
                         <input type="number" style={{ ...inputStyle, width: 110, textAlign: "right" }} value={inv.committed_capital}
                           onChange={e => {
                             const next = [...investorRows];
@@ -321,19 +321,19 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
                           }} placeholder="0" />
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>Capital</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>Capital</span>
                         <input type="number" style={{ ...inputStyle, width: 70, textAlign: "right" }} value={inv.capital_pct}
                           onChange={e => { const next = [...investorRows]; next[i] = { ...next[i], capital_pct: e.target.value }; setInvestorRows(next); }} placeholder="0" />
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>Profit</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>Profit</span>
                         <input type="number" style={{ ...inputStyle, width: 70, textAlign: "right" }} value={inv.profit_pct}
                           onChange={e => { const next = [...investorRows]; next[i] = { ...next[i], profit_pct: e.target.value }; setInvestorRows(next); }} placeholder="0" />
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                       </div>
                     </div>
-                    <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6 }}>
+                    <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 6 }}>
                       Enter dollars, percentages, or both. If every investor has a dollar amount, Capital % auto-fills from the totals.
                     </div>
                   </div>
@@ -364,27 +364,27 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
                   const isActive = activeCoIdx === i && query.length >= 2 && !ci.directory_entry_id;
                   const suggestions = isActive ? directoryEntries.filter(d => d.name.toLowerCase().includes(query)).slice(0, 6) : [];
                   return (
-                    <div key={i} style={{ marginBottom: 10, background: "#f8f7f4", borderRadius: 8, padding: 10 }}>
+                    <div key={i} style={{ marginBottom: 10, background: "var(--hover)", borderRadius: 8, padding: 10 }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                         <div style={{ flex: 2, position: "relative" }}>
-                          <input style={{ ...inputStyle, borderColor: ci.directory_entry_id ? "#2d8a4e" : "#ddd9d0" }}
+                          <input style={{ ...inputStyle, borderColor: ci.directory_entry_id ? "var(--green)" : "var(--line)" }}
                             value={ci.name} onChange={e => { const next = [...coInvestors]; next[i] = { ...next[i], name: e.target.value, directory_entry_id: null }; setCoInvestors(next); setActiveCoIdx(i); }}
                             onFocus={() => setActiveCoIdx(i)} onBlur={() => setTimeout(() => setActiveCoIdx(null), 150)} placeholder="Search directory..." />
-                          {ci.directory_entry_id && <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "#2d8a4e" }}>linked</span>}
+                          {ci.directory_entry_id && <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "var(--green)" }}>linked</span>}
                           {isActive && (
-                            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", maxHeight: 220, overflow: "auto" }}>
+                            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", maxHeight: 220, overflow: "auto" }}>
                               {suggestions.map(d => (
                                 <button key={d.id} onMouseDown={e => { e.preventDefault(); const next = [...coInvestors]; next[i] = { ...next[i], name: d.name, directory_entry_id: d.id }; setCoInvestors(next); setActiveCoIdx(null); }}
-                                  style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#1a1a1f" }}
-                                  onMouseEnter={e => { e.currentTarget.style.background = "#f8f7f4"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
-                                  {d.name}<span style={{ fontSize: 11, color: "#9494a0", marginLeft: 8 }}>{d.type}</span>
+                                  style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--ink)" }}
+                                  onMouseEnter={e => { e.currentTarget.style.background = "var(--hover)"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+                                  {d.name}<span style={{ fontSize: 11, color: "var(--faint)", marginLeft: 8 }}>{d.type}</span>
                                 </button>
                               ))}
                               <button onMouseDown={async e => {
                                 e.preventDefault();
                                 const res = await fetch("/api/directory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: ci.name.trim(), type: "individual" }) });
                                 if (res.ok) { const entry = await res.json(); const next = [...coInvestors]; next[i] = { ...next[i], name: entry.name, directory_entry_id: entry.id }; setCoInvestors(next); setDirectoryEntries(prev => [...prev, entry]); setActiveCoIdx(null); }
-                              }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderTop: suggestions.length > 0 ? "1px solid #e8e6df" : "none", cursor: "pointer", fontSize: 13, color: "#2d5a3d", fontWeight: 500 }}
+                              }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderTop: suggestions.length > 0 ? "1px solid var(--line)" : "none", cursor: "pointer", fontSize: 13, color: "var(--green)", fontWeight: 500 }}
                                 onMouseEnter={e => { e.currentTarget.style.background = "rgba(45,90,61,0.04)"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
                                 + Create &quot;{ci.name.trim()}&quot; in directory
                               </button>
@@ -394,27 +394,27 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
                         <select style={{ ...inputStyle, width: 110, cursor: "pointer" }} value={ci.role} onChange={e => { const next = [...coInvestors]; next[i] = { ...next[i], role: e.target.value }; setCoInvestors(next); }}>
                           <option value="co_investor">Co-Investor</option><option value="promoter">Promoter</option><option value="operator">Operator</option><option value="lender">Lender</option>
                         </select>
-                        <button onClick={() => setCoInvestors(coInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", fontSize: 16 }}>&times;</button>
+                        <button onClick={() => setCoInvestors(coInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 16 }}>&times;</button>
                       </div>
                       <div style={{ display: "flex", gap: 12 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>Capital</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>Capital</span>
                           <input type="number" style={{ ...inputStyle, width: 65, textAlign: "right" }} value={ci.capital_pct}
                             onChange={e => { const next = [...coInvestors]; next[i] = { ...next[i], capital_pct: e.target.value }; setCoInvestors(next); }} placeholder="0" />
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>Profit</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>Profit</span>
                           <input type="number" style={{ ...inputStyle, width: 65, textAlign: "right" }} value={ci.profit_pct}
                             onChange={e => { const next = [...coInvestors]; next[i] = { ...next[i], profit_pct: e.target.value }; setCoInvestors(next); }} placeholder="0" />
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                         </div>
                       </div>
                     </div>
                   );
                 })}
                 <button onClick={() => setCoInvestors([...coInvestors, { name: "", directory_entry_id: null, role: "co_investor", capital_pct: "", profit_pct: "" }])}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 13, padding: 0 }}>+ Add Co-Investor</button>
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0 }}>+ Add Co-Investor</button>
               </div>
             </div>
           )}
@@ -422,7 +422,7 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
           {/* Step 3: Contribution */}
           {step === 2 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ fontSize: 14, color: "#6b6b76", lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.5 }}>
                 How much was contributed{investorRows.length === 1 ? ` by ${investorRows[0].entity_name}` : ""}? Optional.
               </div>
               <div style={{ display: "flex", gap: 12 }}>
@@ -445,7 +445,7 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
           {/* Step 4: Allocations */}
           {step === 3 && (
             <div>
-              <div style={{ fontSize: 14, color: "#1a1a1f", marginBottom: 12, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 14, color: "var(--ink)", marginBottom: 12, lineHeight: 1.5 }}>
                 {investorRows.length === 1 && memberAllocations.length === 0
                   ? `${investorRows[0].entity_name} holds this interest directly — no internal allocation needed.`
                   : investorRows.length === 1
@@ -454,35 +454,35 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
               </div>
 
               {investorRows.length === 1 && memberAllocations.length > 0 && (
-                <div style={{ background: "#f8f7f4", borderRadius: 10, padding: 12 }}>
+                <div style={{ background: "var(--hover)", borderRadius: 10, padding: 12 }}>
                   {memberAllocations.map((alloc, i) => (
                     <div key={alloc.ref_entity_id || alloc.directory_entry_id || `m-${i}`} style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "6px 0",
-                      borderBottom: i < memberAllocations.length - 1 ? "1px solid #e8e6df" : "none",
+                      borderBottom: i < memberAllocations.length - 1 ? "1px solid var(--line)" : "none",
                     }}>
                       <input type="checkbox" checked={alloc.checked} onChange={e => {
                         const next = [...memberAllocations]; next[i] = { ...next[i], checked: e.target.checked }; setMemberAllocations(next);
                       }} />
-                      <span style={{ flex: 1, fontSize: 13, color: "#1a1a1f", minWidth: 100 }}>{alloc.name}</span>
+                      <span style={{ flex: 1, fontSize: 13, color: "var(--ink)", minWidth: 100 }}>{alloc.name}</span>
                       <input type="number" value={alloc.allocation_pct} onChange={e => {
                         const next = [...memberAllocations]; next[i] = { ...next[i], allocation_pct: e.target.value }; setMemberAllocations(next);
-                      }} placeholder="0" disabled={!alloc.checked} style={{ width: 65, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", textAlign: "right", background: alloc.checked ? "#fff" : "#f0eee8" }} />
-                      <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
-                      <span style={{ fontSize: 12, color: "#9494a0" }}>$</span>
+                      }} placeholder="0" disabled={!alloc.checked} style={{ width: 65, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", textAlign: "right", background: alloc.checked ? "#fff" : "var(--hover)" }} />
+                      <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
+                      <span style={{ fontSize: 12, color: "var(--faint)" }}>$</span>
                       <input type="number" value={alloc.committed_amount} onChange={e => {
                         const next = [...memberAllocations]; next[i] = { ...next[i], committed_amount: e.target.value }; setMemberAllocations(next);
-                      }} placeholder="0" disabled={!alloc.checked} style={{ width: 80, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", textAlign: "right", background: alloc.checked ? "#fff" : "#f0eee8" }} />
+                      }} placeholder="0" disabled={!alloc.checked} style={{ width: 80, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", textAlign: "right", background: alloc.checked ? "#fff" : "var(--hover)" }} />
                     </div>
                   ))}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0 0", marginTop: 6, borderTop: "2px solid #ddd9d0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0 0", marginTop: 6, borderTop: "2px solid var(--line)" }}>
                     <span style={{ flex: 1, fontSize: 13, fontWeight: 600, paddingLeft: 22 }}>Total</span>
-                    <span style={{ width: 65, textAlign: "right", fontSize: 13, fontWeight: 600, color: Math.abs(allocTotalPct - 100) > 0.02 ? "#c73e3e" : "#2d8a4e" }}>{allocTotalPct.toFixed(2)}</span>
-                    <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                    <span style={{ width: 65, textAlign: "right", fontSize: 13, fontWeight: 600, color: Math.abs(allocTotalPct - 100) > 0.02 ? "var(--red)" : "var(--green)" }}>{allocTotalPct.toFixed(2)}</span>
+                    <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                   </div>
                 </div>
               )}
 
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#6b6b76", marginTop: 12, cursor: "pointer" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--muted)", marginTop: 12, cursor: "pointer" }}>
                 <input type="checkbox" checked={skipAllocations} onChange={e => setSkipAllocations(e.target.checked)} />
                 Skip — I&apos;ll set allocations later
               </label>
@@ -490,7 +490,7 @@ export function AddInvestmentModal({ onClose, onCreated }: Props) {
           )}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", padding: "16px 24px", borderTop: "1px solid #e8e6df" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "16px 24px", borderTop: "1px solid var(--line)" }}>
           <div>{step > 0 && <Button variant="secondary" onClick={() => setStep(step - 1)}>&larr; Back</Button>}</div>
           <div style={{ display: "flex", gap: 8 }}>
             <Button variant="secondary" onClick={onClose}>Cancel</Button>

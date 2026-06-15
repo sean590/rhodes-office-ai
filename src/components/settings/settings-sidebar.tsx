@@ -10,7 +10,7 @@ import {
   GearIcon,
   DocIcon,
   PeopleIcon,
-  ClockIcon,
+  BuildingIcon,
 } from "@/components/ui/icons";
 
 interface NavItem {
@@ -20,13 +20,37 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-const SETTINGS_NAV: NavItem[] = [
-  { href: "/settings/profile", label: "Profile", Icon: UserIcon },
-  { href: "/settings/security", label: "Security", Icon: ShieldIcon },
-  { href: "/settings/compliance", label: "Compliance", Icon: GearIcon },
-  { href: "/settings/documents", label: "Documents", Icon: DocIcon },
-  { href: "/settings/team", label: "Team", Icon: PeopleIcon, adminOnly: true },
-  { href: "/settings/activity", label: "Activity", Icon: ClockIcon, adminOnly: true },
+interface NavGroup {
+  title: string;
+  items: NavItem[];
+}
+
+// UX refresh Phase 7: grouped into Account / Organization / Automation.
+// Renames: Compliance → "Compliance rules", Documents → "Document requirements",
+// Team → "Team & access". Org name moved to Organization → General. The org-wide
+// Activity log moved out of Settings to Home → Done.
+const SETTINGS_GROUPS: NavGroup[] = [
+  {
+    title: "Account",
+    items: [
+      { href: "/settings/profile", label: "Profile", Icon: UserIcon },
+      { href: "/settings/security", label: "Security", Icon: ShieldIcon },
+    ],
+  },
+  {
+    title: "Organization",
+    items: [
+      { href: "/settings/general", label: "General", Icon: BuildingIcon },
+      { href: "/settings/team", label: "Team & access", Icon: PeopleIcon, adminOnly: true },
+    ],
+  },
+  {
+    title: "Automation",
+    items: [
+      { href: "/settings/compliance", label: "Compliance rules", Icon: GearIcon },
+      { href: "/settings/documents", label: "Document requirements", Icon: DocIcon },
+    ],
+  },
 ];
 
 export function SettingsSidebar() {
@@ -48,9 +72,14 @@ export function SettingsSidebar() {
       .catch(() => {});
   }, []);
 
-  const visibleItems = SETTINGS_NAV.filter((item) => !item.adminOnly || isAdmin);
+  const visibleGroups = SETTINGS_GROUPS
+    .map((g) => ({ ...g, items: g.items.filter((item) => !item.adminOnly || isAdmin) }))
+    .filter((g) => g.items.length > 0);
 
   if (isMobile) {
+    // Mobile: a single horizontal scroll of all items (group titles omitted to
+    // keep the strip compact).
+    const allItems = visibleGroups.flatMap((g) => g.items);
     return (
       <nav
         style={{
@@ -63,7 +92,7 @@ export function SettingsSidebar() {
           WebkitOverflowScrolling: "touch",
         }}
       >
-        {visibleItems.map((item) => {
+        {allItems.map((item) => {
           const isActive = pathname.startsWith(item.href);
           return (
             <Link
@@ -100,34 +129,50 @@ export function SettingsSidebar() {
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 2,
+        gap: 18,
       }}
     >
-      {visibleItems.map((item) => {
-        const isActive = pathname.startsWith(item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
+      {visibleGroups.map((group) => (
+        <div key={group.title} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              padding: "8px 12px",
-              borderRadius: 7,
-              background: isActive ? "#e8e6df" : "transparent",
-              color: isActive ? "#2d5a3d" : "#6b6b76",
-              fontSize: 13,
-              fontWeight: 500,
-              textDecoration: "none",
-              transition: "background 0.15s",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#9494a0",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+              padding: "0 12px 4px",
             }}
           >
-            <item.Icon size={16} color={isActive ? "#2d5a3d" : "#6b6b76"} />
-            {item.label}
-          </Link>
-        );
-      })}
+            {group.title}
+          </div>
+          {group.items.map((item) => {
+            const isActive = pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 12px",
+                  borderRadius: 7,
+                  background: isActive ? "#e8e6df" : "transparent",
+                  color: isActive ? "#2d5a3d" : "#6b6b76",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  textDecoration: "none",
+                  transition: "background 0.15s",
+                }}
+              >
+                <item.Icon size={16} color={isActive ? "#2d5a3d" : "#6b6b76"} />
+                {item.label}
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </aside>
   );
 }

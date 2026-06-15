@@ -69,7 +69,7 @@ export function EntityServiceProvidersTab({ entityId }: { entityId: string; enti
       <Card>
         <div style={{ textAlign: "center", padding: "28px 0", color: "#9494a0", fontSize: 14 }}>
           No service providers serve this entity yet.{" "}
-          <Link href="/service-providers" style={{ color: "#2d5a3d" }}>
+          <Link href="/people" style={{ color: "#2d5a3d" }}>
             Manage providers
           </Link>
         </div>
@@ -85,7 +85,7 @@ export function EntityServiceProvidersTab({ entityId }: { entityId: string; enti
           return (
             <Link
               key={p.id}
-              href={`/service-providers/${p.id}`}
+              href={`/people/${p.id}?type=provider`}
               style={{
                 display: "flex",
                 justifyContent: "space-between",

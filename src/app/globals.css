@@ -153,3 +153,10 @@ html, body {
     opacity: 1;
   }
 }
+
+/* Spin — for in-flight processing indicators (Processing surface). */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -40,6 +40,11 @@ export async function GET() {
     const out: Array<Record<string, unknown>> = [];
     for (const m of messages ?? []) {
       const meta = (m.metadata ?? {}) as Record<string, unknown>;
+      // De-dup rule (one piece of work, one lane): a review-materialized
+      // message belongs to the Review lane, not Approve. The worker seeds
+      // these with empty staged_actions, but the ReviewCard's pickers later
+      // populate them on this same `from_review` message — exclude explicitly.
+      if (meta.from_review === true || meta.queue_item_id) continue;
       const staged = (meta.staged_actions as Array<Record<string, unknown>>) ?? [];
       const applied = (meta.applied_statuses as Record<string, string>) ?? {};
       for (const a of staged) {

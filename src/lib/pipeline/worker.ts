@@ -13,6 +13,7 @@ import {
   type OrchestratorMessage,
 } from "@/lib/mcp/orchestrator";
 import { redact } from "@/lib/mcp/redact";
+import { friendlyProcessingError } from "@/lib/pipeline/error-copy";
 
 /**
  * Process a single queue item via the document agent. The agent is the
@@ -381,13 +382,18 @@ export async function processQueueItem(
     const rawMessage = err instanceof Error ? err.message : String(err);
     console.error(`Extraction failed for queue item ${itemId}:`, rawMessage);
 
-    // Translate raw API errors into user-friendly messages
-    let friendlyMessage = rawMessage;
+    // Translate raw API errors into user-friendly messages. The large-document
+    // case gets a richer page-count message; everything else runs through the
+    // shared sanitizer so no signed URL / UUID / request id is ever persisted
+    // to a user-facing field. (Raw detail still goes to Sentry + console above.)
+    let friendlyMessage: string;
     if (rawMessage.includes("prompt is too long") || rawMessage.includes("too many tokens")) {
       const pages = item.pdf_page_count;
       friendlyMessage = pages
         ? `This document is too large to process (${pages} pages). Try uploading individual sections instead.`
         : "This document is too large to process. Try uploading individual sections instead.";
+    } else {
+      friendlyMessage = friendlyProcessingError(rawMessage);
     }
 
     const { error: markErrorErr } = await admin

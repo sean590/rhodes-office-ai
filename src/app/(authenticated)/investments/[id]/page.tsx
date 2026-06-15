@@ -10,6 +10,7 @@ import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { AllocationsTab } from "@/components/investments/AllocationsTab";
 import { TransactionsTab } from "@/components/investments/TransactionsTab";
 import { DocumentsTab } from "@/components/investments/DocumentsTab";
+import { humanizeActivity } from "@/lib/activity-humanizer";
 import type { InvestmentType, InvestmentStatus, InvestmentInvestor, CoInvestor } from "@/lib/types/investments";
 
 interface InvestmentDetail {
@@ -148,8 +149,8 @@ export default function InvestmentDetailPage() {
     } catch (err) { console.error(err); }
   };
 
-  if (loading) return <div style={{ maxWidth: 1200, margin: "0 auto" }}><div style={{ color: "#9494a0", fontSize: 13 }}>Loading...</div></div>;
-  if (!investment) return <div style={{ maxWidth: 1200, margin: "0 auto" }}><div style={{ color: "#c73e3e", fontSize: 14 }}>Investment not found.</div></div>;
+  if (loading) return <div style={{ maxWidth: 1200, margin: "0 auto" }}><div style={{ color: "var(--faint)", fontSize: 13 }}>Loading...</div></div>;
+  if (!investment) return <div style={{ maxWidth: 1200, margin: "0 auto" }}><div style={{ color: "var(--red)", fontSize: 14 }}>Investment not found.</div></div>;
 
   const typeColor = INVESTMENT_TYPE_COLORS[investment.investment_type] || INVESTMENT_TYPE_COLORS.other;
   const statusColor = INVESTMENT_STATUS_COLORS[investment.status] || INVESTMENT_STATUS_COLORS.active;
@@ -167,30 +168,30 @@ export default function InvestmentDetailPage() {
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-      <button onClick={() => router.push("/investments")} style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 13, padding: 0, marginBottom: 16 }}>
+      <button onClick={() => router.push("/investments")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0, marginBottom: 16 }}>
         &larr; Back to Investments
       </button>
 
       <div style={{ marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
           <div style={{ flex: 1 }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#1a1a1f", margin: 0 }}>{investment.name}</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", margin: 0 }}>{investment.name}</h1>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               <Badge label={INVESTMENT_TYPE_LABELS[investment.investment_type]} color={typeColor.text} bg={typeColor.bg} />
               <Badge label={INVESTMENT_STATUS_LABELS[investment.status]} color={statusColor.text} bg={statusColor.bg} />
               {investorNames.length === 1 && (
-                <span style={{ fontSize: 13, color: "#6b6b76" }}>
+                <span style={{ fontSize: 13, color: "var(--muted)" }}>
                   via{" "}
                   <button onClick={() => {
                     const inv = investment.investors[0];
                     if (inv) router.push(`/entities/${inv.entity_id}`);
-                  }} style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 13, padding: 0 }}>
+                  }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0 }}>
                     {investorNames[0]}
                   </button>
                 </span>
               )}
             </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 13, color: "#6b6b76", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 13, color: "var(--muted)", flexWrap: "wrap" }}>
               {investment.preferred_return_pct != null && (
                 <span>Pref Return: {Number(investment.preferred_return_pct)}%{investment.preferred_return_basis ? ` (${investment.preferred_return_basis.replace(/_/g, " ")})` : ""}</span>
               )}
@@ -200,7 +201,7 @@ export default function InvestmentDetailPage() {
               {investment.formation_state && <span>State: {investment.formation_state}</span>}
             </div>
             {investment.co_investors && investment.co_investors.length > 0 && (
-              <div style={{ fontSize: 13, color: "#6b6b76", marginTop: 4 }}>
+              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
                 Co-investors: {investment.co_investors.map((c) => {
                   const name = c.directory_entry_name || "Unknown";
                   const pcts = [c.capital_pct != null ? `${c.capital_pct}% capital` : null, c.profit_pct != null ? `${c.profit_pct}% profit` : null].filter(Boolean).join(", ");
@@ -209,7 +210,7 @@ export default function InvestmentDetailPage() {
                 }).join("; ")}
               </div>
             )}
-            {investment.description && <div style={{ fontSize: 13, color: "#6b6b76", marginTop: 6, maxWidth: 600, lineHeight: 1.5 }}>{investment.description}</div>}
+            {investment.description && <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, maxWidth: 600, lineHeight: 1.5 }}>{investment.description}</div>}
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
             <button
@@ -220,30 +221,30 @@ export default function InvestmentDetailPage() {
                 display: "flex", alignItems: "center", gap: 5,
                 padding: "6px 12px", borderRadius: 7,
                 border: "1px solid rgba(45,90,61,0.2)", background: "rgba(45,90,61,0.04)",
-                cursor: "pointer", color: "#2d5a3d", fontSize: 13, fontWeight: 500,
+                cursor: "pointer", color: "var(--green)", fontSize: 13, fontWeight: 500,
               }}
             >
               Ask about this
             </button>
             <Button variant="secondary" onClick={startEditing}>Edit</Button>
-            <button onClick={() => setShowDeleteConfirm(true)} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid #e8e6df", background: "none", cursor: "pointer", color: "#c73e3e", fontSize: 13, fontWeight: 500 }}>Delete</button>
+            <button onClick={() => setShowDeleteConfirm(true)} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--red)", fontSize: 13, fontWeight: 500 }}>Delete</button>
           </div>
         </div>
 
         {showDeleteConfirm && (
           <div style={{ marginTop: 12, padding: "12px 16px", background: "rgba(199,62,62,0.06)", border: "1px solid rgba(199,62,62,0.2)", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: 13, color: "#c73e3e" }}>Delete this investment and all data?</span>
+            <span style={{ fontSize: 13, color: "var(--red)" }}>Delete this investment and all data?</span>
             <div style={{ display: "flex", gap: 8 }}>
               <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
-              <button onClick={handleDelete} style={{ padding: "6px 14px", borderRadius: 7, border: "none", background: "#c73e3e", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Confirm Delete</button>
+              <button onClick={handleDelete} style={{ padding: "6px 14px", borderRadius: 7, border: "none", background: "var(--red)", color: "#fff", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Confirm Delete</button>
             </div>
           </div>
         )}
 
         {editing && (
-          <div style={{ marginTop: 16, padding: 20, background: "#f8f7f4", borderRadius: 10, border: "1px solid #e8e6df" }}>
+          <div style={{ marginTop: 16, padding: 20, background: "var(--hover)", borderRadius: 10, border: "1px solid var(--line)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <span style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f" }}>Edit Investment</span>
+              <span style={{ fontSize: 15, fontWeight: 600, color: "var(--ink)" }}>Edit Investment</span>
               <div style={{ display: "flex", gap: 8 }}>
                 <Button variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
                 <Button variant="primary" onClick={saveEdits} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
@@ -251,13 +252,13 @@ export default function InvestmentDetailPage() {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Name</label>
-                <input style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Name</label>
+                <input style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
               </div>
               <div style={{ display: "flex", gap: 12 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Status</label>
-                  <select style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff", cursor: "pointer" }} value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Status</label>
+                  <select style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff", cursor: "pointer" }} value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
                     <option value="active">Active</option>
                     <option value="committed">Committed</option>
                     <option value="winding_down">Winding Down</option>
@@ -266,12 +267,12 @@ export default function InvestmentDetailPage() {
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Preferred Return %</label>
-                  <input type="number" style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff" }} value={editPrefReturnPct} onChange={(e) => setEditPrefReturnPct(e.target.value)} placeholder="0" />
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Preferred Return %</label>
+                  <input type="number" style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} value={editPrefReturnPct} onChange={(e) => setEditPrefReturnPct(e.target.value)} placeholder="0" />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Pref Return Basis</label>
-                  <select style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff", cursor: "pointer" }} value={editPrefReturnBasis} onChange={(e) => setEditPrefReturnBasis(e.target.value)}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Pref Return Basis</label>
+                  <select style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff", cursor: "pointer" }} value={editPrefReturnBasis} onChange={(e) => setEditPrefReturnBasis(e.target.value)}>
                     <option value="">None</option>
                     <option value="capital_contributed">Capital Contributed</option>
                     <option value="capital_committed">Capital Committed</option>
@@ -279,10 +280,10 @@ export default function InvestmentDetailPage() {
                 </div>
               </div>
               <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "#6b6b76", display: "block", marginBottom: 4 }}>Description</label>
-                <textarea style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid #ddd9d0", background: "#fff", minHeight: 60, resize: "vertical" }} value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Description</label>
+                <textarea style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff", minHeight: 60, resize: "vertical" }} value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
               </div>
-              <div style={{ fontSize: 12, color: "#9494a0", padding: "8px 12px", background: "#f8f7f4", borderRadius: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--faint)", padding: "8px 12px", background: "var(--hover)", borderRadius: 6 }}>
                 Investors and co-investors are managed from the <strong>Edit Investors</strong> button on the Ownership table below.
               </div>
             </div>
@@ -304,13 +305,13 @@ export default function InvestmentDetailPage() {
             ...(uncalled != null ? [{ label: "Uncalled", value: fmtDollarsFull(uncalled) }] : []),
             { label: "Cash Invested", value: fmtDollarsFull(investment.total_contributed), sub: "incl. fees" },
             { label: "Distributed", value: fmtDollarsFull(investment.total_distributed) },
-            { label: "Net", value: fmtDollarsFull(net) },
-          ].map((stat: { label: string; value: string; sub?: string | null }) => (
-            <div key={stat.label} style={{ background: "#f8f7f4", borderRadius: 10, padding: "10px 18px", flex: isMobile ? "1 1 calc(50% - 8px)" : "0 0 auto" }}>
-              <div style={{ fontSize: 11, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>{stat.label}</div>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1f", marginTop: 2 }}>{stat.value}</div>
+            { label: "Net cash position", value: fmtDollarsFull(net), valueColor: net < 0 ? "var(--red)" : "var(--green)" },
+          ].map((stat: { label: string; value: string; sub?: string | null; valueColor?: string }) => (
+            <div key={stat.label} style={{ background: "var(--hover)", borderRadius: 10, padding: "10px 18px", flex: isMobile ? "1 1 calc(50% - 8px)" : "0 0 auto" }}>
+              <div style={{ fontSize: 11, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 600 }}>{stat.label}</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: stat.valueColor ?? "var(--ink)", marginTop: 2 }}>{stat.value}</div>
               {stat.sub && (
-                <div style={{ fontSize: 10, color: "#9494a0", marginTop: 2 }}>{stat.sub}</div>
+                <div style={{ fontSize: 10, color: "var(--faint)", marginTop: 2 }}>{stat.sub}</div>
               )}
             </div>
           ))}
@@ -318,12 +319,12 @@ export default function InvestmentDetailPage() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #e8e6df", marginBottom: 20 }}>
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
         {TABS.map((tab) => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
             padding: "10px 20px", background: "none", border: "none",
-            borderBottom: activeTab === tab.id ? "2px solid #2d5a3d" : "2px solid transparent",
-            color: activeTab === tab.id ? "#2d5a3d" : "#6b6b76",
+            borderBottom: activeTab === tab.id ? "2px solid var(--green)" : "2px solid transparent",
+            color: activeTab === tab.id ? "var(--green)" : "var(--muted)",
             fontWeight: activeTab === tab.id ? 600 : 400, fontSize: 14, cursor: "pointer", transition: "all 0.15s",
           }}>
             {tab.label}
@@ -354,39 +355,33 @@ export default function InvestmentDetailPage() {
 
       {activeTab === "activity" && (
         <div>
-          <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px", color: "#1a1a1f" }}>Activity</h3>
+          <h3 style={{ fontSize: 15, fontWeight: 600, margin: "0 0 16px", color: "var(--ink)" }}>Activity</h3>
           {activityLoading ? (
-            <div style={{ color: "#9494a0", fontSize: 13 }}>Loading activity...</div>
+            <div style={{ color: "var(--faint)", fontSize: 13 }}>Loading activity...</div>
           ) : activityLog.length === 0 ? (
-            <div style={{ color: "#9494a0", fontSize: 13, textAlign: "center", padding: "40px 0" }}>No activity recorded yet.</div>
+            <div style={{ color: "var(--faint)", fontSize: 13, textAlign: "center", padding: "40px 0" }}>No activity recorded yet.</div>
           ) : (
             <div>
               {activityLog.map((entry) => {
-                const a = entry.action;
-                const rt = entry.resource_type;
-                const meta = entry.metadata || {};
-                let title = `${a} ${rt}`.replace(/_/g, " ");
-                let detail = "";
-
-                if (a === "create" && rt === "investment") { title = "Investment created"; if (meta.name) detail = String(meta.name); }
-                else if (a === "edit" && rt === "investment") { title = "Updated investment details"; if (Array.isArray(meta.fields_updated)) detail = `Changed: ${(meta.fields_updated as string[]).join(", ")}`; }
-                else if (a === "create" && rt === "investment_allocation") { title = "Updated allocations"; const mc = meta.member_count as number | undefined; if (mc) detail = `${mc} member${mc !== 1 ? "s" : ""}`; }
-                else if (a === "delete" && rt === "investment_allocation") { title = "Deactivated allocation"; }
-                else if (a === "create" && rt === "investment_transaction") { const txnType = meta.transaction_type ? String(meta.transaction_type).replace(/_/g, " ") : "transaction"; const amt = meta.amount as number | undefined; title = `Recorded ${txnType}`; if (amt) detail = `$${Number(amt).toLocaleString()}`; }
-                else if (a === "delete" && rt === "investment_transaction") { title = "Deleted transaction"; }
+                // Single source of truth — same humanized copy as Home → Done,
+                // the entity Activity tab, and Settings (lib/activity-humanizer.ts).
+                const human = humanizeActivity({ ...entry, investment_id: id });
+                if (human.suppressed) return null;
+                const title = human.lead;
+                const detail = human.detail ?? "";
 
                 const timeStr = new Date(entry.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
                 return (
-                  <div key={entry.id} style={{ padding: "12px 0", borderBottom: "1px solid #e8e6df" }}>
+                  <div key={entry.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, color: "#1a1a1f", fontWeight: 500 }}>{title}</div>
-                        {detail && <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 2 }}>{detail}</div>}
+                        <div style={{ fontSize: 13, color: "var(--ink)", fontWeight: 500 }}>{title}</div>
+                        {detail && <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 2 }}>{detail}</div>}
                       </div>
                       <div style={{ textAlign: "right", flexShrink: 0 }}>
-                        <div style={{ fontSize: 12, color: "#9494a0", whiteSpace: "nowrap" }}>{timeStr}</div>
-                        {entry.user_name && <div style={{ fontSize: 11, color: "#b0b0b8", marginTop: 1 }}>{entry.user_name}</div>}
+                        <div style={{ fontSize: 12, color: "var(--faint)", whiteSpace: "nowrap" }}>{timeStr}</div>
+                        {entry.user_name && <div style={{ fontSize: 11, color: "var(--faint)", marginTop: 1 }}>{entry.user_name}</div>}
                       </div>
                     </div>
                   </div>

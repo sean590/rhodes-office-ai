@@ -105,7 +105,7 @@ export default function SettingsDocumentsPage() {
             margin: 0,
           }}
         >
-          Documents
+          Document requirements
         </h1>
         <p style={{ fontSize: 13, color: "#9494a0", margin: "4px 0 0 0" }}>
           Document requirements per entity type and AI-detected patterns

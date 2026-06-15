@@ -189,7 +189,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
   const totalPct = editAllocations.filter(a => a.checked).reduce((s, a) => s + (Number(a.allocation_pct) || 0), 0);
   const totalCommitted = editAllocations.filter(a => a.checked).reduce((s, a) => s + (Number(a.committed_amount) || 0), 0);
 
-  if (loading) return <div style={{ color: "#9494a0", fontSize: 13, padding: "20px 0" }}>Loading allocations...</div>;
+  if (loading) return <div style={{ color: "var(--faint)", fontSize: 13, padding: "20px 0" }}>Loading allocations...</div>;
 
   // === Ownership table ===
   // Derived capital % display: if every internal investor has a committed_capital
@@ -220,7 +220,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
       {(investors.length > 0 || coInvestors.length > 0) && (
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 12px" }}>
-            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>Ownership</h3>
+            <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "var(--ink)" }}>Ownership</h3>
             {!editingInvestors && (
               <Button variant="secondary" onClick={() => {
                 setEditInternalInvestors(investors.map(inv => ({
@@ -246,74 +246,74 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
             )}
           </div>
           {preferredReturnPct != null && (
-            <div style={{ fontSize: 13, color: "#6b6b76", marginBottom: 12 }}>
+            <div style={{ fontSize: 13, color: "var(--muted)", marginBottom: 12 }}>
               Preferred Return: {Number(preferredReturnPct)}%{preferredReturnBasis ? ` on ${preferredReturnBasis.replace(/_/g, " ")}` : ""}
             </div>
           )}
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Investor</th>
-                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Role</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Capital %</th>
-                {showProfit && <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Profit %</th>}
-                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Committed</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>Called</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Investor</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Role</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Capital %</th>
+                {showProfit && <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Profit %</th>}
+                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Committed</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Called</th>
               </tr>
             </thead>
             <tbody>
               {investors.map((inv) => (
                 <tr key={inv.id}>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", borderBottom: "1px solid #f0eee8" }}>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", borderBottom: "1px solid var(--hover)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span>{inv.entity_name || "Unknown"}</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.10)", padding: "2px 7px", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Internal</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--green)", background: "rgba(45,90,61,0.10)", padding: "2px 7px", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>Internal</span>
                     </div>
                   </td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", borderBottom: "1px solid #f0eee8" }}>Investor</td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", borderBottom: "1px solid var(--hover)" }}>Investor</td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>
                     {inv.capital_pct != null
                       ? `${Number(inv.capital_pct)}%`
                       : derivedCapPct(inv) != null
                         ? `${derivedCapPct(inv)!.toFixed(2)}%`
                         : "—"}
                   </td>
-                  {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{inv.profit_pct != null ? `${Number(inv.profit_pct)}%` : "—"}</td>}
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{inv.committed_capital != null ? fmtDollars(Number(inv.committed_capital)) : "—"}</td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{inv.called_capital != null ? fmtDollars(inv.called_capital) : "—"}</td>
+                  {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{inv.profit_pct != null ? `${Number(inv.profit_pct)}%` : "—"}</td>}
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{inv.committed_capital != null ? fmtDollars(Number(inv.committed_capital)) : "—"}</td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{inv.called_capital != null ? fmtDollars(inv.called_capital) : "—"}</td>
                 </tr>
               ))}
               {coInvestors.map((ci) => (
                 <tr key={ci.id}>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", borderBottom: "1px solid #f0eee8" }}>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", borderBottom: "1px solid var(--hover)" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span>{ci.directory_entry_name || "Unknown"}</span>
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#6b3fa3", background: "rgba(123,77,181,0.10)", padding: "2px 7px", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>External</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "var(--purple)", background: "rgba(123,77,181,0.10)", padding: "2px 7px", borderRadius: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>External</span>
                     </div>
                   </td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", borderBottom: "1px solid #f0eee8" }}>{ROLE_LABELS[ci.role] || ci.role}</td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{ci.capital_pct != null ? `${Number(ci.capital_pct)}%` : "—"}</td>
-                  {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{ci.profit_pct != null ? `${Number(ci.profit_pct)}%` : "—"}</td>}
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>—</td>
-                  <td style={{ padding: "10px 12px", fontSize: 13, color: "#6b6b76", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>—</td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", borderBottom: "1px solid var(--hover)" }}>{ROLE_LABELS[ci.role] || ci.role}</td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{ci.capital_pct != null ? `${Number(ci.capital_pct)}%` : "—"}</td>
+                  {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{ci.profit_pct != null ? `${Number(ci.profit_pct)}%` : "—"}</td>}
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>—</td>
+                  <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--muted)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>—</td>
                 </tr>
               ))}
               <tr>
-                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#1a1a1f", borderTop: "2px solid #ddd9d0" }}>Total</td>
-                <td style={{ padding: "10px 12px", borderTop: "2px solid #ddd9d0" }}></td>
-                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#1a1a1f", textAlign: "right", borderTop: "2px solid #ddd9d0" }}>{totalCapital.toFixed(2)}%</td>
-                {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#1a1a1f", textAlign: "right", borderTop: "2px solid #ddd9d0" }}>{totalProfit.toFixed(2)}%</td>}
-                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#1a1a1f", textAlign: "right", borderTop: "2px solid #ddd9d0" }}>{totalCommittedCapital > 0 ? fmtDollars(totalCommittedCapital) : "—"}</td>
-                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "#1a1a1f", textAlign: "right", borderTop: "2px solid #ddd9d0" }}>{totalCalledCapital > 0 ? fmtDollars(totalCalledCapital) : "—"}</td>
+                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "var(--ink)", borderTop: "2px solid var(--line)" }}>Total</td>
+                <td style={{ padding: "10px 12px", borderTop: "2px solid var(--line)" }}></td>
+                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "var(--ink)", textAlign: "right", borderTop: "2px solid var(--line)" }}>{totalCapital.toFixed(2)}%</td>
+                {showProfit && <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "var(--ink)", textAlign: "right", borderTop: "2px solid var(--line)" }}>{totalProfit.toFixed(2)}%</td>}
+                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "var(--ink)", textAlign: "right", borderTop: "2px solid var(--line)" }}>{totalCommittedCapital > 0 ? fmtDollars(totalCommittedCapital) : "—"}</td>
+                <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, color: "var(--ink)", textAlign: "right", borderTop: "2px solid var(--line)" }}>{totalCalledCapital > 0 ? fmtDollars(totalCalledCapital) : "—"}</td>
               </tr>
             </tbody>
           </table>
 
           {/* Unified Investors editor — dual section: Internal + External */}
           {editingInvestors && (
-            <div style={{ marginTop: 16, background: "#f8f7f4", borderRadius: 10, padding: 16 }}>
+            <div style={{ marginTop: 16, background: "var(--hover)", borderRadius: 10, padding: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>Edit Investors</h4>
+                <h4 style={{ fontSize: 14, fontWeight: 600, margin: 0, color: "var(--ink)" }}>Edit Investors</h4>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button variant="secondary" onClick={() => { setEditingInvestors(false); setActiveCoIdx(null); }}>Cancel</Button>
                   <Button variant="primary" onClick={async () => {
@@ -373,18 +373,18 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
               {/* Internal Investors section */}
               <div style={{ marginBottom: 20 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <h5 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "#1a1a1f", textTransform: "uppercase", letterSpacing: "0.06em" }}>Investors (Internal)</h5>
-                  <span style={{ fontSize: 11, color: "#9494a0" }}>Entities you manage that hold an interest in the deal</span>
+                  <h5 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Investors (Internal)</h5>
+                  <span style={{ fontSize: 11, color: "var(--faint)" }}>Entities you manage that hold an interest in the deal</span>
                 </div>
 
                 {editInternalInvestors.length === 0 && (
-                  <div style={{ fontSize: 13, color: "#9494a0", padding: "8px 0" }}>No internal investors. At least one is required.</div>
+                  <div style={{ fontSize: 13, color: "var(--faint)", padding: "8px 0" }}>No internal investors. At least one is required.</div>
                 )}
 
                 {editInternalInvestors.map((ei, i) => {
-                  const inputStyle = { padding: "6px 10px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", background: "#fff" };
+                  const inputStyle = { padding: "6px 10px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", background: "#fff" };
                   return (
-                    <div key={i} style={{ marginBottom: 8, background: "#fff", borderRadius: 8, padding: 10, border: "1px solid #e8e6df" }}>
+                    <div key={i} style={{ marginBottom: 8, background: "#fff", borderRadius: 8, padding: 10, border: "1px solid var(--line)" }}>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                         <select
                           style={{ ...inputStyle, flex: 2, cursor: "pointer" }}
@@ -397,7 +397,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                           ))}
                         </select>
                         <div style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>$</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>$</span>
                           <input
                             type="text"
                             style={{ ...inputStyle, flex: 1, textAlign: "right" }}
@@ -422,12 +422,12 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                           />
                         </div>
                         {editInternalInvestors.length > 1 && (
-                          <button onClick={() => setEditInternalInvestors(editInternalInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", fontSize: 16 }}>&times;</button>
+                          <button onClick={() => setEditInternalInvestors(editInternalInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 16 }}>&times;</button>
                         )}
                       </div>
                       <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>Capital</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>Capital</span>
                           <input
                             type="number"
                             style={{ ...inputStyle, width: 70, textAlign: "right" }}
@@ -435,10 +435,10 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                             onChange={e => { const next = [...editInternalInvestors]; next[i] = { ...next[i], capital_pct: e.target.value }; setEditInternalInvestors(next); }}
                             placeholder="0"
                           />
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>Profit</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>Profit</span>
                           <input
                             type="number"
                             style={{ ...inputStyle, width: 70, textAlign: "right" }}
@@ -446,7 +446,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                             onChange={e => { const next = [...editInternalInvestors]; next[i] = { ...next[i], profit_pct: e.target.value }; setEditInternalInvestors(next); }}
                             placeholder="0"
                           />
-                          <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                          <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                         </div>
                       </div>
                     </div>
@@ -469,22 +469,22 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                   const capPctOff = totalCapPct > 0 && Math.abs(totalCapPct - 100) > 0.02;
                   const profitPctOff = totalProfitPct > 0 && Math.abs(totalProfitPct - 100) > 0.02;
                   return (
-                    <div style={{ marginTop: 6, padding: "8px 10px", background: "#fff", borderRadius: 8, border: "1px solid #e8e6df", display: "flex", gap: 16, alignItems: "center", fontSize: 12, color: "#1a1a1f" }}>
-                      <span style={{ fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "#9494a0" }}>Total</span>
+                    <div style={{ marginTop: 6, padding: "8px 10px", background: "#fff", borderRadius: 8, border: "1px solid var(--line)", display: "flex", gap: 16, alignItems: "center", fontSize: 12, color: "var(--ink)" }}>
+                      <span style={{ fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--faint)" }}>Total</span>
                       <span>
-                        <span style={{ color: "#9494a0" }}>Committed </span>
+                        <span style={{ color: "var(--faint)" }}>Committed </span>
                         <strong>${totalCommitted.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</strong>
                       </span>
                       <span>
-                        <span style={{ color: "#9494a0" }}>Capital </span>
-                        <strong style={{ color: capPctOff ? "#c73e3e" : "#1a1a1f" }}>{totalCapPct.toFixed(2)}%</strong>
+                        <span style={{ color: "var(--faint)" }}>Capital </span>
+                        <strong style={{ color: capPctOff ? "var(--red)" : "var(--ink)" }}>{totalCapPct.toFixed(2)}%</strong>
                       </span>
                       <span>
-                        <span style={{ color: "#9494a0" }}>Profit </span>
-                        <strong style={{ color: profitPctOff ? "#c73e3e" : "#1a1a1f" }}>{totalProfitPct.toFixed(2)}%</strong>
+                        <span style={{ color: "var(--faint)" }}>Profit </span>
+                        <strong style={{ color: profitPctOff ? "var(--red)" : "var(--ink)" }}>{totalProfitPct.toFixed(2)}%</strong>
                       </span>
                       {(capPctOff || profitPctOff) && (
-                        <span style={{ color: "#c73e3e", fontSize: 11 }}>Percentages should sum to 100%.</span>
+                        <span style={{ color: "var(--red)", fontSize: 11 }}>Percentages should sum to 100%.</span>
                       )}
                     </div>
                   );
@@ -492,44 +492,44 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
 
                 <button
                   onClick={() => setEditInternalInvestors([...editInternalInvestors, { id: null, entity_id: "", committed_capital: "", capital_pct: "", profit_pct: "" }])}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 13, padding: 0, marginTop: 8 }}
+                  style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0, marginTop: 8 }}
                 >+ Add Investor</button>
               </div>
 
               {/* External Co-Investors section */}
-              <div style={{ paddingTop: 16, borderTop: "1px solid #e8e6df" }}>
+              <div style={{ paddingTop: 16, borderTop: "1px solid var(--line)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                  <h5 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "#1a1a1f", textTransform: "uppercase", letterSpacing: "0.06em" }}>Co-Investors (External)</h5>
-                  <span style={{ fontSize: 11, color: "#9494a0" }}>Promoters, operators, lenders, and third parties in the deal for context</span>
+                  <h5 style={{ fontSize: 12, fontWeight: 600, margin: 0, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Co-Investors (External)</h5>
+                  <span style={{ fontSize: 11, color: "var(--faint)" }}>Promoters, operators, lenders, and third parties in the deal for context</span>
                 </div>
 
                 {editCoInvestors.length === 0 && (
-                  <div style={{ fontSize: 13, color: "#9494a0", padding: "8px 0" }}>No co-investors. Click below to add one.</div>
+                  <div style={{ fontSize: 13, color: "var(--faint)", padding: "8px 0" }}>No co-investors. Click below to add one.</div>
                 )}
 
                 {editCoInvestors.map((ci, i) => {
                 const query = ci.name.toLowerCase();
                 const isActive = activeCoIdx === i && query.length >= 2 && !ci.directory_entry_id;
                 const suggestions = isActive ? directoryEntries.filter(d => d.name.toLowerCase().includes(query)).slice(0, 6) : [];
-                const inputStyle = { width: "100%", padding: "6px 10px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", background: "#fff" };
+                const inputStyle = { width: "100%", padding: "6px 10px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", background: "#fff" };
                 return (
-                  <div key={i} style={{ marginBottom: 10, background: "#fff", borderRadius: 8, padding: 10, border: "1px solid #e8e6df" }}>
+                  <div key={i} style={{ marginBottom: 10, background: "#fff", borderRadius: 8, padding: 10, border: "1px solid var(--line)" }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
                       <div style={{ flex: 2, position: "relative" }}>
-                        <input style={{ ...inputStyle, borderColor: ci.directory_entry_id ? "#2d8a4e" : "#ddd9d0" }}
+                        <input style={{ ...inputStyle, borderColor: ci.directory_entry_id ? "var(--green)" : "var(--line)" }}
                           value={ci.name}
                           onChange={e => { const next = [...editCoInvestors]; next[i] = { ...next[i], name: e.target.value, directory_entry_id: null }; setEditCoInvestors(next); setActiveCoIdx(i); }}
                           onFocus={() => setActiveCoIdx(i)}
                           onBlur={() => setTimeout(() => setActiveCoIdx(null), 150)}
                           placeholder="Search directory..." />
-                        {ci.directory_entry_id && <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "#2d8a4e" }}>linked</span>}
+                        {ci.directory_entry_id && <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 11, color: "var(--green)" }}>linked</span>}
                         {isActive && (
-                          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", maxHeight: 220, overflow: "auto" }}>
+                          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 10, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.08)", maxHeight: 220, overflow: "auto" }}>
                             {suggestions.map(d => (
                               <button key={d.id} onMouseDown={e => { e.preventDefault(); const next = [...editCoInvestors]; next[i] = { ...next[i], name: d.name, directory_entry_id: d.id }; setEditCoInvestors(next); setActiveCoIdx(null); }}
-                                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "#1a1a1f" }}
-                                onMouseEnter={e => { e.currentTarget.style.background = "#f8f7f4"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
-                                {d.name}<span style={{ fontSize: 11, color: "#9494a0", marginLeft: 8 }}>{d.type}</span>
+                                style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--ink)" }}
+                                onMouseEnter={e => { e.currentTarget.style.background = "var(--hover)"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
+                                {d.name}<span style={{ fontSize: 11, color: "var(--faint)", marginLeft: 8 }}>{d.type}</span>
                               </button>
                             ))}
                             {ci.name.trim().length >= 2 && (
@@ -537,7 +537,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                                 e.preventDefault();
                                 const res = await fetch("/api/directory", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: ci.name.trim(), type: "individual" }) });
                                 if (res.ok) { const entry = await res.json(); const next = [...editCoInvestors]; next[i] = { ...next[i], name: entry.name, directory_entry_id: entry.id }; setEditCoInvestors(next); setDirectoryEntries(prev => [...prev, entry]); setActiveCoIdx(null); }
-                              }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderTop: suggestions.length > 0 ? "1px solid #e8e6df" : "none", cursor: "pointer", fontSize: 13, color: "#2d5a3d", fontWeight: 500 }}
+                              }} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderTop: suggestions.length > 0 ? "1px solid var(--line)" : "none", cursor: "pointer", fontSize: 13, color: "var(--green)", fontWeight: 500 }}
                                 onMouseEnter={e => { e.currentTarget.style.background = "rgba(45,90,61,0.04)"; }} onMouseLeave={e => { e.currentTarget.style.background = "none"; }}>
                                 + Create &quot;{ci.name.trim()}&quot; in directory
                               </button>
@@ -551,20 +551,20 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                         <option value="operator">Operator</option>
                         <option value="lender">Lender</option>
                       </select>
-                      <button onClick={() => setEditCoInvestors(editCoInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "#9494a0", fontSize: 16 }}>&times;</button>
+                      <button onClick={() => setEditCoInvestors(editCoInvestors.filter((_, j) => j !== i))} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 16 }}>&times;</button>
                     </div>
                     <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>Capital</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>Capital</span>
                         <input type="number" style={{ ...inputStyle, width: 70, textAlign: "right" }} value={ci.capital_pct}
                           onChange={e => { const next = [...editCoInvestors]; next[i] = { ...next[i], capital_pct: e.target.value }; setEditCoInvestors(next); }} placeholder="0" />
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>Profit</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>Profit</span>
                         <input type="number" style={{ ...inputStyle, width: 70, textAlign: "right" }} value={ci.profit_pct}
                           onChange={e => { const next = [...editCoInvestors]; next[i] = { ...next[i], profit_pct: e.target.value }; setEditCoInvestors(next); }} placeholder="0" />
-                        <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
+                        <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
                       </div>
                       <input style={{ ...inputStyle, flex: 1 }} value={ci.notes} onChange={e => { const next = [...editCoInvestors]; next[i] = { ...next[i], notes: e.target.value }; setEditCoInvestors(next); }} placeholder="Notes (optional)" />
                     </div>
@@ -573,7 +573,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
               })}
 
               <button onClick={() => setEditCoInvestors([...editCoInvestors, { directory_entry_id: null, name: "", role: "co_investor", capital_pct: "", profit_pct: "", notes: "" }])}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "#3366a8", fontSize: 13, padding: 0, marginTop: 4 }}>+ Add Co-Investor</button>
+                style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0, marginTop: 4 }}>+ Add Co-Investor</button>
               </div>
             </div>
           )}
@@ -599,7 +599,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
           return (
             <div key={inv.id} style={{ marginBottom: 28 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>
+                <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "var(--ink)" }}>
                   Allocations — {inv.entity_name || "Investor"}
                 </h3>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -608,7 +608,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                 </div>
               </div>
 
-              <div style={{ background: "#f8f7f4", borderRadius: 10, padding: 16 }}>
+              <div style={{ background: "var(--hover)", borderRadius: 10, padding: 16 }}>
                 {editAllocations.filter(a => a.checked).length >= 2 && (
                   <div style={{ marginBottom: 12 }}>
                     <button onClick={() => {
@@ -628,7 +628,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                         idx++;
                         return { ...a, allocation_pct: String(Math.round(pct * 100) / 100), committed_amount: totalContributed > 0 ? String(cents / 100) : "" };
                       }));
-                    }} style={{ background: "none", border: "1px solid #ddd9d0", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500 }}>
+                    }} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "4px 12px", cursor: "pointer", fontSize: 12, color: "var(--blue)", fontWeight: 500 }}>
                       Split Equally ({editAllocations.filter(a => a.checked).length} members)
                     </button>
                   </div>
@@ -637,40 +637,40 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                 {editAllocations.map((alloc, i) => (
                   <div key={alloc.member_entity_id || alloc.member_directory_id || `alloc-${i}`} style={{
                     display: "flex", alignItems: "center", gap: 12, padding: "8px 0",
-                    borderBottom: i < editAllocations.length - 1 ? "1px solid #e8e6df" : "none",
+                    borderBottom: i < editAllocations.length - 1 ? "1px solid var(--line)" : "none",
                   }}>
                     <input type="checkbox" checked={alloc.checked} onChange={e => {
                       const next = [...editAllocations]; next[i] = { ...next[i], checked: e.target.checked }; setEditAllocations(next);
                     }} />
-                    <span style={{ flex: 1, fontSize: 13, color: "#1a1a1f", minWidth: 120 }}>{alloc.name}</span>
+                    <span style={{ flex: 1, fontSize: 13, color: "var(--ink)", minWidth: 120 }}>{alloc.name}</span>
                     <input type="number" value={alloc.allocation_pct} onChange={e => {
                       const pct = e.target.value;
                       const next = [...editAllocations];
                       const update = { ...next[i], allocation_pct: pct };
                       if (totalContributed > 0 && pct !== "") update.committed_amount = String(Math.round((Number(pct) / 100) * totalContributed * 100) / 100);
                       next[i] = update; setEditAllocations(next);
-                    }} placeholder="0" disabled={!alloc.checked} style={{ width: 70, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", textAlign: "right", background: alloc.checked ? "#fff" : "#f0eee8" }} />
-                    <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
-                    <span style={{ fontSize: 12, color: "#9494a0" }}>$</span>
+                    }} placeholder="0" disabled={!alloc.checked} style={{ width: 70, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", textAlign: "right", background: alloc.checked ? "#fff" : "var(--hover)" }} />
+                    <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
+                    <span style={{ fontSize: 12, color: "var(--faint)" }}>$</span>
                     <input type="number" value={alloc.committed_amount} onChange={e => {
                       const amt = e.target.value;
                       const next = [...editAllocations];
                       const update = { ...next[i], committed_amount: amt };
                       if (totalContributed > 0 && amt !== "") update.allocation_pct = String(Math.round((Number(amt) / totalContributed) * 100 * 100) / 100);
                       next[i] = update; setEditAllocations(next);
-                    }} placeholder="0" disabled={!alloc.checked} style={{ width: 90, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid #ddd9d0", textAlign: "right", background: alloc.checked ? "#fff" : "#f0eee8" }} />
+                    }} placeholder="0" disabled={!alloc.checked} style={{ width: 90, padding: "4px 8px", fontSize: 13, borderRadius: 6, border: "1px solid var(--line)", textAlign: "right", background: alloc.checked ? "#fff" : "var(--hover)" }} />
                   </div>
                 ))}
 
-                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0 0", marginTop: 8, borderTop: "2px solid #ddd9d0" }}>
-                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#1a1a1f", paddingLeft: 24 }}>Total</span>
-                  <span style={{ width: 70, textAlign: "right", fontSize: 13, fontWeight: 600, color: Math.abs(totalPct - 100) > 0.02 ? "#c73e3e" : "#2d8a4e" }}>{totalPct.toFixed(2)}</span>
-                  <span style={{ fontSize: 12, color: "#9494a0" }}>%</span>
-                  <span style={{ fontSize: 12, color: "#9494a0" }}>$</span>
-                  <span style={{ width: 90, textAlign: "right", fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>{totalCommitted.toLocaleString()}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0 0", marginTop: 8, borderTop: "2px solid var(--line)" }}>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "var(--ink)", paddingLeft: 24 }}>Total</span>
+                  <span style={{ width: 70, textAlign: "right", fontSize: 13, fontWeight: 600, color: Math.abs(totalPct - 100) > 0.02 ? "var(--red)" : "var(--green)" }}>{totalPct.toFixed(2)}</span>
+                  <span style={{ fontSize: 12, color: "var(--faint)" }}>%</span>
+                  <span style={{ fontSize: 12, color: "var(--faint)" }}>$</span>
+                  <span style={{ width: 90, textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--ink)" }}>{totalCommitted.toLocaleString()}</span>
                 </div>
                 {Math.abs(totalPct - 100) > 0.02 && editAllocations.some(a => a.checked) && (
-                  <div style={{ fontSize: 12, color: "#c73e3e", marginTop: 8 }}>Allocations must sum to 100% (currently {totalPct.toFixed(2)}%)</div>
+                  <div style={{ fontSize: 12, color: "var(--red)", marginTop: 8 }}>Allocations must sum to 100% (currently {totalPct.toFixed(2)}%)</div>
                 )}
               </div>
             </div>
@@ -681,16 +681,16 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
         return (
           <div key={inv.id} style={{ marginBottom: 28 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "#1a1a1f" }}>
+              <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "var(--ink)" }}>
                 {investors.length > 1 ? `Allocations — ${inv.entity_name || "Investor"}` : "Internal Allocations"}
-                {investors.length === 1 && inv.entity_name && <span style={{ fontWeight: 400, color: "#9494a0" }}> — {inv.entity_name}</span>}
+                {investors.length === 1 && inv.entity_name && <span style={{ fontWeight: 400, color: "var(--faint)" }}> — {inv.entity_name}</span>}
               </h3>
               <Button variant="secondary" onClick={() => startEditing(inv.id)}>Edit</Button>
             </div>
 
             {allocs.length === 0 ? (
               <div style={{ textAlign: "center", padding: "30px 0" }}>
-                <div style={{ fontSize: 14, color: "#9494a0", marginBottom: 12 }}>No allocations set for {inv.entity_name || "this investor"}.</div>
+                <div style={{ fontSize: 14, color: "var(--faint)", marginBottom: 12 }}>No allocations set for {inv.entity_name || "this investor"}.</div>
                 <Button variant="primary" onClick={() => startEditing(inv.id)}><PlusIcon size={14} /> Set Allocations</Button>
               </div>
             ) : (
@@ -698,16 +698,16 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                 <thead>
                   <tr>
                     {["Member", "Allocation", "Committed"].map(h => (
-                      <th key={h} style={{ padding: "8px 12px", textAlign: h === "Member" ? "left" : "right", fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid #e8e6df" }}>{h}</th>
+                      <th key={h} style={{ padding: "8px 12px", textAlign: h === "Member" ? "left" : "right", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {allocs.map(alloc => (
                     <tr key={alloc.id}>
-                      <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", borderBottom: "1px solid #f0eee8" }}>{alloc.member_name || "Unknown"}</td>
-                      <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>{Number(alloc.allocation_pct).toFixed(2)}%</td>
-                      <td style={{ padding: "10px 12px", fontSize: 13, color: "#1a1a1f", textAlign: "right", borderBottom: "1px solid #f0eee8" }}>
+                      <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", borderBottom: "1px solid var(--hover)" }}>{alloc.member_name || "Unknown"}</td>
+                      <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>{Number(alloc.allocation_pct).toFixed(2)}%</td>
+                      <td style={{ padding: "10px 12px", fontSize: 13, color: "var(--ink)", textAlign: "right", borderBottom: "1px solid var(--hover)" }}>
                         {inv.committed_capital != null
                           ? fmtDollars(Math.round(Number(alloc.allocation_pct) / 100 * Number(inv.committed_capital) * 100) / 100)
                           : "—"}
@@ -715,9 +715,9 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                     </tr>
                   ))}
                   <tr>
-                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, borderTop: "2px solid #ddd9d0" }}>Total</td>
-                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, textAlign: "right", borderTop: "2px solid #ddd9d0" }}>{allocs.reduce((s, a) => s + Number(a.allocation_pct), 0).toFixed(2)}%</td>
-                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, textAlign: "right", borderTop: "2px solid #ddd9d0" }}>
+                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, borderTop: "2px solid var(--line)" }}>Total</td>
+                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, textAlign: "right", borderTop: "2px solid var(--line)" }}>{allocs.reduce((s, a) => s + Number(a.allocation_pct), 0).toFixed(2)}%</td>
+                    <td style={{ padding: "10px 12px", fontSize: 13, fontWeight: 600, textAlign: "right", borderTop: "2px solid var(--line)" }}>
                       {inv.committed_capital != null ? fmtDollars(Number(inv.committed_capital)) : "$0"}
                     </td>
                   </tr>
