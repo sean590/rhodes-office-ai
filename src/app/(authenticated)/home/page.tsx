@@ -75,6 +75,36 @@ function reviewMeta(r: ReviewItem): string {
   return bits.length ? bits.join(" · ") : "ready to review";
 }
 
+// Plain-language explanation of why a document is parked for review, instead of
+// the raw queue reason code ("agent_deferred", "mismatch", …).
+function reviewReasonText(reason: string | null | undefined): string {
+  switch (reason) {
+    case "agent_deferred":
+      return "Rhodes couldn't confidently file this on its own. Confirm it as-is, or reassign the entity / reclassify it in chat — either clears it from here.";
+    case "mismatch":
+      return "The extracted details didn't match what was expected — give it a quick look before filing.";
+    case "duplicate_of_sibling":
+      return "This looks like a possible duplicate of another document in the same upload.";
+    default:
+      return reason ? reason.replace(/_/g, " ") : "Ready to review.";
+  }
+}
+
+// Two-tone detail for a review item's expanded/sheet view: what it is, where
+// it'd go, and why it's here.
+function ReviewDetail({ r }: { r: ReviewItem }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 13.5, color: "var(--ink)", fontWeight: 600 }}>{r.document_name}</div>
+      <div style={{ fontSize: 12.5, color: "var(--muted)" }}>
+        {r.entity_name ? `Suggested entity: ${r.entity_name}` : "No entity assigned yet"}
+        {r.document_type_label && r.document_type_label !== "Other" ? ` · ${r.document_type_label}` : ""}
+      </div>
+      <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.5 }}>{reviewReasonText(r.approval_reason)}</div>
+    </div>
+  );
+}
+
 export default function HomePage() {
   const setPageContext = useSetPageContext();
   const chatPanel = useChatPanel();
@@ -332,7 +362,7 @@ export default function HomePage() {
       return {
         id: r.id, title: r.document_name,
         subtitle: `${g.channel === "chat" ? "from chat" : "to review"} · ${reviewMeta(r)}`,
-        detail: <span>{reviewMeta(r)}{r.approval_reason ? ` — ${r.approval_reason}` : ""}</span>,
+        detail: <ReviewDetail r={r} />,
         dup: dups.ids.has(r.id) ? "Possible duplicate of another document in this batch." : undefined,
         primaryLabel: "Confirm",
         onApprove: () => confirmReview(r),
@@ -400,9 +430,7 @@ export default function HomePage() {
           actions={[{ label: "Confirm", variant: "primary", onClick: () => confirmReview(r), busy: busy[r.id] }]}
           expandedContent={
             <div>
-              <div style={{ fontSize: 13.5, color: "var(--ink)" }}>{r.document_name}</div>
-              <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>{reviewMeta(r)}</div>
-              {r.approval_reason && <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 4 }}>Why review: {r.approval_reason}</div>}
+              <ReviewDetail r={r} />
               <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
                 <Button variant="secondary" onClick={() => refineReview(r)}>Refine in chat</Button>
               </div>

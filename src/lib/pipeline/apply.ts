@@ -35,6 +35,28 @@ export interface ApplyOptions {
  * Apply a set of proposed actions to the database.
  * Returns results for each action.
  */
+
+/**
+ * When a parked-for-review document (review_ready — typically agent_deferred,
+ * where the agent couldn't confidently classify/assign it) gets handled
+ * directly via chat — entity reassigned, type reclassified, or linked to an
+ * investment — the human has just supplied exactly what the agent deferred for.
+ * Resolve any lingering review_ready queue item for that document so it leaves
+ * the Review lane instead of stranding there. (Bug: reassigning a deferred doc
+ * in chat updated the document but never cleared its queue item.)
+ */
+async function resolvePendingReviewForDocument(
+  supabase: ReturnType<typeof createAdminClient>,
+  documentId: string | null | undefined,
+): Promise<void> {
+  if (!documentId) return;
+  await supabase
+    .from("document_queue")
+    .update({ status: "approved", updated_at: new Date().toISOString() })
+    .eq("document_id", documentId)
+    .eq("status", "review_ready");
+}
+
 export async function applyActions(
   actions: Array<{ action: string; data: Record<string, unknown> }>,
   options: ApplyOptions = {}
@@ -1133,6 +1155,9 @@ export async function applyActions(
           await checkAndSatisfyExpectations(linkEntityDocId).catch((err) =>
             console.error("checkAndSatisfyExpectations after link_document_to_entity failed:", err),
           );
+          // Reassigning the entity is exactly what an agent_deferred review
+          // needs — clear any lingering review_ready item for this doc.
+          await resolvePendingReviewForDocument(supabase, linkEntityDocId);
 
           results.push({
             action: "link_document_to_entity",
@@ -1171,6 +1196,7 @@ export async function applyActions(
                 entity_id: linkInvestor?.entity_id || undefined,
               })
               .eq("id", linkDocId);
+            await resolvePendingReviewForDocument(supabase, linkDocId);
           }
 
           results.push({
@@ -2009,6 +2035,12 @@ export async function applyActions(
             await checkAndSatisfyExpectations(documentId).catch((err) =>
               console.error(`update_document check-and-satisfy failed for ${documentId}:`, err),
             );
+          }
+
+          // Reclassifying type/category/year resolves what an agent_deferred
+          // review was waiting on — clear any lingering review_ready item.
+          if (updates.document_type !== undefined || updates.document_category !== undefined || updates.year !== undefined) {
+            await resolvePendingReviewForDocument(supabase, documentId);
           }
 
           results.push({ action: "update_document", success: true, data: after });
