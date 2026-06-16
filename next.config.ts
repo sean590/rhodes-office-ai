@@ -23,7 +23,11 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co",
               "font-src 'self' https://fonts.gstatic.com",
-              "connect-src 'self' https://*.supabase.co https://*.rhodesoffice.ai https://api.anthropic.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
+              // wss://*.supabase.co is REQUIRED for Supabase Realtime — CSP connect-src
+              // matches by scheme, so https://*.supabase.co does NOT cover the realtime
+              // WebSocket. Without it the browser blocks the socket ("The operation is
+              // insecure"), which crashed the authenticated shell on subscribe.
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.rhodesoffice.ai https://api.anthropic.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
               "frame-ancestors 'none'",
             ].join("; "),
           },
