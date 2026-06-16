@@ -318,14 +318,15 @@ export default function InvestmentDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20 }}>
+      {/* Tabs — horizontally scrollable on narrow screens so labels are never clipped */}
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 20, overflowX: "auto", WebkitOverflowScrolling: "touch", scrollbarWidth: "none" }}>
         {TABS.map((tab) => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
-            padding: "10px 20px", background: "none", border: "none",
+            flexShrink: 0, whiteSpace: "nowrap",
+            padding: "10px 16px", background: "none", border: "none",
             borderBottom: activeTab === tab.id ? "2px solid var(--green)" : "2px solid transparent",
             color: activeTab === tab.id ? "var(--green)" : "var(--muted)",
-            fontWeight: activeTab === tab.id ? 600 : 400, fontSize: 14, cursor: "pointer", transition: "all 0.15s",
+            fontWeight: activeTab === tab.id ? 600 : 400, fontSize: 14, cursor: "pointer", transition: "color 0.15s",
           }}>
             {tab.label}
           </button>

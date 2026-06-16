@@ -18,6 +18,7 @@ import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useChatPanel } from "@/components/chat/chat-panel-provider";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import { ProcessingStrip } from "@/components/home/ProcessingStrip";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { InboxCard, GroupCard, GroupChildRow, SectionHead } from "@/components/home/InboxCard";
@@ -77,6 +78,7 @@ function reviewMeta(r: ReviewItem): string {
 export default function HomePage() {
   const setPageContext = useSetPageContext();
   const chatPanel = useChatPanel();
+  const isMobile = useIsMobile();
   const [lane, setLane] = useState<"needs" | "suggested" | "done">("needs");
   const [userId, setUserId] = useState<string | null>(null);
   const [staged, setStaged] = useState<StagedItem[]>([]);
@@ -478,7 +480,7 @@ export default function HomePage() {
 
       {lane === "needs" && (
         <div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 4 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 10, marginBottom: 4 }}>
             <Stat n={needsCount} label="All needs-you" onClick={() => setFocus(null)} active={focus === null} />
             <Stat n={approveCount} label="To approve" onClick={approveCount ? () => setFocus("approve") : undefined} active={focus === "approve"} />
             <Stat n={reviews.length} label="To review" onClick={reviews.length ? () => setFocus("review") : undefined} active={focus === "review"} />

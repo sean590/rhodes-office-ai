@@ -250,7 +250,8 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
               Preferred Return: {Number(preferredReturnPct)}%{preferredReturnBasis ? ` on ${preferredReturnBasis.replace(/_/g, " ")}` : ""}
             </div>
           )}
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+          <table style={{ width: "100%", minWidth: 460, borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", borderBottom: "1px solid var(--line)" }}>Investor</th>
@@ -308,6 +309,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
               </tr>
             </tbody>
           </table>
+          </div>
 
           {/* Unified Investors editor — dual section: Internal + External */}
           {editingInvestors && (
@@ -694,7 +696,8 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                 <Button variant="primary" onClick={() => startEditing(inv.id)}><PlusIcon size={14} /> Set Allocations</Button>
               </div>
             ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+              <table style={{ width: "100%", minWidth: 420, borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
                     {["Member", "Allocation", "Committed"].map(h => (
@@ -723,6 +726,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
                   </tr>
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         );

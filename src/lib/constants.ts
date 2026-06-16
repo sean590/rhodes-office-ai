@@ -119,6 +119,8 @@ export const DOCUMENT_TYPE_LABELS: Record<string, string> = {
   financial_statements: 'Financial Statements',
   services_agreement: 'Services Agreement',
   tax_payment_confirmation: 'Tax Payment Confirmation',
+  safe_agreement: 'SAFE Agreement',
+  draw_request: 'Draw Request',
   other: 'Other',
 };
 
