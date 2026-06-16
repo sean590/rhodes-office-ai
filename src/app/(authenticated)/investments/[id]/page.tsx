@@ -173,8 +173,8 @@ export default function InvestmentDetailPage() {
       </button>
 
       <div style={{ marginBottom: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16 }}>
-          <div style={{ flex: 1 }}>
+        <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: "flex-start", gap: isMobile ? 12 : 16 }}>
+          <div style={{ flex: 1, minWidth: 0, width: isMobile ? "100%" : undefined }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", margin: 0 }}>{investment.name}</h1>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
               <Badge label={INVESTMENT_TYPE_LABELS[investment.investment_type]} color={typeColor.text} bg={typeColor.bg} />
@@ -212,7 +212,7 @@ export default function InvestmentDetailPage() {
             )}
             {investment.description && <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, maxWidth: 600, lineHeight: 1.5 }}>{investment.description}</div>}
           </div>
-          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
             <button
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("rhodes:open-chat", { detail: { query: `Tell me about the ${investment.name} investment` } }));

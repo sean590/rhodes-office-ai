@@ -161,6 +161,7 @@ export function GroupCard({
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
   const [showAll, setShowAll] = useState(false);
+  const isMobile = useIsMobile();
   const ch = CHANNEL[channel];
   const items = React.Children.toArray(children);
   const cap = childCap ?? items.length;
@@ -168,7 +169,7 @@ export function GroupCard({
   const hidden = items.length - visible.length;
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
+      <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 12, padding: "13px 16px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
         <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--page)", color: iconColor }}>
           <Icon name={icon} size={18} />
         </div>
@@ -177,20 +178,22 @@ export function GroupCard({
             <span style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>{label}</span>
             <span style={{ fontSize: 11, fontWeight: 700, minWidth: 18, textAlign: "center", padding: "1px 6px", borderRadius: 999, background: "var(--line)", color: "var(--muted)" }}>{count}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 5, color: ch.color, background: ch.bg }}>{ch.label}</span>
             <span style={{ fontSize: 12.5, color: "var(--muted)" }}>{stamp}</span>
             {!!dupCount && dupCount > 0 && <DupPill label={`${dupCount} duplicate${dupCount === 1 ? "" : "s"}`} />}
           </div>
         </div>
-        <ActionButtons actions={actions} />
-        <button
-          onClick={() => setOpen((o) => !o)}
-          aria-label={open ? "Collapse" : "Expand"}
-          style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", border: "1px solid var(--line)", background: "var(--card)", color: "var(--muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform .12s" }}
-        >
-          <Icon name="chevron-down" size={16} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, ...(isMobile ? { width: "100%", justifyContent: "flex-end", marginTop: 4 } : {}) }}>
+          <ActionButtons actions={actions} />
+          <button
+            onClick={() => setOpen((o) => !o)}
+            aria-label={open ? "Collapse" : "Expand"}
+            style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 8, cursor: "pointer", display: "grid", placeItems: "center", border: "1px solid var(--line)", background: "var(--card)", color: "var(--muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform .12s" }}
+          >
+            <Icon name="chevron-down" size={16} />
+          </button>
+        </div>
       </div>
       {open && (items.length > 0 || onDismissAll) && (
         <div>
@@ -221,16 +224,19 @@ export function GroupChildRow({
   dup?: boolean;
   actions: InboxAction[];
 }) {
+  const isMobile = useIsMobile();
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderTop: "1px solid var(--line)" }}>
+    <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 12, padding: "12px 16px", borderTop: "1px solid var(--line)", flexWrap: isMobile ? "wrap" : "nowrap" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-          <span style={{ fontSize: 14, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</span>
+          <span style={{ fontSize: 14, color: "var(--ink)", ...(isMobile ? { lineHeight: 1.35 } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{title}</span>
           {dup && <DupPill />}
         </div>
         {meta && <div style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{meta}</div>}
       </div>
-      <ActionButtons actions={actions} />
+      <div style={{ display: "flex", gap: 6, flexShrink: 0, ...(isMobile ? { width: "100%", justifyContent: "flex-end", marginTop: 6 } : {}) }}>
+        <ActionButtons actions={actions} />
+      </div>
     </div>
   );
 }
