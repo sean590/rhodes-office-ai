@@ -2053,6 +2053,7 @@ function TrustDetailsCard({
   picklist: PicklistItem[];
   picklistLoading: boolean;
 }) {
+  const isMobile = useIsMobile();
   const [addingRole, setAddingRole] = useState(false);
   const [newRoleType, setNewRoleType] = useState<TrustRoleType>("trustee");
   const [showRolePicker, setShowRolePicker] = useState(false);
@@ -2186,7 +2187,7 @@ function TrustDetailsCard({
           </button>
         )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 32 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 2fr", gap: isMobile ? 16 : 32 }}>
         {/* Left column: Trust info */}
         <div>
           {editingDetails ? (
@@ -4199,6 +4200,7 @@ function DocumentsTab({
   entityName: string;
   entityData: Record<string, unknown> | null;
 }) {
+  const isMobile = useIsMobile();
   const [showUpload, setShowUpload] = useState(false);
 
   // Document completeness expectations — loaded from entity data.
@@ -5265,7 +5267,8 @@ function DocumentsTab({
                     style={{
                       display: isExpanded ? "none" : "flex",
                       alignItems: "center",
-                      gap: 12,
+                      flexWrap: isMobile ? "wrap" : "nowrap",
+                      gap: isMobile ? 8 : 12,
                       padding: `10px 18px 10px ${paddingLeft}px`,
                       borderBottom: "1px solid #f8f7f4",
                       fontSize: 13,
@@ -6148,7 +6151,7 @@ export default function EntityDetailPage() {
             flexShrink: 0,
           }}
         >
-          <BuildingIcon size={24} />
+          <BuildingIcon size={24} color="var(--green)" />
         </div>
 
         <div style={{ flex: 1 }}>
