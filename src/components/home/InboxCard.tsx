@@ -20,6 +20,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { Icon, type IconName } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export type Channel = "chat" | "email" | "compliance" | "upload" | "portal";
 
@@ -84,15 +85,18 @@ export function InboxCard({
   defaultExpanded?: boolean;
 }) {
   const [open, setOpen] = useState(!!defaultExpanded);
+  const isMobile = useIsMobile();
   const ch = channel ? CHANNEL[channel] : null;
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)", overflow: "hidden" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
+      {/* On mobile the action buttons wrap to their own line so they don't
+          squeeze the title down to an ellipsis. */}
+      <div style={{ display: "flex", alignItems: isMobile ? "flex-start" : "center", gap: 12, padding: "13px 16px", flexWrap: isMobile ? "wrap" : "nowrap" }}>
         <div style={{ flexShrink: 0, width: 34, height: 34, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--page)", color: iconColor }}>
           <Icon name={icon} size={18} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</div>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", ...(isMobile ? { lineHeight: 1.35 } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{title}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
             {ch && (
               <span style={{ fontSize: 11, fontWeight: 600, padding: "1px 8px", borderRadius: 5, color: ch.color, background: ch.bg }}>{ch.label}</span>
@@ -106,7 +110,7 @@ export function InboxCard({
             {badge.text}
           </span>
         )}
-        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0, ...(isMobile ? { width: "100%", justifyContent: "flex-end", marginTop: 4 } : {}) }}>
           <ActionButtons actions={actions} />
           {expandedContent != null && (
             <Button variant="secondary" onClick={() => setOpen((o) => !o)}>{open ? "Done" : "Edit"}</Button>

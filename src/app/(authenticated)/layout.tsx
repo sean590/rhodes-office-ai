@@ -91,7 +91,10 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <main style={{
             flex: 1,
             padding: isMobile ? 16 : 28,
-            paddingBottom: isMobile ? `calc(16px + 56px + env(safe-area-inset-bottom, 0px))` : 28,
+            // Clear the bottom tab bar (56) AND the floating chat FAB that
+            // sits above it (~64), so the last content + corner elements (cap
+            // table bar, doc rows) scroll clear instead of hiding under them.
+            paddingBottom: isMobile ? `calc(16px + 56px + 64px + env(safe-area-inset-bottom, 0px))` : 28,
             overflowY: "auto",
             minWidth: 0,
           }}>
