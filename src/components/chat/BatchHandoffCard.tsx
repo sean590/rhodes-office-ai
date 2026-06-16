@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { safeSubscribe } from "@/lib/supabase/safe-realtime";
 
 type BatchStatus = "staging" | "processing" | "review" | "completed";
 
@@ -83,7 +84,7 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
       } catch { /* ignore */ }
     })();
 
-    const channel = supabase
+    const channel = safeSubscribe(() => supabase
       .channel(`batch-handoff-${batch_id}`)
       .on(
         "postgres_changes",
@@ -98,11 +99,11 @@ export function BatchHandoffCard({ metadata }: { metadata: BatchHandoffMeta }) {
           if (next) setStatus(next);
         },
       )
-      .subscribe();
+      .subscribe());
 
     return () => {
       cancelled = true;
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [supabase, batch_id]);
 

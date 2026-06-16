@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { safeSubscribe } from "@/lib/supabase/safe-realtime";
 
 interface BatchRow {
   id: string;
@@ -76,22 +77,15 @@ export function NotificationBell() {
     };
     load();
 
-    // Realtime is a best-effort refresh trigger, never load-bearing. Some
-    // contexts block the WebSocket (CSP, strict mobile/in-app webviews) and
-    // .subscribe() throws synchronously ("The operation is insecure"); since
-    // this effect runs in the always-mounted Topbar, an uncaught throw would
-    // break the authenticated shell right after login. Swallow it — the bell
-    // still works from the initial fetch above.
-    let channel: ReturnType<typeof supabase.channel> | null = null;
-    try {
-      channel = supabase
-        .channel("batch-notifications")
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "document_batches" }, load)
-        .on("postgres_changes", { event: "UPDATE", schema: "public", table: "document_batches" }, load)
-        .subscribe();
-    } catch (err) {
-      console.warn("NotificationBell: realtime unavailable, falling back to fetch-only", err);
-    }
+    // Realtime is a best-effort refresh trigger; safeSubscribe degrades to null
+    // (no live push) if the WebSocket is blocked, rather than throwing and
+    // breaking the always-mounted Topbar shell. The bell still works from the
+    // initial fetch above.
+    const channel = safeSubscribe(() => supabase
+      .channel("batch-notifications")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "document_batches" }, load)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "document_batches" }, load)
+      .subscribe());
 
     return () => {
       cancelled = true;

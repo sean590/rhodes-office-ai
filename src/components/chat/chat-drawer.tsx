@@ -9,6 +9,7 @@ import { usePageContext, type PageContext } from "./page-context-provider";
 import { useChatPanel } from "./chat-panel-provider";
 import { readChatStream } from "@/lib/utils/chat-stream";
 import { createClient } from "@/lib/supabase/client";
+import { safeSubscribe } from "@/lib/supabase/safe-realtime";
 import { readStreamEvents } from "@/lib/chat/stream-reader";
 import type { StreamEvent } from "@/lib/mcp/stream-events";
 import type { LinkableRef } from "@/lib/utils/linkify";
@@ -164,7 +165,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   useEffect(() => {
     if (!activeSessionId) return;
 
-    const channel = supabase
+    const channel = safeSubscribe(() => supabase
       .channel(`chat-${activeSessionId}`)
       .on(
         "postgres_changes",
@@ -213,10 +214,10 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         if (status === "SUBSCRIBED") {
           void refetchActiveSessionMessages(activeSessionId);
         }
-      });
+      }));
 
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
   }, [activeSessionId, supabase, refetchActiveSessionMessages]);
 
@@ -262,7 +263,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   // list so the unread badge can compute fresh.
   useEffect(() => {
     if (!isOpen) return;
-    const channel = supabase
+    const channel = safeSubscribe(() => supabase
       .channel(`session-list-updates`)
       .on(
         "postgres_changes",
@@ -278,9 +279,9 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         if (status === "SUBSCRIBED") {
           void fetchSessions();
         }
-      });
+      }));
     return () => {
-      supabase.removeChannel(channel);
+      if (channel) supabase.removeChannel(channel);
     };
     // fetchSessions is stable (useCallback with empty deps below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
