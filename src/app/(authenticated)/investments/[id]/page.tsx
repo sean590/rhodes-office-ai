@@ -166,6 +166,24 @@ export default function InvestmentDetailPage() {
   const net = investment.total_distributed - investment.total_contributed;
   const investorNames = investment.investors.map((inv) => inv.entity_name || "Unknown");
 
+  // "Lead with state, not schema" (same North Star as the entity pages): a
+  // plain-language one-liner about what this investment IS, instead of a stack
+  // of labeled raw fields. The description + co-investors move out of the header.
+  const viaName = investorNames.length === 1 ? investorNames[0] : null;
+  const investedStr = investment.date_invested
+    ? new Date(investment.date_invested + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+  const statusLower = (INVESTMENT_STATUS_LABELS[investment.status] || investment.status).toLowerCase();
+  const typeLower = (INVESTMENT_TYPE_LABELS[investment.investment_type] || "").toLowerCase();
+  const prefPct = investment.preferred_return_pct != null ? Number(investment.preferred_return_pct) : null;
+  let stateClause = `a ${typeLower} investment`.replace("  ", " ");
+  if (viaName) stateClause += ` held via ${viaName}`;
+  if (investment.formation_state) stateClause += ` in ${investment.formation_state}`;
+  let stateTail = "";
+  if (investedStr) stateTail += `invested ${investedStr}`;
+  if (prefPct != null) stateTail += `${investedStr ? " at a " : ""}${prefPct}% preferred return`;
+  const stateSentence = `${investment.name} is ${statusLower} — ${stateClause}${stateTail ? `, ${stateTail}` : ""}.`;
+
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto" }}>
       <button onClick={() => router.push("/investments")} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0, marginBottom: 16 }}>
@@ -176,41 +194,10 @@ export default function InvestmentDetailPage() {
         <div style={{ display: "flex", flexDirection: isMobile ? "column" : "row", justifyContent: "space-between", alignItems: "flex-start", gap: isMobile ? 12 : 16 }}>
           <div style={{ flex: 1, minWidth: 0, width: isMobile ? "100%" : undefined }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "var(--ink)", margin: 0 }}>{investment.name}</h1>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               <Badge label={INVESTMENT_TYPE_LABELS[investment.investment_type]} color={typeColor.text} bg={typeColor.bg} />
               <Badge label={INVESTMENT_STATUS_LABELS[investment.status]} color={statusColor.text} bg={statusColor.bg} />
-              {investorNames.length === 1 && (
-                <span style={{ fontSize: 13, color: "var(--muted)" }}>
-                  via{" "}
-                  <button onClick={() => {
-                    const inv = investment.investors[0];
-                    if (inv) router.push(`/entities/${inv.entity_id}`);
-                  }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--blue)", fontSize: 13, padding: 0 }}>
-                    {investorNames[0]}
-                  </button>
-                </span>
-              )}
             </div>
-            <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: 13, color: "var(--muted)", flexWrap: "wrap" }}>
-              {investment.preferred_return_pct != null && (
-                <span>Pref Return: {Number(investment.preferred_return_pct)}%{investment.preferred_return_basis ? ` (${investment.preferred_return_basis.replace(/_/g, " ")})` : ""}</span>
-              )}
-              {investment.date_invested && (
-                <span>Invested: {new Date(investment.date_invested + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</span>
-              )}
-              {investment.formation_state && <span>State: {investment.formation_state}</span>}
-            </div>
-            {investment.co_investors && investment.co_investors.length > 0 && (
-              <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 4 }}>
-                Co-investors: {investment.co_investors.map((c) => {
-                  const name = c.directory_entry_name || "Unknown";
-                  const pcts = [c.capital_pct != null ? `${c.capital_pct}% capital` : null, c.profit_pct != null ? `${c.profit_pct}% profit` : null].filter(Boolean).join(", ");
-                  const role = c.role !== "co_investor" ? ` [${c.role}]` : "";
-                  return `${name}${pcts ? ` (${pcts})` : ""}${role}`;
-                }).join("; ")}
-              </div>
-            )}
-            {investment.description && <div style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, maxWidth: 600, lineHeight: 1.5 }}>{investment.description}</div>}
           </div>
           <div style={{ display: "flex", gap: 8, flexShrink: 0, flexWrap: "wrap" }}>
             <button
@@ -229,6 +216,12 @@ export default function InvestmentDetailPage() {
             <Button variant="secondary" onClick={startEditing}>Edit</Button>
             <button onClick={() => setShowDeleteConfirm(true)} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--red)", fontSize: 13, fontWeight: 500 }}>Delete</button>
           </div>
+        </div>
+
+        {/* Lead with state, not schema — a plain-language summary of the investment */}
+        <div style={{ marginTop: 14, padding: "14px 18px", border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)", display: "flex", alignItems: "flex-start", gap: 10 }}>
+          <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 999, marginTop: 6, background: investment.status === "active" ? "var(--green)" : "var(--muted)" }} />
+          <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.5 }}>{stateSentence}</span>
         </div>
 
         {showDeleteConfirm && (
@@ -316,6 +309,13 @@ export default function InvestmentDetailPage() {
             </div>
           ))}
         </div>
+
+        {investment.description && (
+          <div style={{ marginTop: 16, padding: "14px 18px", border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)" }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>About</div>
+            <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55 }}>{investment.description}</div>
+          </div>
+        )}
       </div>
 
       {/* Tabs — horizontally scrollable on narrow screens so labels are never clipped */}
