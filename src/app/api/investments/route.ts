@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createInvestmentSchema } from "@/lib/validations";
-import { deriveTotalsFromTransactions, type TransactionTotalRow } from "@/lib/utils/transaction-totals";
+import { deriveTotalsFromTransactions, earliestContributionDate, type TransactionTotalRow } from "@/lib/utils/transaction-totals";
 
 /**
  * GET /api/investments
@@ -142,7 +142,7 @@ export async function GET(request: Request) {
         if (investorIds.length > 0) {
           const { data } = await supabase
             .from("investment_transactions")
-            .select("transaction_type, amount, line_items, adjusts_transaction_id")
+            .select("transaction_type, amount, line_items, adjusts_transaction_id, transaction_date")
             .in("investment_investor_id", investorIds)
             .is("parent_transaction_id", null);
           txns = (data || []) as TransactionTotalRow[];
@@ -168,6 +168,10 @@ export async function GET(request: Request) {
 
         return {
           ...row,
+          // Fall back to the earliest contribution date when no explicit
+          // date_invested is set (investments often only have transactions).
+          date_invested:
+            (row.date_invested as string | null) ?? earliestContributionDate(txns),
           investor_count: investorCount,
           investor_names: investorNames,
           participant_count: participantCount || 0,

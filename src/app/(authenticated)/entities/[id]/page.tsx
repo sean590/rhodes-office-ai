@@ -2719,6 +2719,7 @@ function RelationshipsTab({
 /* ---- Cap Table Tab (full) ---- */
 function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading }: { entityId: string; capTable: CapTableEntry[]; onRefresh: () => Promise<void> | void; picklist: PicklistItem[]; picklistLoading: boolean }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ investor_name: "", investor_type: "individual", units: "", ownership_pct: "", capital_contributed: "", investment_date: "" });
   const [saving, setSaving] = useState(false);
@@ -2877,7 +2878,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
   return (
     <div>
       {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: isMobile ? 10 : 16, marginBottom: 24 }}>
         <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>
             Total Raised
@@ -2957,13 +2958,13 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
 
       {/* Full investor table */}
       <Card style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <SectionHeader>Investors</SectionHeader>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto" }}>
+            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing} style={isMobile ? { flex: 1 } : undefined}>
               {syncing ? "Syncing..." : "Sync Members & Directory"}
             </Button>
-            <Button size="sm" onClick={() => setShowAdd(true)}>
+            <Button size="sm" onClick={() => setShowAdd(true)} style={isMobile ? { flex: 1 } : undefined}>
               <PlusIcon size={10} />
               Add Investor
             </Button>
@@ -2982,7 +2983,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
         {/* Add form */}
         {showAdd && (
           <div style={{ background: "#fafaf7", border: "1px solid #e8e6df", borderRadius: 8, padding: 12, marginBottom: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr 1fr 1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
               <div style={{ position: "relative" }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", marginBottom: 3 }}>Investor Name *</div>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -3052,7 +3053,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
         {/* Table header */}
         <div
           style={{
-            display: "grid",
+            display: isMobile ? "none" : "grid",
             gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 1fr auto",
             gap: 12,
             padding: "8px 0",
@@ -3081,6 +3082,50 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
           const isEditing = editingId === entry.id;
 
           if (isEditing) {
+            if (isMobile) {
+              const mLabel = { fontSize: 10, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase" as const, marginBottom: 3 };
+              return (
+                <div
+                  key={entry.id}
+                  style={{ border: "1px solid #ddd9d0", borderRadius: 10, padding: 12, marginBottom: 10, background: "#fafaf7", display: "flex", flexDirection: "column", gap: 10 }}
+                >
+                  <div>
+                    <div style={mLabel}>Investor Name</div>
+                    <input style={inputStyle} value={editForm.investor_name} onChange={(e) => setEditForm((f) => ({ ...f, investor_name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <div style={mLabel}>Type</div>
+                    <select style={{ ...inputStyle, cursor: "pointer" }} value={editForm.investor_type} onChange={(e) => setEditForm((f) => ({ ...f, investor_type: e.target.value }))}>
+                      {Object.entries(INVESTOR_TYPE_BADGE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={mLabel}>Units</div>
+                      <input style={inputStyle} type="number" value={editForm.units} onChange={(e) => setEditForm((f) => ({ ...f, units: e.target.value }))} />
+                    </div>
+                    <div>
+                      <div style={mLabel}>Ownership %</div>
+                      <input style={inputStyle} type="number" step="0.01" value={editForm.ownership_pct} onChange={(e) => setEditForm((f) => ({ ...f, ownership_pct: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={mLabel}>Capital ($)</div>
+                      <input style={inputStyle} type="number" step="0.01" value={editForm.capital_contributed} onChange={(e) => setEditForm((f) => ({ ...f, capital_contributed: e.target.value }))} />
+                    </div>
+                    <div>
+                      <div style={mLabel}>Date</div>
+                      <input style={inputStyle} type="date" value={editForm.investment_date} onChange={(e) => setEditForm((f) => ({ ...f, investment_date: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <Button size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                    <Button size="sm" variant="primary" onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={entry.id}
@@ -3111,6 +3156,63 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
                   <Button size="sm" onClick={() => setEditingId(null)}>
                     <XIcon size={10} />
                   </Button>
+                </div>
+              </div>
+            );
+          }
+
+          if (isMobile) {
+            const fieldRow = (label: string, value: React.ReactNode, mono?: boolean) => (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "#6b6b76" }}>{label}</span>
+                <span style={{ fontSize: 13, color: "#1a1a1f", fontFamily: mono ? "'DM Mono', monospace" : "inherit", fontWeight: mono ? 500 : 400 }}>{value}</span>
+              </div>
+            );
+            return (
+              <div
+                key={entry.id}
+                style={{ border: "1px solid #f0eee8", borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {/* Name + type */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <span
+                    onClick={isEntity ? () => router.push(`/entities/${entry.investor_entity_id}`) : undefined}
+                    style={{ color: isEntity ? "#3366a8" : "#1a1a1f", fontWeight: 600, fontSize: 14, cursor: isEntity ? "pointer" : "default" }}
+                  >
+                    {entry.investor_name || "Unknown Investor"}
+                    {isEntity && <span style={{ marginLeft: 3, fontSize: 11 }}>{"↗"}</span>}
+                  </span>
+                  <Badge label={typeBadge.label} color={typeBadge.color} bg={typeBadge.bg} />
+                </div>
+                {/* Ownership bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#f0eee8", overflow: "hidden" }}>
+                    <div style={{ width: `${entry.ownership_pct}%`, height: "100%", background: barColor, borderRadius: 3 }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1f", minWidth: 48, textAlign: "right" }}>
+                    {entry.ownership_pct.toFixed(1)}%
+                  </span>
+                </div>
+                {/* Fields */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {fieldRow("Units", entry.units?.toLocaleString() ?? "—", true)}
+                  {fieldRow("Capital", formatMoney(entry.capital_contributed), true)}
+                  {fieldRow("Date", formatDate(entry.investment_date))}
+                </div>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => startEdit(entry)}
+                    style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#6b6b76", fontWeight: 500, fontFamily: "inherit" }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(entry.id)}
+                    style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 5, padding: "5px 10px", cursor: "pointer", color: "#c73e3e", fontFamily: "inherit" }}
+                  >
+                    <XIcon size={11} />
+                  </button>
                 </div>
               </div>
             );

@@ -66,6 +66,7 @@ export default function InvestmentDetailPage() {
   const [editStatus, setEditStatus] = useState("");
   const [editPrefReturnPct, setEditPrefReturnPct] = useState("");
   const [editPrefReturnBasis, setEditPrefReturnBasis] = useState("");
+  const [editDateInvested, setEditDateInvested] = useState("");
   const [editDescription, setEditDescription] = useState("");
   // (Investor editing was moved to the Ownership table's Edit Investors panel
   // in AllocationsTab — these state slots used to back a top-level form.)
@@ -112,6 +113,7 @@ export default function InvestmentDetailPage() {
     setEditStatus(investment.status);
     setEditPrefReturnPct(investment.preferred_return_pct != null ? String(investment.preferred_return_pct) : "");
     setEditPrefReturnBasis(investment.preferred_return_basis || "");
+    setEditDateInvested(investment.date_invested || "");
     setEditDescription(investment.description || "");
     setEditing(true);
   };
@@ -126,6 +128,7 @@ export default function InvestmentDetailPage() {
           name: editName, status: editStatus,
           preferred_return_pct: editPrefReturnPct ? Number(editPrefReturnPct) : null,
           preferred_return_basis: editPrefReturnBasis || null,
+          date_invested: editDateInvested || null,
           description: editDescription || null,
         }),
       });
@@ -244,9 +247,15 @@ export default function InvestmentDetailPage() {
               </div>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Name</label>
-                <input style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ flex: 2, minWidth: 200 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Name</label>
+                  <input style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff", boxSizing: "border-box" }} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                </div>
+                <div style={{ flex: 1, minWidth: 150 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>Date Invested</label>
+                  <input type="date" style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff", boxSizing: "border-box" }} value={editDateInvested} onChange={(e) => setEditDateInvested(e.target.value)} />
+                </div>
               </div>
               <div style={{ display: "flex", gap: 12 }}>
                 <div style={{ flex: 1 }}>

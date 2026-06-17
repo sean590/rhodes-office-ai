@@ -7,6 +7,7 @@ import { updateInvestmentSchema } from "@/lib/validations";
 import {
   deriveTotalsFromTransactions,
   deriveCalledCapitalByInvestor,
+  earliestContributionDate,
   type TransactionTotalRow,
 } from "@/lib/utils/transaction-totals";
 
@@ -90,7 +91,7 @@ export async function GET(
     if (investorIds.length > 0) {
       const { data } = await supabase
         .from("investment_transactions")
-        .select("investment_investor_id, transaction_type, amount, line_items, adjusts_transaction_id")
+        .select("investment_investor_id, transaction_type, amount, line_items, adjusts_transaction_id, transaction_date")
         .in("investment_investor_id", investorIds)
         .is("parent_transaction_id", null);
       txns = (data || []) as Array<TransactionTotalRow & { investment_investor_id: string }>;
@@ -121,6 +122,9 @@ export async function GET(
 
     return NextResponse.json({
       ...investment,
+      // Fall back to the earliest contribution date when no explicit
+      // date_invested is set (keeps list + detail consistent).
+      date_invested: investment.date_invested ?? earliestContributionDate(txns),
       investors: enrichedInvestors,
       co_investors: coInvestors,
       participant_count: participantCount,

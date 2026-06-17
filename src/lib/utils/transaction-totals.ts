@@ -26,6 +26,24 @@ export interface TransactionTotalRow {
   amount: number | string;
   line_items?: TransactionLineItem[] | null;
   adjusts_transaction_id?: string | null;
+  transaction_date?: string | null;
+}
+
+/**
+ * The "invested" date for an investment, derived from its transactions:
+ * the earliest contribution transaction date. Used as a fallback when an
+ * investment has no explicit `date_invested` set — the money clearly went in
+ * on the date of the first contribution. Returns null if there are no dated
+ * contribution rows.
+ */
+export function earliestContributionDate(
+  txns: TransactionTotalRow[]
+): string | null {
+  const dates = txns
+    .filter((t) => t.transaction_type === "contribution" && t.transaction_date)
+    .map((t) => t.transaction_date as string)
+    .sort();
+  return dates[0] ?? null;
 }
 
 export interface DerivedTotals {
