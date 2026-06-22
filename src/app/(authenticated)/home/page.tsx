@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useChatPanel } from "@/components/chat/chat-panel-provider";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -114,7 +114,6 @@ export default function HomePage() {
   const setPageContext = useSetPageContext();
   const chatPanel = useChatPanel();
   const router = useRouter();
-  const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const [lane, setLane] = useState<"needs" | "suggested" | "done">("needs");
   const [userId, setUserId] = useState<string | null>(null);
@@ -432,7 +431,9 @@ export default function HomePage() {
   // open the matching review group's sheet at that item, then clear the param
   // so closing the sheet doesn't immediately reopen it.
   useEffect(() => {
-    const reviewId = searchParams.get("review");
+    // Read from window (not useSearchParams) so /home stays statically
+    // prerenderable — useSearchParams forces a CSR-bailout Suspense boundary.
+    const reviewId = new URLSearchParams(window.location.search).get("review");
     if (!reviewId) return;
     for (const g of reviewGroups) {
       const idx = g.entries.findIndex((e) => e.review?.id === reviewId);
@@ -442,7 +443,7 @@ export default function HomePage() {
         return;
       }
     }
-  }, [searchParams, reviewGroups, router]);
+  }, [reviewGroups, router]);
 
   // ── Renderers ───────────────────────────────────────────────────
   const renderApprove = (g: OriginGroup) => {
