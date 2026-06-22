@@ -3,6 +3,19 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { presignRequestSchema, validateFileMetadata } from "@/lib/validations";
 
+// Presigning is one storage call per file. A bulk upload (up to 100 files)
+// would time out if these ran serially — give headroom and run them in parallel.
+export const maxDuration = 60;
+
+type PresignedUrl = {
+  originalName: string;
+  safeName: string;
+  storagePath: string;
+  signedUrl: string;
+  token: string;
+};
+type RejectedFile = { filename: string; reason: string };
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ batchId: string }> }
@@ -33,42 +46,34 @@ export async function POST(
       return NextResponse.json({ error: "Invalid request", details: parsed.error.flatten() }, { status: 400 });
     }
 
-    const urls: Array<{
-      originalName: string;
-      safeName: string;
-      storagePath: string;
-      signedUrl: string;
-      token: string;
-    }> = [];
-    const rejected: Array<{ filename: string; reason: string }> = [];
-
-    for (const file of parsed.data.files) {
-      const check = validateFileMetadata(file.name, file.size, file.type);
-      if (!check.valid) {
-        rejected.push({ filename: file.name, reason: check.error });
-        continue;
-      }
-
-      const safeName = file.name.replace(/[^a-zA-Z0-9\-_. ]/g, "_");
-      const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
-
-      const { data, error } = await admin.storage
-        .from("documents")
-        .createSignedUploadUrl(storagePath, { upsert: true });
-
-      if (error) {
-        rejected.push({ filename: file.name, reason: `Failed to create upload URL: ${error.message}` });
-        continue;
-      }
-
-      urls.push({
-        originalName: file.name,
-        safeName,
-        storagePath,
-        signedUrl: data.signedUrl,
-        token: data.token,
-      });
-    }
+    // One storage call per file, run in PARALLEL. Serially presigning a
+    // 52-file batch timed the route out (the upload's onDrop presign fetch
+    // died with nothing registered).
+    const results = await Promise.all(
+      parsed.data.files.map(
+        async (file): Promise<{ url?: PresignedUrl; rejected?: RejectedFile }> => {
+          const check = validateFileMetadata(file.name, file.size, file.type);
+          if (!check.valid) {
+            return { rejected: { filename: file.name, reason: check.error } };
+          }
+          const safeName = file.name.replace(/[^a-zA-Z0-9\-_. ]/g, "_");
+          const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
+          const { data, error } = await admin.storage
+            .from("documents")
+            .createSignedUploadUrl(storagePath, { upsert: true });
+          if (error || !data) {
+            return {
+              rejected: { filename: file.name, reason: `Failed to create upload URL: ${error?.message ?? "unknown"}` },
+            };
+          }
+          return {
+            url: { originalName: file.name, safeName, storagePath, signedUrl: data.signedUrl, token: data.token },
+          };
+        },
+      ),
+    );
+    const urls = results.flatMap((r) => (r.url ? [r.url] : []));
+    const rejected = results.flatMap((r) => (r.rejected ? [r.rejected] : []));
 
     return NextResponse.json({ urls, rejected });
   } catch (err) {
