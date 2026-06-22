@@ -14,6 +14,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useChatPanel } from "@/components/chat/chat-panel-provider";
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -24,6 +25,7 @@ import { Button } from "@/components/ui/button";
 import { InboxCard, GroupCard, GroupChildRow, SectionHead } from "@/components/home/InboxCard";
 import { ReviewSheet, type SheetEntry, type SheetOption } from "@/components/home/ReviewSheet";
 import { fieldsForAction } from "@/lib/home-action-fields";
+import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import { SuggestedSends } from "@/components/entities/SuggestedSends";
 import { formatStamp, formatDue } from "@/lib/format-time";
 import {
@@ -70,6 +72,9 @@ const ACTOR_PILL: Record<ActorKind, { icon: IconName; color: string; bg: string 
   person: { icon: "user", color: "var(--muted)", bg: "var(--page)" },
 };
 
+// Document-type slugs for the inline review form's type picker.
+const DOC_TYPE_SLUGS = Object.keys(DOCUMENT_TYPE_LABELS);
+
 function reviewMeta(r: ReviewItem): string {
   const bits = [r.entity_name, r.document_type_label].filter(Boolean);
   return bits.length ? bits.join(" · ") : "ready to review";
@@ -108,6 +113,8 @@ function ReviewDetail({ r }: { r: ReviewItem }) {
 export default function HomePage() {
   const setPageContext = useSetPageContext();
   const chatPanel = useChatPanel();
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const isMobile = useIsMobile();
   const [lane, setLane] = useState<"needs" | "suggested" | "done">("needs");
   const [userId, setUserId] = useState<string | null>(null);
@@ -227,6 +234,38 @@ export default function HomePage() {
     } catch { alert("Failed to confirm"); } finally { setBusyFor(r.id, false); }
   }, [fetchAll]);
 
+  // Apply inline edits (assign entity / reclassify) from the review sheet via
+  // the same validated tool path the agent + staged actions use. The
+  // link/update handlers auto-resolve the review_ready item server-side
+  // (resolvePendingReviewForDocument), so we just prune it locally. With no
+  // changes, falls back to a plain confirm.
+  const applyReviewEdits = useCallback(async (r: ReviewItem, edited?: Record<string, unknown>) => {
+    if (!r.document_id || !edited) return confirmReview(r);
+    const actions: Array<{ id: string; tool: string; input: Record<string, unknown>; summary: string }> = [];
+    const newEntity = edited.entity_id ? String(edited.entity_id) : "";
+    if (newEntity && newEntity !== (r.entity_id ?? "")) {
+      actions.push({ id: `rev-${r.id}-entity`, tool: "link_document_to_entity", input: { document_id: r.document_id, entity_id: newEntity }, summary: `Link "${r.document_name}" to entity` });
+    }
+    const docUpdate: Record<string, unknown> = {};
+    if (edited.document_type && edited.document_type !== (r.document_type ?? "")) docUpdate.document_type = edited.document_type;
+    if (edited.year != null && edited.year !== "" && Number(edited.year) !== (r.year ?? null)) docUpdate.year = Number(edited.year);
+    if (Object.keys(docUpdate).length > 0) {
+      actions.push({ id: `rev-${r.id}-update`, tool: "update_document", input: { document_id: r.document_id, ...docUpdate }, summary: `Update "${r.document_name}"` });
+    }
+    if (actions.length === 0) return confirmReview(r); // nothing changed
+    const sessionId = r.chat_session_id ?? r.batch?.session_id;
+    if (!sessionId) { alert("No chat session linked to this item — use Refine in chat instead."); return; }
+    setBusyFor(r.id, true);
+    try {
+      const res = await fetch("/api/chat/apply-actions", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: sessionId, actions }),
+      });
+      if (res.ok) { setReviews((p) => p.filter((x) => x.id !== r.id)); fetchAll(); }
+      else alert("Failed to apply changes");
+    } catch { alert("Failed to apply changes"); } finally { setBusyFor(r.id, false); }
+  }, [confirmReview, fetchAll]);
+
   const markFiled = useCallback(async (o: Obligation) => {
     if (!o.entities) return;
     setBusyFor(o.id, true);
@@ -280,7 +319,14 @@ export default function HomePage() {
   // Reassigning/refining a review item happens in chat (the pipeline
   // materializes one session per deferred item), never on the old /review page.
   const refineReview = useCallback((r: ReviewItem) => {
-    chatPanel.open(undefined, undefined, r.batch?.session_id ?? undefined);
+    // Load the per-item session the pipeline seeded (falls back to the batch
+    // session), and seed a prompt so the drawer visibly does something even
+    // when it's already open on desktop.
+    chatPanel.open(
+      `Help me file "${r.document_name}" — which entity should it belong to, and is the type right?`,
+      undefined,
+      r.chat_session_id ?? r.batch?.session_id ?? undefined,
+    );
   }, [chatPanel]);
 
   // ── Derived ─────────────────────────────────────────────────────
@@ -362,18 +408,41 @@ export default function HomePage() {
       return {
         id: r.id, title: r.document_name,
         subtitle: `${g.channel === "chat" ? "from chat" : "to review"} · ${reviewMeta(r)}`,
-        detail: <ReviewDetail r={r} />,
+        // Editable inline: assign the entity / confirm the type without leaving
+        // for chat. Empty entity = "No entity assigned yet" — the whole point.
+        fields: [
+          { key: "entity_id", label: "Entity", type: "entity" },
+          { key: "document_type", label: "Document type", type: "enum", enumValues: DOC_TYPE_SLUGS },
+          { key: "year", label: "Year", type: "year" },
+        ],
+        input: { entity_id: r.entity_id ?? "", document_type: r.document_type ?? "", year: r.year ?? "" },
         dup: dups.ids.has(r.id) ? "Possible duplicate of another document in this batch." : undefined,
         primaryLabel: "Confirm",
-        onApprove: () => confirmReview(r),
+        onApprove: (edited) => applyReviewEdits(r, edited),
         onDismiss: () => dismissReview(r),
         onRefineChat: () => refineReview(r), busy: busy[r.id],
       };
     });
-  }, [sheet, approveGroups, reviewGroups, busy, dupInfo, approveStagedWith, confirmReview, dismissStaged, dismissReview, refineStaged, refineReview]);
+  }, [sheet, approveGroups, reviewGroups, busy, dupInfo, approveStagedWith, applyReviewEdits, dismissStaged, dismissReview, refineStaged, refineReview]);
 
   const openSheet = (g: OriginGroup, index = 0) =>
     setSheet({ lane: g.lane, key: g.key, title: g.label, index });
+
+  // Deep-link from the Processing page's "Open to review" (?review=<itemId>):
+  // open the matching review group's sheet at that item, then clear the param
+  // so closing the sheet doesn't immediately reopen it.
+  useEffect(() => {
+    const reviewId = searchParams.get("review");
+    if (!reviewId) return;
+    for (const g of reviewGroups) {
+      const idx = g.entries.findIndex((e) => e.review?.id === reviewId);
+      if (idx >= 0) {
+        setSheet({ lane: g.lane, key: g.key, title: g.label, index: idx });
+        router.replace("/home", { scroll: false });
+        return;
+      }
+    }
+  }, [searchParams, reviewGroups, router]);
 
   // ── Renderers ───────────────────────────────────────────────────
   const renderApprove = (g: OriginGroup) => {

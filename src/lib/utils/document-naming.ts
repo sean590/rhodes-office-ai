@@ -67,6 +67,7 @@ export const CATEGORY_LABELS: Record<DocumentCategory, string> = {
   formation: "Formation",
   tax: "Tax",
   investor: "Investor",
+  financial: "Financial",
   contracts: "Contracts",
   compliance: "Compliance",
   insurance: "Insurance",

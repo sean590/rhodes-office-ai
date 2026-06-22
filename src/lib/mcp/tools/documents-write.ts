@@ -143,7 +143,7 @@ export const updateDocumentTool = defineTool({
     name: z.string().min(1).optional().describe("New filename/display name."),
     document_type: z.string().optional().describe("Document type slug, e.g. 'k1', 'operating_agreement'."),
     document_category: z
-      .enum(["formation", "tax", "investor", "contracts", "compliance", "insurance", "governance", "other"])
+      .enum(["formation", "tax", "investor", "financial", "contracts", "compliance", "insurance", "governance", "other"])
       .optional(),
     year: z.number().int().min(1900).max(2100).optional().nullable(),
     jurisdiction: z.string().optional().nullable().describe("2-letter state code if the document is state-scoped."),
@@ -220,7 +220,7 @@ export const addDocumentExpectationTool = defineTool({
       .min(1)
       .describe("Document type slug, e.g. 'k1', 'service_agreement'. Use snake_case."),
     document_category: z
-      .enum(["formation", "tax", "investor", "contracts", "compliance", "insurance", "governance", "other"])
+      .enum(["formation", "tax", "investor", "financial", "contracts", "compliance", "insurance", "governance", "other"])
       .describe("Which document-list category this belongs to."),
     is_required: z.boolean().optional().default(true),
     notes: z.string().optional().nullable(),

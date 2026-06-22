@@ -177,7 +177,7 @@ export interface CustomFieldWithValue extends CustomFieldDefinition {
   value: CustomFieldValue | null;
 }
 
-export type DocumentCategory = 'formation' | 'tax' | 'investor' | 'contracts' | 'compliance' | 'insurance' | 'governance' | 'other';
+export type DocumentCategory = 'formation' | 'tax' | 'investor' | 'financial' | 'contracts' | 'compliance' | 'insurance' | 'governance' | 'other';
 
 export interface Document {
   id: string;

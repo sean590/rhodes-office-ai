@@ -60,6 +60,7 @@ interface QueueRow {
   approval_reason: string | null;
   extraction_error: string | null;
   created_at: string;
+  chat_session_id: string | null;
 }
 
 export async function GET(request: Request) {
@@ -104,7 +105,7 @@ export async function GET(request: Request) {
     const { data: items, error: itemsErr } = await admin
       .from("document_queue")
       .select(
-        "id, batch_id, document_id, status, original_filename, ai_suggested_name, ai_document_type, staged_doc_type, ai_entity_id, staged_entity_id, ai_year, staged_year, ai_confidence, ai_proposed_actions, ai_proposed_entities, ai_summary, approval_reason, extraction_error, created_at",
+        "id, batch_id, document_id, status, original_filename, ai_suggested_name, ai_document_type, staged_doc_type, ai_entity_id, staged_entity_id, ai_year, staged_year, ai_confidence, ai_proposed_actions, ai_proposed_entities, ai_summary, approval_reason, extraction_error, created_at, chat_session_id",
       )
       .in("status", statuses)
       .in("batch_id", batchIds)
@@ -148,6 +149,7 @@ export async function GET(request: Request) {
         id: i.id,
         batch_id: i.batch_id,
         document_id: i.document_id,
+        chat_session_id: i.chat_session_id,
         status: i.status,
         document_name: i.ai_suggested_name || i.original_filename,
         document_type: docType,

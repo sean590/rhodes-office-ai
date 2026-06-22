@@ -32,10 +32,14 @@ export interface StagedItem {
 export interface ReviewItem {
   id: string;
   document_name: string;
+  document_type?: string | null;
   document_type_label?: string | null;
   entity_name: string | null;
+  entity_id?: string | null;
+  year?: number | null;
   approval_reason: string | null;
   document_id: string | null;
+  chat_session_id?: string | null;
   ai_confidence: number | null;
   batch_id: string;
   created_at: string;

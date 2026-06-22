@@ -345,7 +345,11 @@ async function runDocumentAgentInternal(
   // Build the initial user message: the PDF + filename + optional user
   // context. We use buildPdfContent so the model gets the same multi-page
   // analysis (page count, optional text) that extractDocument produced.
+  // Anthropic's vision API natively accepts these image types; the model
+  // auto-downsizes large images, so a 5MB photo costs ~1.6K tokens.
+  const VISION_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
   const isPdf = mimeType === "application/pdf";
+  const isImage = !!mimeType && VISION_IMAGE_TYPES.includes(mimeType);
   let userContent: Anthropic.Messages.ContentBlockParam[];
   if (isPdf) {
     // Password gate: pdf-lib's getPageCount walks the page tree, which is
@@ -372,9 +376,26 @@ async function runDocumentAgentInternal(
     // text blocks and base64 PDF/image blocks; the elements ARE valid
     // ContentBlockParam shapes, just typed loosely. Cast through unknown.
     userContent = pdfBlocks as unknown as Anthropic.Messages.ContentBlockParam[];
+  } else if (isImage) {
+    // Images (scans/photos of W-2s, 1099s, etc.) go to the vision model as a
+    // base64 image block. Critically NOT as text: decoding raw JPEG/PNG bytes
+    // as UTF-8 produces millions of garbage "tokens" and blows the context
+    // window ("prompt is too long: 2.6M tokens > 1M") before the model runs.
+    userContent = [
+      { type: "text", text: `Document name: "${filename}"` },
+      {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: mimeType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+          data: fileBuffer.toString("base64"),
+        },
+      },
+    ];
   } else {
-    // Non-PDF: read as text. Defer rich-format support until we hit a
-    // case that needs it.
+    // Other non-PDF, non-image files (genuinely text-y). Office binaries like
+    // .xlsx are ZIP-of-XML and still produce garbage here — spreadsheet
+    // support (convert to CSV/text) is a known gap, tracked separately.
     userContent = [
       {
         type: "text",
@@ -406,7 +427,13 @@ async function runDocumentAgentInternal(
       );
     }
   }
-  userContent.push({ type: "text", text: introText.join("\n") });
+  // Cache breakpoint on the LAST block of the first user message → caches
+  // [system + tools + the entire document]. The agent re-sends this message on
+  // every turn; without caching the doc (text + page images) is re-charged at
+  // full price each turn — which our telemetry showed is ~97% of total cost.
+  // With it, turns 2..N read the doc at 0.1× instead of 1.0×. Quality-identical;
+  // the 5-min ephemeral TTL easily covers a single doc's multi-turn run.
+  userContent.push({ type: "text", text: introText.join("\n"), cache_control: { type: "ephemeral" } });
 
   const messages: Anthropic.Messages.MessageParam[] = [
     { role: "user", content: userContent },
@@ -546,7 +573,14 @@ async function runDocumentAgentInternal(
       // Validate input via the tool's zod schema, then call the handler.
       const parseResult = def.inputSchema.safeParse(block.input);
       if (!parseResult.success) {
-        const errMsg = `Invalid input for ${block.name}: ${parseResult.error.message}`;
+        // Be directive: the model otherwise loops on a bad value (e.g. an
+        // out-of-enum document_category) and then GIVES UP, writing a prose
+        // summary instead of filing. Tell it to correct and retry, and forbid
+        // the prose-instead-of-tools escape hatch.
+        const errMsg =
+          `Invalid input for ${block.name}: ${parseResult.error.message}. ` +
+          `Correct the parameters to match the schema exactly — for enum fields you MUST use one of the exact allowed values listed above; pick the closest one rather than inventing a value — then call ${block.name} again. ` +
+          `Do NOT respond with a prose summary in place of tool calls; the document is only filed when the tools succeed.`;
         toolCalls.push({ name: block.name, input: block.input, ok: false, resultPreview: errMsg });
         toolResultBlocks.push({
           type: "tool_result",

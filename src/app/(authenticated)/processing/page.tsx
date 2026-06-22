@@ -144,7 +144,10 @@ export default function ProcessingPage() {
     await fetchData();
   }), [withBusy, fetchData]);
 
-  const openReview = useCallback(() => router.push("/home"), [router]);
+  const openReview = useCallback(
+    (item: ProcessingItem) => router.push(`/home?review=${item.id}`),
+    [router],
+  );
 
   const stuckItems = useMemo(() => active.filter((i) => toProcessingState(i.status) === "stuck"), [active]);
   const retryAllStuck = useCallback(async () => {
