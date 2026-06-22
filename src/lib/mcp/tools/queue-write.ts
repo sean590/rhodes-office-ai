@@ -54,9 +54,11 @@ export const fileQueueItemTool = defineTool({
     }
     return {
       data: {
-        queue_item_id: result.item.id,
+        queue_item_id: result.item?.id ?? queue_item_id,
         document_id: result.documentId,
         status: "approved" as const,
+        // Benign no-op: the item was already filed or no longer in the queue.
+        ...(result.noop ? { already_filed: true } : {}),
       },
     };
   },

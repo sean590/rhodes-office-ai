@@ -94,8 +94,13 @@ async function resolveAuditEntityName(
 
 export interface FileQueueItemResult {
   ok: true;
-  item: QueueItemRow;
+  /** Null when the item was already gone (a stale file action). */
+  item: QueueItemRow | null;
   documentId: string | null;
+  /** True when there was nothing to do — the item was already filed or no
+   *  longer in the queue. A benign no-op, reported as success (not a failure)
+   *  so stale staged file-actions don't surface scary "not found" errors. */
+  noop?: boolean;
 }
 export type FileQueueItemFailure = VerifyFail;
 
@@ -113,12 +118,28 @@ export async function fileQueueItem(
 ): Promise<FileQueueItemResult | FileQueueItemFailure> {
   const admin = createAdminClient();
   const verify = await verifyQueueItemAccess(admin, queueItemId, ctx.orgId);
-  if (!verify.ok) return verify;
+  if (!verify.ok) {
+    // Item is gone (404). Staged actions are async: between the agent staging
+    // a file action and the user approving it, the item is often already filed
+    // and cleaned up — or superseded by a re-split. That's a benign no-op, not
+    // a failure; surfacing "Queue item not found" reads as a scary error for
+    // something that's actually done.
+    if (verify.status === 404) {
+      return { ok: true, item: null, documentId: null, noop: true };
+    }
+    return verify;
+  }
   const item = verify.item;
 
-  // Refuse from terminal/non-review states. We don't want a chat call to
-  // re-file an already-approved item or re-open a rejected one — those flows
-  // need explicit user intent via /review or a dedicated reopen affordance.
+  // Already filed (approved or auto-ingested by the pipeline) → idempotent
+  // no-op. Common when the pipeline auto-files between staging and approval,
+  // or when the same file action is approved twice.
+  if (item.status === "approved" || item.status === "auto_ingested") {
+    return { ok: true, item, documentId: item.document_id, noop: true };
+  }
+
+  // Genuinely not fileable (still queued/extracting/errored, or rejected) —
+  // these are real failures, not "already done": the document isn't filed.
   if (item.status !== "review_ready" && item.status !== "extracted") {
     return {
       ok: false,

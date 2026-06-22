@@ -49,8 +49,9 @@ export async function POST(
 
     return NextResponse.json({
       status: "approved",
-      queue_item_id: result.item.id,
+      queue_item_id: result.item?.id ?? itemId,
       document_id: result.documentId,
+      already_filed: result.noop ?? false,
     });
   } catch (err) {
     console.error("POST /api/pipeline/queue/[itemId]/ingest-only error:", err);
