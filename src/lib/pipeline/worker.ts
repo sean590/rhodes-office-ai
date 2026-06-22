@@ -263,6 +263,15 @@ export async function processQueueItem(
           chat_session_id: chatSessionId,
           extraction_completed_at: new Date().toISOString(),
           extraction_tokens: agentResult.tokensUsed,
+          // Cost telemetry (broken out so cache reads/writes are priced
+          // correctly) — feeds the cost-per-document model.
+          extraction_input_tokens: agentResult.usage.input,
+          extraction_output_tokens: agentResult.usage.output,
+          extraction_cache_read_tokens: agentResult.usage.cacheRead,
+          extraction_cache_creation_tokens: agentResult.usage.cacheCreation,
+          extraction_turns: agentResult.turns,
+          extraction_model: agentResult.model,
+          extraction_cost_usd: agentResult.costUsd,
           updated_at: new Date().toISOString(),
         })
         .eq("id", itemId);

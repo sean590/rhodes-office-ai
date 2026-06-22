@@ -43,6 +43,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { redact as redactImpl } from "@/lib/mcp/redact";
 import type { ToolContext } from "@/lib/mcp/tool-context";
 import type { ToolDefinition } from "@/lib/mcp/schema";
+import { type TokenUsage, emptyUsage, computeCostUsd } from "./model-pricing";
 
 // Read tools — agent uses these for verification
 import { listInvestmentsTool, getInvestmentTool, listInvestmentTransactionsTool } from "@/lib/mcp/tools/investments";
@@ -198,8 +199,19 @@ export interface DocumentAgentOutput {
   deferReason?: string;
   /** Tools the agent called, in order — for debugging and audit. */
   toolCalls: Array<{ name: string; input: unknown; ok: boolean; resultPreview?: string }>;
-  /** Tokens spent across the agent's run. */
+  /** Tokens spent across the agent's run (uncached input + output — keeps the
+   *  original `extraction_tokens` semantics for back-compat). */
   tokensUsed: number;
+  /** Usage broken out by billing class (uncached input / output / cache read /
+   *  cache write), for cost analysis. Cache reads are ~0.1× and cache writes
+   *  ~1.25× of input, so the breakout is required to compute real cost. */
+  usage: TokenUsage;
+  /** Model round-trips (turns) in the agent loop — drives within-run caching. */
+  turns: number;
+  /** Model the agent ran on. */
+  model: string;
+  /** Fully-loaded USD cost of the run at current pricing. */
+  costUsd: number;
 }
 
 const SYSTEM_PROMPT = `You are a document-processing agent for a family-office entity-management platform. A document just landed in the upload queue. Your job: read it, figure out what it is, and use tools to file it correctly.
@@ -401,9 +413,23 @@ async function runDocumentAgentInternal(
   ];
 
   const toolCalls: DocumentAgentOutput["toolCalls"] = [];
-  let tokensUsed = 0;
+  const AGENT_MODEL = "claude-sonnet-4-6";
+  const usageTotals = emptyUsage();
+  let turns = 0;
   let deferred: { reason: string } | null = null;
   let finalAssistantText: string | null = null;
+
+  // Common cost/usage fields for every return path. Reads the live
+  // accumulator, so call it at return time (after the loop has run).
+  // `tokensUsed` stays uncached-input + output for back-compat; `usage` carries
+  // the full breakout (incl. cache reads/writes) that `costUsd` is computed from.
+  const buildMetrics = () => ({
+    tokensUsed: usageTotals.input + usageTotals.output,
+    usage: { ...usageTotals },
+    turns,
+    model: AGENT_MODEL,
+    costUsd: computeCostUsd(AGENT_MODEL, usageTotals),
+  });
 
   for (let iter = 0; iter < MAX_ITERATIONS; iter++) {
     let response: Anthropic.Messages.Message;
@@ -416,7 +442,7 @@ async function runDocumentAgentInternal(
       // cached blocks is ~10% of normal input. Net: ~30% cost cut on the
       // worker pipeline, since the static prefix is most of every call.
       response = await anthropic.messages.create({
-        model: "claude-sonnet-4-6",
+        model: AGENT_MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
         system: [
           {
@@ -437,11 +463,20 @@ async function runDocumentAgentInternal(
         status: "failed",
         summary: `Agent API error on iteration ${iter}: ${err instanceof Error ? err.message : String(err)}`,
         toolCalls,
-        tokensUsed,
+        ...buildMetrics(),
       };
     }
     const usage = response.usage as unknown as Record<string, number>;
-    tokensUsed += (usage.input_tokens || 0) + (usage.output_tokens || 0);
+    // API `input_tokens` is UNCACHED input only; cache read/write are separate
+    // billing classes (a cache write costs ~1.25× input, a read ~0.1×), so we
+    // keep them apart — collapsing them is what makes a summed token count
+    // useless for cost. Every call with cache_creation > 0 is a cache *write*
+    // (a "cold" prefix); cache_read > 0 means we hit a warm prefix.
+    usageTotals.input += usage.input_tokens || 0;
+    usageTotals.output += usage.output_tokens || 0;
+    usageTotals.cacheRead += usage.cache_read_input_tokens || 0;
+    usageTotals.cacheCreation += usage.cache_creation_input_tokens || 0;
+    turns += 1;
 
     // If model didn't call a tool, it's done — capture the final text.
     if (response.stop_reason !== "tool_use") {
@@ -562,7 +597,7 @@ async function runDocumentAgentInternal(
       summary: `Deferred to review: ${deferred.reason}`,
       deferReason: deferred.reason,
       toolCalls,
-      tokensUsed,
+      ...buildMetrics(),
     };
   }
 
@@ -570,6 +605,6 @@ async function runDocumentAgentInternal(
     status: "applied",
     summary: finalAssistantText || `Processed in ${toolCalls.length} tool calls.`,
     toolCalls,
-    tokensUsed,
+    ...buildMetrics(),
   };
 }
