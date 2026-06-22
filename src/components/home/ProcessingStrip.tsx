@@ -28,10 +28,20 @@ export function ProcessingStrip() {
   }, []);
 
   useEffect(() => {
+    // `cancelled` is essential: without it, if the component unmounts while a
+    // fetchCounts() is in flight, the cleanup's clearTimeout runs before the
+    // .finally() sets `timer`, then the resolving fetch schedules a NEW tick
+    // the cleanup can never clear — an orphaned poll loop that survives unmount.
+    // Repeated Home↔Processing navigation stacks these into a runaway.
+    let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
-    const tick = () => { fetchCounts().finally(() => { timer = setTimeout(tick, 5000); }); };
+    const tick = () => {
+      fetchCounts().finally(() => {
+        if (!cancelled) timer = setTimeout(tick, 5000);
+      });
+    };
     tick();
-    return () => clearTimeout(timer);
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [fetchCounts]);
 
   const { processing, stuck } = useMemo(() => {

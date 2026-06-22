@@ -100,12 +100,16 @@ export default function ProcessingPage() {
   }, [fetchData]);
   useEffect(() => {
     if (!inFlight) return;
-    pollRef.current = setTimeout(function tick() {
+    // `cancelled` guard: without it, an in-flight fetchData() resolving after
+    // cleanup reschedules an orphaned poll loop that survives unmount/re-run.
+    let cancelled = false;
+    const tick = () => {
       fetchData().finally(() => {
-        pollRef.current = setTimeout(tick, 3000);
+        if (!cancelled) pollRef.current = setTimeout(tick, 3000);
       });
-    }, 3000);
-    return () => { if (pollRef.current) clearTimeout(pollRef.current); };
+    };
+    pollRef.current = setTimeout(tick, 3000);
+    return () => { cancelled = true; if (pollRef.current) clearTimeout(pollRef.current); };
   }, [inFlight, fetchData]);
 
   const withBusy = useCallback(async (id: string, fn: () => Promise<void>) => {
