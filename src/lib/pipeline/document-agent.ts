@@ -44,6 +44,7 @@ import { redact as redactImpl } from "@/lib/mcp/redact";
 import type { ToolContext } from "@/lib/mcp/tool-context";
 import type { ToolDefinition } from "@/lib/mcp/schema";
 import { type TokenUsage, emptyUsage, computeCostUsd } from "./model-pricing";
+import { isSpreadsheet, spreadsheetToText } from "./spreadsheet";
 
 // Read tools — agent uses these for verification
 import { listInvestmentsTool, getInvestmentTool, listInvestmentTransactionsTool } from "@/lib/mcp/tools/investments";
@@ -392,10 +393,22 @@ async function runDocumentAgentInternal(
         },
       },
     ];
+  } else if (isSpreadsheet(mimeType, filename)) {
+    // Spreadsheets (.xlsx — financials, GLs, cap tables) are ZIP-of-XML, so
+    // raw bytes as UTF-8 are garbage. Parse the workbook into CSV-style text.
+    let sheetText: string;
+    try {
+      sheetText = await spreadsheetToText(fileBuffer, filename);
+    } catch (err) {
+      // Legacy .xls or a corrupt workbook — don't crash the run; give the agent
+      // enough to defer cleanly rather than feeding it garbage.
+      sheetText = `Document name: "${filename}"\n\n[Could not parse this spreadsheet${
+        filename.toLowerCase().endsWith(".xls") ? " (legacy .xls format may be unsupported)" : ""
+      }: ${err instanceof Error ? err.message : String(err)}]`;
+    }
+    userContent = [{ type: "text", text: sheetText }];
   } else {
-    // Other non-PDF, non-image files (genuinely text-y). Office binaries like
-    // .xlsx are ZIP-of-XML and still produce garbage here — spreadsheet
-    // support (convert to CSV/text) is a known gap, tracked separately.
+    // Other non-PDF, non-image, non-spreadsheet files (genuinely text-y).
     userContent = [
       {
         type: "text",

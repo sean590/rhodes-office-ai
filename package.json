@@ -21,6 +21,7 @@
     "@upstash/redis": "^1.36.3",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
+    "exceljs": "^4.4.0",
     "next": "16.1.6",
     "pdf-lib": "^1.17.1",
     "react": "19.2.3",
