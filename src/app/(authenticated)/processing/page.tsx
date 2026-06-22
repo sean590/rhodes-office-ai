@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ProcessingRow, toProcessingState, type ProcessingItem } from "@/components/pipeline/ProcessingRow";
+import { BulkUploadCard } from "@/components/pipeline/BulkUploadCard";
 import { Icon } from "@/components/ui/icon";
 
 const ACTIVE_STATUSES = "queued,extracting,review_ready,error,password_required";
@@ -222,6 +223,10 @@ export default function ProcessingPage() {
         </div>
       )}
 
+      <div style={{ marginBottom: 16 }}>
+        <BulkUploadCard onUploaded={fetchData} />
+      </div>
+
       {notice && (
         <div style={{ fontSize: 12.5, color: "var(--red)", background: "var(--red-50)", border: "1px solid var(--red)", borderRadius: "var(--radius-sm)", padding: "8px 12px", marginBottom: 12 }}>
           {notice}
@@ -234,7 +239,7 @@ export default function ProcessingPage() {
         <div style={{ padding: "60px 20px", textAlign: "center", color: "var(--muted)" }}>
           <Icon name="circle-check" size={28} color="var(--green)" />
           <div style={{ fontSize: 14, fontWeight: 600, color: "var(--ink)", marginTop: 10 }}>Nothing processing</div>
-          <div style={{ fontSize: 13, marginTop: 4 }}>Drop documents in chat and they&rsquo;ll show up here as they&rsquo;re read.</div>
+          <div style={{ fontSize: 13, marginTop: 4 }}>Upload documents above (or drop them in chat) and they&rsquo;ll show up here as they&rsquo;re read.</div>
         </div>
       ) : (
         <>
