@@ -50,17 +50,29 @@ export async function processQueueItem(
     logDbError(error, `${itemId}: update progress to ${step}`);
   };
 
-  // 2. Update status to extracting (invariant — drives the state machine).
+  // 2. Atomically CLAIM: flip to `extracting` only if not already being
+  //    processed, bumping the attempt counter. The durable cron worker and the
+  //    upload's immediate processBatch can both reach the same item; this guard
+  //    ensures the first claim wins and any loser no-ops instead of
+  //    double-processing (which would duplicate the agent's side effects). The
+  //    attempt counter lets the cron dead-letter docs that die mid-run.
   {
-    const { error } = await admin
+    const { data: claimed, error } = await admin
       .from("document_queue")
       .update({
         status: "extracting",
+        process_attempts: ((item.process_attempts as number | null) ?? 0) + 1,
         extraction_started_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq("id", itemId);
-    assertNoDbError(error, `${itemId}: mark extracting`);
+      .eq("id", itemId)
+      .neq("status", "extracting")
+      .select("id");
+    assertNoDbError(error, `${itemId}: claim`);
+    if (!claimed || claimed.length === 0) {
+      console.log(`[PIPELINE] ${itemId}: already claimed by another worker — skipping`);
+      return;
+    }
   }
 
   try {

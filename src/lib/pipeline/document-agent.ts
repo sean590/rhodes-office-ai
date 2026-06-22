@@ -46,6 +46,29 @@ import type { ToolDefinition } from "@/lib/mcp/schema";
 import { type TokenUsage, emptyUsage, computeCostUsd } from "./model-pricing";
 import { isSpreadsheet, spreadsheetToText } from "./spreadsheet";
 
+/** Retry an Anthropic create on 429 rate-limit with exponential backoff + jitter.
+ *  This is the throttle for the durable worker: concurrent doc runs that hit the
+ *  org rate limit back off and retry instead of failing the document. */
+async function createWithBackoff(
+  anthropic: Anthropic,
+  params: Anthropic.Messages.MessageCreateParamsNonStreaming,
+  maxRetries = 5,
+): Promise<Anthropic.Messages.Message> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await anthropic.messages.create(params);
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      const msg = err instanceof Error ? err.message : String(err);
+      const is429 = status === 429 || /rate.?limit|429/i.test(msg);
+      if (!is429 || attempt >= maxRetries) throw err;
+      const waitMs = Math.min(30_000, 1_000 * 2 ** attempt) + Math.floor(Math.random() * 1_000);
+      console.warn(`[DOC-AGENT] 429 rate limit — backing off ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+}
+
 // Read tools — agent uses these for verification
 import { listInvestmentsTool, getInvestmentTool, listInvestmentTransactionsTool } from "@/lib/mcp/tools/investments";
 import { listEntitiesTool, getEntityTool } from "@/lib/mcp/tools/entities";
@@ -481,7 +504,7 @@ async function runDocumentAgentInternal(
       // dynamic is in the cached prefix. Per Anthropic docs, pricing on
       // cached blocks is ~10% of normal input. Net: ~30% cost cut on the
       // worker pipeline, since the static prefix is most of every call.
-      response = await anthropic.messages.create({
+      response = await createWithBackoff(anthropic, {
         model: AGENT_MODEL,
         max_tokens: MAX_OUTPUT_TOKENS,
         system: [
