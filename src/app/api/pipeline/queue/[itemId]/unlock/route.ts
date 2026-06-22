@@ -13,9 +13,10 @@
  * the user retries.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processQueueItem, generateBatchSummary } from "@/lib/pipeline/worker";
+import { analyzePdfWithPassword } from "@/lib/pipeline/pdf-processor";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 // Unlock awaits the full pipeline (download → analyze → agent → write tools).
@@ -40,7 +41,7 @@ export async function POST(
     // Cross-tenant guard — same shape as the other queue routes.
     const { data: item } = await admin
       .from("document_queue")
-      .select("id, batch_id, status")
+      .select("id, batch_id, status, file_path")
       .eq("id", itemId)
       .maybeSingle();
     if (!item) {
@@ -69,69 +70,50 @@ export async function POST(
       return NextResponse.json({ error: "Password is required" }, { status: 400 });
     }
 
-    // Re-run the full extraction pipeline with the password supplied. If
-    // the password is wrong, processQueueItem will throw inside extraction
-    // and the queue item will land back in password_required (worker
-    // catches PdfPasswordRequiredError) — return a 400 to the caller.
+    // Validate the password FAST (just open the encrypted PDF), then run the
+    // slow extraction (download → analyze → agent → write) in the BACKGROUND
+    // via after(). Awaiting the full pipeline here blocked the request ~38s+
+    // per doc; with concurrent unlocks the client fetch timed out / "Failed
+    // to fetch" even though processing succeeded server-side.
+    if (!item.file_path) {
+      return NextResponse.json({ error: "Document file is missing" }, { status: 500 });
+    }
+    const { data: fileData, error: dlErr } = await admin.storage
+      .from("documents")
+      .download(item.file_path as string);
+    if (dlErr || !fileData) {
+      return NextResponse.json({ error: "Could not read the document" }, { status: 500 });
+    }
+    const buffer = Buffer.from(await fileData.arrayBuffer());
     try {
-      await processQueueItem(itemId, { password });
-    } catch (err) {
-      console.error("Unlock failed:", err);
-      return NextResponse.json(
-        { error: "Failed to unlock document" },
-        { status: 500 },
-      );
+      await analyzePdfWithPassword(buffer, password);
+    } catch {
+      // PDF wouldn't open with this password → wrong password. Immediate
+      // feedback; the item stays password_required for a retry.
+      return NextResponse.json({ error: "Incorrect password" }, { status: 400 });
     }
 
-    // Re-fetch to surface the new status to the caller. Three terminal
-    // states matter here:
-    //   password_required → password was wrong, ask the user again
-    //   error             → password worked but extraction failed downstream
-    //                       (e.g. corrupt PDF, AI extraction error). Report
-    //                       this rather than claiming success.
-    //   anything else     → genuine success (extracted/review_ready/etc.)
-    const { data: refreshed } = await admin
-      .from("document_queue")
-      .select("status, extraction_error, batch_id")
-      .eq("id", itemId)
-      .maybeSingle();
-    if (refreshed?.status === "password_required") {
-      return NextResponse.json(
-        { error: "Incorrect password" },
-        { status: 400 },
-      );
-    }
-    if (refreshed?.status === "error") {
-      return NextResponse.json(
-        {
-          error:
-            refreshed.extraction_error ||
-            "Document was unlocked but extraction failed afterwards.",
-        },
-        { status: 500 },
-      );
-    }
-
-    // Auto-summary (phase 2, "post-unlock"): if this unlock finished off
-    // the last password_required item in the batch, fire a summary so the
-    // user gets a "now everything's done" message in the originating chat
-    // session. We check by counting remaining locked items.
-    if (refreshed?.batch_id) {
-      const { count: remainingLocked } = await admin
-        .from("document_queue")
-        .select("id", { count: "exact", head: true })
-        .eq("batch_id", refreshed.batch_id as string)
-        .eq("status", "password_required");
-      if (!remainingLocked || remainingLocked === 0) {
-        // Fire-and-forget; the user shouldn't wait on this for the
-        // unlock response to return.
-        generateBatchSummary(admin, refreshed.batch_id as string, "post-unlock").catch((err) =>
-          console.error(`[UNLOCK] post-unlock summary failed:`, err),
-        );
+    // Password is correct — process in the background. The password is captured
+    // in this closure only; never persisted. processQueueItem claims the item
+    // (password_required → extracting), so the cron worker won't also grab it.
+    const batchId = item.batch_id as string;
+    after(async () => {
+      try {
+        await processQueueItem(itemId, { password });
+        const { count: remainingLocked } = await admin
+          .from("document_queue")
+          .select("id", { count: "exact", head: true })
+          .eq("batch_id", batchId)
+          .eq("status", "password_required");
+        if (!remainingLocked) {
+          await generateBatchSummary(admin, batchId, "post-unlock").catch(() => {});
+        }
+      } catch (err) {
+        console.error("[UNLOCK] background processing failed:", err);
       }
-    }
+    });
 
-    return NextResponse.json({ success: true, status: refreshed?.status ?? "unknown" });
+    return NextResponse.json({ success: true, status: "processing" });
   } catch (err) {
     console.error("POST /api/pipeline/queue/[itemId]/unlock error:", err);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

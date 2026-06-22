@@ -269,7 +269,7 @@ const removeRelationshipTool = simpleWriteTool(
 
 const createComplianceObligationTool = simpleWriteTool(
   "create_compliance_obligation", "create_compliance_obligation",
-  "Create a compliance obligation on an entity. For rule-driven obligations, include rule_id. For ad-hoc obligations (PTET, one-off filings, custom deadlines), omit rule_id. Always check existing obligations first to avoid duplicates.",
+  "Create a compliance obligation on an entity. For rule-driven obligations, include rule_id; for ad-hoc ones (PTET, one-off filings, custom deadlines), omit rule_id. To log a HISTORICAL record (a past filing/payment, e.g. from onboarding), set status='completed' with completed_at (the filing/payment date), and optionally payment_amount, confirmation, and document_id — this creates an already-completed record in ONE step (no separate mark-complete needed). Always check existing obligations first to avoid duplicates.",
   z.object({
     entity_id: z.string().uuid(),
     rule_id: z.string().optional().nullable(),
@@ -280,8 +280,17 @@ const createComplianceObligationTool = simpleWriteTool(
     recurrence: z.enum(["annual", "quarterly", "monthly", "one_time"]).optional().nullable(),
     notes: z.string().optional().nullable(),
     source: z.enum(["rule", "ai", "user"]).optional().default("ai"),
+    // Historical-record fields: create an already-completed obligation in one step.
+    status: z.enum(["pending", "completed"]).optional().describe("Set 'completed' for a historical/backdated record."),
+    completed_at: z.string().optional().nullable().describe("Filing/payment date (backdated for historical records)."),
+    payment_amount: z.number().optional().nullable().describe("Amount paid, in dollars."),
+    confirmation: z.string().optional().nullable().describe("Confirmation / reference number."),
+    document_id: z.string().uuid().optional().nullable().describe("Supporting document to attach."),
   }),
-  async (i, ctx) => `Create ${i.obligation_type} obligation "${i.name}" (${i.jurisdiction}) due ${i.due_date} on ${await resolveName(ctx, "entity", i.entity_id as string)}`,
+  async (i, ctx) =>
+    i.status === "completed"
+      ? `Log historical ${i.obligation_type} obligation "${i.name}" (${i.jurisdiction}) — completed ${i.completed_at ?? "today"}${i.payment_amount != null ? ` for $${i.payment_amount}` : ""} on ${await resolveName(ctx, "entity", i.entity_id as string)}`
+      : `Create ${i.obligation_type} obligation "${i.name}" (${i.jurisdiction}) due ${i.due_date} on ${await resolveName(ctx, "entity", i.entity_id as string)}`,
   "entity", "entity_id",
 );
 

@@ -2195,6 +2195,10 @@ export async function applyActions(
           const ruleId = (item.data.rule_id as string | null | undefined) ?? null;
           const source = (item.data.source as string | undefined) ?? (ruleId ? "rule" : "ai");
 
+          // Historical record: create an already-completed obligation in one
+          // step (a past filing/payment, e.g. from onboarding ingestion).
+          const isCompleted = item.data.status === "completed";
+
           const { data, error } = await supabase
             .from("compliance_obligations")
             .insert({
@@ -2205,9 +2209,20 @@ export async function applyActions(
               frequency: recurrence,
               obligation_type: (item.data.obligation_type as string) || "custom",
               jurisdiction: item.data.jurisdiction as string,
-              status: "pending",
+              status: isCompleted ? "completed" : "pending",
               notes: (item.data.notes as string | null | undefined) ?? null,
               source,
+              ...(isCompleted
+                ? {
+                    completed_at:
+                      (item.data.completed_at as string | null | undefined) ??
+                      new Date().toISOString().split("T")[0],
+                    completed_by: options.userId ?? null,
+                  }
+                : {}),
+              ...(item.data.payment_amount != null ? { payment_amount: item.data.payment_amount as number } : {}),
+              ...(item.data.confirmation != null ? { confirmation: item.data.confirmation as string } : {}),
+              ...(item.data.document_id != null ? { document_id: item.data.document_id as string } : {}),
             })
             .select()
             .single();
