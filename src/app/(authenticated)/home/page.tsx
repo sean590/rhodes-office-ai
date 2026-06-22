@@ -319,13 +319,11 @@ export default function HomePage() {
   // materializes one session per deferred item), never on the old /review page.
   const refineReview = useCallback((r: ReviewItem) => {
     // Load the per-item session the pipeline seeded (falls back to the batch
-    // session), and seed a prompt so the drawer visibly does something even
-    // when it's already open on desktop.
-    chatPanel.open(
-      `Help me file "${r.document_name}" — which entity should it belong to, and is the type right?`,
-      undefined,
-      r.chat_session_id ?? r.batch?.session_id ?? undefined,
-    );
+    // session). Do NOT pass a query: the chat drawer AUTO-SENDS a query when
+    // there's no session to load (chat-drawer prefill: query-without-session →
+    // auto-send), so a session-less review item would fire an unintended
+    // message. Open the session (or just the drawer) and let the user type.
+    chatPanel.open(undefined, undefined, r.chat_session_id ?? r.batch?.session_id ?? undefined);
   }, [chatPanel]);
 
   // ── Derived ─────────────────────────────────────────────────────

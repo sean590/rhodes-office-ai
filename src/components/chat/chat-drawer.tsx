@@ -180,13 +180,20 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           setMessages((prev) => {
             // Dedupe: already have this exact id.
             if (prev.some((m) => m.id === newMsg.id)) return prev;
-            // Replace temp message with the real DB row when content + role match.
+            // Replace a temp message with the real DB row. For most temps we
+            // match on content; but the in-flight STREAMING assistant
+            // placeholder ("temp-assistant-…") still holds partial text when a
+            // fast realtime INSERT arrives before the stream's `done` event, so
+            // requiring content equality there mis-fires and renders the message
+            // twice. There's only ever one streaming assistant placeholder, so
+            // match it by prefix alone (the stream's `done`, if it lands after,
+            // just no-ops since the id has already been swapped to the real one).
             const tempIdx = prev.findIndex(
               (m) =>
                 typeof m.id === "string" &&
                 m.id.startsWith("temp-") &&
-                m.content === newMsg.content &&
-                m.role === newMsg.role,
+                m.role === newMsg.role &&
+                (m.content === newMsg.content || m.id.startsWith("temp-assistant-")),
             );
             if (tempIdx !== -1) {
               const updated = [...prev];
