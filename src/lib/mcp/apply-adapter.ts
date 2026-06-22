@@ -38,31 +38,45 @@ export async function applyMcpActions(
     registry.map((t) => [t.name, t]),
   );
 
-  const applied: ApplyResult["applied"] = [];
-  const failed: ApplyResult["failed"] = [];
+  type Outcome =
+    | { applied: ApplyResult["applied"][number] }
+    | { failed: ApplyResult["failed"][number] };
 
-  for (const action of actions) {
+  const applyOne = async (action: StagedAction): Promise<Outcome> => {
     const tool = toolMap.get(action.tool);
-    if (!tool) {
-      failed.push({ action, error: `tool "${action.tool}" not found` });
-      continue;
-    }
+    if (!tool) return { failed: { action, error: `tool "${action.tool}" not found` } };
     if (tool.kind !== "write") {
-      failed.push({ action, error: `tool "${action.tool}" is not a write tool` });
-      continue;
+      return { failed: { action, error: `tool "${action.tool}" is not a write tool` } };
     }
-
     try {
       const parsed = tool.inputSchema.parse(action.input);
       const result = await tool.handler(parsed, ctx);
-      applied.push({
-        action,
-        data: (result as { data: unknown }).data,
-        audit_event_id: (result as { audit_event_id?: string }).audit_event_id,
-      });
+      return {
+        applied: {
+          action,
+          data: (result as { data: unknown }).data,
+          audit_event_id: (result as { audit_event_id?: string }).audit_event_id,
+        },
+      };
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      failed.push({ action, error: message });
+      return { failed: { action, error: err instanceof Error ? err.message : String(err) } };
+    }
+  };
+
+  // Apply in bounded-concurrency chunks rather than one-at-a-time: a 20-action
+  // batch applied serially took minutes and timed the route out. Within a
+  // single approval batch the actions are independent — the agent can't stage
+  // an action against a resource it's creating in the same batch (it wouldn't
+  // have the id), so cross-resource dependencies span follow-up turns. Order
+  // within applied/failed is preserved; continue-on-failure is unchanged.
+  const CONCURRENCY = 5;
+  const applied: ApplyResult["applied"] = [];
+  const failed: ApplyResult["failed"] = [];
+  for (let i = 0; i < actions.length; i += CONCURRENCY) {
+    const outcomes = await Promise.all(actions.slice(i, i + CONCURRENCY).map(applyOne));
+    for (const o of outcomes) {
+      if ("applied" in o) applied.push(o.applied);
+      else failed.push(o.failed);
     }
   }
 

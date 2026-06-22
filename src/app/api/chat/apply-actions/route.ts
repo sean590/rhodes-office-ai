@@ -18,6 +18,10 @@ import { checkPerHourWriteCap } from "@/lib/mcp/rate-limit-writes";
 import { ToolError } from "@/lib/mcp/tool-helpers";
 import type { StagedAction } from "@/lib/mcp/staging";
 
+// Applying a large approval batch (e.g. 20+ actions) takes real time even
+// parallelized; without a budget the route hit the default timeout and failed.
+export const maxDuration = 300;
+
 export async function POST(request: Request) {
   try {
     const ctx = await requireOrg();
