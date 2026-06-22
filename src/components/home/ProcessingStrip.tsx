@@ -36,8 +36,10 @@ export function ProcessingStrip() {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const tick = () => {
+      // 15s, not 5s: this is just a status banner — it doesn't need to be
+      // near-real-time, and 5s polling piles up requests over a long session.
       fetchCounts().finally(() => {
-        if (!cancelled) timer = setTimeout(tick, 5000);
+        if (!cancelled) timer = setTimeout(tick, 15000);
       });
     };
     tick();

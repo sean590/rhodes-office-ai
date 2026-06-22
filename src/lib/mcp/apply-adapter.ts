@@ -48,9 +48,11 @@ export async function applyMcpActions(
     if (tool.kind !== "write") {
       return { failed: { action, error: `tool "${action.tool}" is not a write tool` } };
     }
+    const t0 = Date.now();
     try {
       const parsed = tool.inputSchema.parse(action.input);
       const result = await tool.handler(parsed, ctx);
+      console.log(`[apply] ${action.tool} ${Date.now() - t0}ms`);
       return {
         applied: {
           action,
@@ -59,6 +61,7 @@ export async function applyMcpActions(
         },
       };
     } catch (err) {
+      console.log(`[apply] ${action.tool} FAILED ${Date.now() - t0}ms: ${err instanceof Error ? err.message : String(err)}`);
       return { failed: { action, error: err instanceof Error ? err.message : String(err) } };
     }
   };
