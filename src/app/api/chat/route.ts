@@ -244,6 +244,11 @@ export async function POST(request: Request) {
                   ? finalResult.stagedActions
                   : undefined,
               mcp_chat: true,
+              // Cost telemetry — chat runs on Opus, a material cost center.
+              // Measured here so we can track chat cost alongside ingestion.
+              cost_usd: finalResult.costUsd,
+              usage: finalResult.usage,
+              model: finalResult.model,
             },
           }).select("id").single();
           await admin

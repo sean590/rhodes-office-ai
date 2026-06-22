@@ -42,4 +42,8 @@ export type StreamEvent =
       truncated: boolean;
       stopReason: string | null;
       messageId?: string;
+      /** Cost telemetry for the assistant turn (chat runs on Opus). */
+      usage?: { input: number; output: number; cacheRead: number; cacheCreation: number };
+      costUsd?: number;
+      model?: string;
     };

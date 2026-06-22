@@ -46,8 +46,20 @@ export function totalTokens(u: TokenUsage): number {
 /** Fully-loaded USD cost for the given model + usage. Returns 0 for an
  *  unknown model (surface that as "cost unknown" in aggregation, don't trust
  *  it as free). */
+/** Fall back to family pricing when the exact version string isn't in the
+ *  table (e.g. chat runs "claude-opus-4-6" while the table lists "-4-8") so a
+ *  model bump doesn't silently zero out cost. */
+function ratesFor(model: string): ModelRates | null {
+  if (PRICING[model]) return PRICING[model];
+  const m = model.toLowerCase();
+  if (m.includes("opus")) return PRICING["claude-opus-4-8"];
+  if (m.includes("sonnet")) return PRICING["claude-sonnet-4-6"];
+  if (m.includes("haiku")) return PRICING["claude-haiku-4-5"];
+  return null;
+}
+
 export function computeCostUsd(model: string, u: TokenUsage): number {
-  const r = PRICING[model];
+  const r = ratesFor(model);
   if (!r) return 0;
   return (
     (u.input * r.input +

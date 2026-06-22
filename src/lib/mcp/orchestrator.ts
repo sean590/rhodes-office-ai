@@ -28,6 +28,7 @@ import { logToolCall } from "./tool-call-log";
 import { checkPerTurnWriteCap } from "./rate-limit-writes";
 import { ToolError } from "./tool-helpers";
 import type { StreamEvent } from "./stream-events";
+import { emptyUsage, computeCostUsd } from "@/lib/pipeline/model-pricing";
 
 // --- Limits (per spec §7) ---------------------------------------------------
 
@@ -156,6 +157,9 @@ export interface OrchestratorResult {
   iterations: number;
   truncated: boolean;
   stopReason: string | null;
+  usage?: { input: number; output: number; cacheRead: number; cacheCreation: number };
+  costUsd?: number;
+  model?: string;
 }
 
 // --- Tool definitions for the Anthropic API --------------------------------
@@ -441,6 +445,20 @@ export async function* runOrchestratorStreaming(
   let iterations = 0;
   let stopReason: string | null = null;
   let accumulatedText = "";
+  // Cost telemetry: accumulate token usage across iterations (chat runs on
+  // Opus — ~5x Sonnet — so this is a material cost center to measure).
+  const usageTotals = emptyUsage();
+  const model = input.model ?? "claude-opus-4-6";
+  const addUsage = (raw: unknown) => {
+    const u = (raw ?? {}) as {
+      input_tokens?: number; output_tokens?: number;
+      cache_read_input_tokens?: number; cache_creation_input_tokens?: number;
+    };
+    usageTotals.input += u.input_tokens || 0;
+    usageTotals.output += u.output_tokens || 0;
+    usageTotals.cacheRead += u.cache_read_input_tokens || 0;
+    usageTotals.cacheCreation += u.cache_creation_input_tokens || 0;
+  };
 
   let systemPrompt = SYSTEM_PROMPT;
   if (input.userIdentity) {
@@ -455,7 +473,7 @@ export async function* runOrchestratorStreaming(
   }
 
   const apiParams = {
-    model: input.model ?? "claude-opus-4-6",
+    model,
     // 4096 was tight for tool-heavy turns: a 15-action staging batch with
     // brief per-action narration regularly exceeded that budget, leaving the
     // turn truncated mid-prose with zero staged actions. 16k gives the model
@@ -507,11 +525,13 @@ export async function* runOrchestratorStreaming(
       }
 
       const finalMsg = await stream.finalMessage();
+      addUsage((finalMsg as unknown as Record<string, unknown>).usage);
       stopReason = finalMsg.stop_reason ?? null;
       content = finalMsg.content;
     } else {
       // Non-streaming fallback (test mocks, etc.)
       const response = await input.anthropic.messages.create(apiParams);
+      addUsage((response as unknown as Record<string, unknown>).usage);
       stopReason = response.stop_reason ?? null;
       content = response.content;
 
@@ -608,6 +628,9 @@ export async function* runOrchestratorStreaming(
     iterations,
     truncated,
     stopReason,
+    usage: { ...usageTotals },
+    costUsd: computeCostUsd(model, usageTotals),
+    model,
   };
 }
 
