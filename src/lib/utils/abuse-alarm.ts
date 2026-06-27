@@ -12,10 +12,15 @@ import * as Sentry from "@sentry/nextjs";
 // an infra problem must not take down the product.
 //
 // Tuning (all optional; sensible defaults below):
-//   ABUSE_ALARM_MODE      'alert' (default) = notify only · 'block' = also 429 the request
-//   ABUSE_DOCS_PER_10MIN  per-user docs allowed in 10 minutes (default 60)
-//   ABUSE_DOCS_PER_HOUR   per-user docs allowed in 60 minutes (default 300)
+//   ABUSE_ALARM_MODE      'block' (prod default) = also 429 · 'alert' = notify only
+//   ABUSE_DOCS_PER_10MIN  per-user docs allowed in 10 minutes (default 300)
+//   ABUSE_DOCS_PER_HOUR   per-user docs allowed in 60 minutes (default 1500)
 // Reuses the same KV_REST_API_URL / KV_REST_API_TOKEN as the rate limiter.
+//
+// NOTE (stopgap): block mode is on in prod, but thresholds are set HIGH so legit
+// bulk uploads / onboarding backfills aren't blocked — which means the runaway-cost
+// ceiling is still ~1500 docs/hr/user. The proper fix (Phase 3) is PER-ORG +
+// cost-based limits with a separate, higher allowance for the explicit backfill path.
 
 let redis: Redis | null = null;
 
@@ -36,12 +41,16 @@ function envInt(name: string, fallback: number): number {
 }
 
 type Mode = "alert" | "block";
-const MODE: Mode = process.env.ABUSE_ALARM_MODE === "block" ? "block" : "alert";
+// Explicit env wins; otherwise BLOCK in production (don't ship an alert-only door),
+// alert in dev. Set ABUSE_ALARM_MODE=alert to override in prod if ever needed.
+const MODE: Mode = process.env.ABUSE_ALARM_MODE === "block" ? "block"
+  : process.env.ABUSE_ALARM_MODE === "alert" ? "alert"
+  : process.env.NODE_ENV === "production" ? "block" : "alert";
 
 // Trips if EITHER window is exceeded — catches short bursts and sustained floods.
 const WINDOWS = [
-  { key: "10m", windowMs: 10 * 60_000, limit: () => envInt("ABUSE_DOCS_PER_10MIN", 60) },
-  { key: "1h", windowMs: 60 * 60_000, limit: () => envInt("ABUSE_DOCS_PER_HOUR", 300) },
+  { key: "10m", windowMs: 10 * 60_000, limit: () => envInt("ABUSE_DOCS_PER_10MIN", 300) },
+  { key: "1h", windowMs: 60 * 60_000, limit: () => envInt("ABUSE_DOCS_PER_HOUR", 1500) },
 ];
 
 export interface AbuseCheckResult {

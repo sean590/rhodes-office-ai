@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { unsatisfyByDocument } from "@/lib/utils/document-expectations";
@@ -15,13 +15,12 @@ export async function GET(
     const { orgId } = ctx;
 
     const { id } = await params;
-    const admin = createAdminClient();
+    const admin = createOrgClient(orgId);
 
     const { data, error } = await admin
       .from("documents")
       .select("*")
       .eq("id", id)
-      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .single();
 
@@ -56,13 +55,12 @@ export async function PATCH(
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const admin = createOrgClient(orgId);
 
     const { data, error } = await admin
       .from("documents")
       .update({ name: name.trim() })
       .eq("id", id)
-      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .select()
       .single();
@@ -91,14 +89,13 @@ export async function DELETE(
     const { orgId, user } = ctx;
 
     const { id } = await params;
-    const admin = createAdminClient();
+    const admin = createOrgClient(orgId);
 
     // Soft delete using admin client
     const { data: doc, error } = await admin
       .from("documents")
       .update({ deleted_at: new Date().toISOString() })
       .eq("id", id)
-      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .select()
       .single();

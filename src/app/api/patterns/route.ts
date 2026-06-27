@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { runInferenceEngine, promoteToTemplate } from "@/lib/utils/inference-engine";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -15,12 +15,11 @@ export async function GET() {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const admin = createAdminClient();
+    const admin = createOrgClient(orgId);
 
     const { data: patterns, error } = await admin
       .from("org_document_patterns")
       .select("*")
-      .eq("organization_id", orgId)
       .eq("is_active", true)
       .gte("confidence", 0.7)
       .order("confidence", { ascending: false });
@@ -67,7 +66,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
     const action = body.action as string;
-    const admin = createAdminClient();
+    const admin = createOrgClient(orgId);
 
     if (action === "run") {
       const result = await runInferenceEngine(orgId);
@@ -108,8 +107,7 @@ export async function POST(request: Request) {
       await admin
         .from("org_document_patterns")
         .update({ is_active: false, updated_at: new Date().toISOString() })
-        .eq("id", pattern_id)
-        .eq("organization_id", orgId);
+        .eq("id", pattern_id);
 
       const reqHeaders = await headers();
       const reqCtx = getRequestContext(reqHeaders, orgId);

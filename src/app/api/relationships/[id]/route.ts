@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
@@ -14,7 +14,7 @@ export async function PUT(
     const { orgId, user } = ctx;
 
     const { id } = await params;
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
     const body = await request.json();
 
     const updates: Record<string, unknown> = {};
@@ -47,7 +47,6 @@ export async function PUT(
       .from("relationships")
       .update(updates)
       .eq("id", id)
-      .eq("organization_id", orgId)
       .select()
       .single();
 
@@ -93,7 +92,7 @@ export async function DELETE(
     const { orgId, user } = ctx;
 
     const { id } = await params;
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
 
     const { searchParams } = new URL(request.url);
     const hard = searchParams.get("hard") === "true";
@@ -103,8 +102,7 @@ export async function DELETE(
       const { error } = await supabase
         .from("relationships")
         .delete()
-        .eq("id", id)
-        .eq("organization_id", orgId);
+        .eq("id", id);
 
       if (error) {
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -114,8 +112,7 @@ export async function DELETE(
       const { error } = await supabase
         .from("relationships")
         .update({ status: "terminated", updated_at: new Date().toISOString() })
-        .eq("id", id)
-        .eq("organization_id", orgId);
+        .eq("id", id);
 
       if (error) {
         return NextResponse.json({ error: "Internal server error" }, { status: 500 });

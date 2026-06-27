@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createInvestmentSchema } from "@/lib/validations";
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const url = new URL(request.url);
     const entityId = url.searchParams.get("entity_id");
     const status = url.searchParams.get("status");
@@ -34,16 +34,15 @@ export async function GET(request: Request) {
     if (entityId) {
       // Detect whether this is a person; if so, expand the filter to cover
       // their joint_title memberships as well.
-      const { data: entityRow } = await supabase
+      const { data: entityRow } = await db
         .from("entities")
         .select("type")
         .eq("id", entityId)
-        .eq("organization_id", orgId)
         .maybeSingle();
 
       const entityIdsToQuery: string[] = [entityId];
       if (entityRow?.type === "person") {
-        const { data: memberships } = await supabase
+        const { data: memberships } = await db.raw
           .from("joint_title_members")
           .select("joint_title_id")
           .eq("person_entity_id", entityId);
@@ -51,7 +50,7 @@ export async function GET(request: Request) {
         entityIdsToQuery.push(...jointTitleIdsForPerson);
       }
 
-      const { data: investorRows, error: investorErr } = await supabase
+      const { data: investorRows, error: investorErr } = await db
         .from("investment_investors")
         .select("investment_id")
         .in("entity_id", entityIdsToQuery)
@@ -72,10 +71,9 @@ export async function GET(request: Request) {
       }
     }
 
-    let query = supabase
+    let query = db
       .from("investments")
       .select("*")
-      .eq("organization_id", orgId)
       .order("name", { ascending: true });
 
     if (investmentIdFilter) {
@@ -98,7 +96,7 @@ export async function GET(request: Request) {
         const investmentId = row.id as string;
 
         // Get investors with entity names
-        const { data: investors } = await supabase
+        const { data: investors } = await db
           .from("investment_investors")
           .select("id, entity_id, capital_pct, profit_pct, is_active, entities(name)")
           .eq("investment_id", investmentId)
@@ -127,7 +125,7 @@ export async function GET(request: Request) {
         // Get participant count from allocations (via investor IDs)
         let participantCount = 0;
         if (investorIds.length > 0) {
-          const { count } = await supabase
+          const { count } = await db
             .from("investment_allocations")
             .select("id", { count: "exact", head: true })
             .in("investment_investor_id", investorIds)
@@ -140,7 +138,7 @@ export async function GET(request: Request) {
         // child rows; line items live in JSONB on the parent now (spec 036).
         let txns: TransactionTotalRow[] = [];
         if (investorIds.length > 0) {
-          const { data } = await supabase
+          const { data } = await db
             .from("investment_transactions")
             .select("transaction_type, amount, line_items, adjusts_transaction_id, transaction_date")
             .in("investment_investor_id", investorIds)
@@ -214,13 +212,12 @@ export async function POST(request: Request) {
     }
 
     const data = parsed.data;
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Create the investment row (no parent_entity_id, capital_pct, or profit_pct)
-    const { data: investment, error } = await supabase
+    const { data: investment, error } = await db
       .from("investments")
       .insert({
-        organization_id: orgId,
         name: data.name,
         short_name: data.short_name || null,
         investment_type: data.investment_type,
@@ -244,7 +241,6 @@ export async function POST(request: Request) {
 
     // Create investment_investors rows
     const investorRows = data.investors.map((inv) => ({
-      organization_id: orgId,
       investment_id: investment.id,
       entity_id: inv.entity_id,
       capital_pct: inv.capital_pct ?? null,
@@ -254,7 +250,7 @@ export async function POST(request: Request) {
       created_by: user.id,
     }));
 
-    const { data: createdInvestors, error: investorError } = await supabase
+    const { data: createdInvestors, error: investorError } = await db
       .from("investment_investors")
       .insert(investorRows)
       .select("id, entity_id");
@@ -262,7 +258,7 @@ export async function POST(request: Request) {
     if (investorError) {
       console.error("POST investment_investors error:", investorError);
       // Clean up the investment row on failure
-      await supabase.from("investments").delete().eq("id", investment.id);
+      await db.from("investments").delete().eq("id", investment.id);
       return NextResponse.json({ error: "Failed to create investors" }, { status: 500 });
     }
 
@@ -278,7 +274,7 @@ export async function POST(request: Request) {
         created_by: user.id,
       }));
 
-      const { error: coInvestorError } = await supabase
+      const { error: coInvestorError } = await db
         .from("investment_co_investors")
         .insert(coInvestorRows);
 

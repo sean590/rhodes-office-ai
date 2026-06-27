@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { COMPLIANCE_RULES } from "@/lib/data/compliance-rules";
 import type { EntityTypeScope } from "@/lib/data/compliance-rules";
@@ -13,11 +13,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const scope = url.searchParams.get("entity_type_scope");
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   let query = admin
     .from("compliance_profiles")
     .select("*")
-    .eq("organization_id", ctx.orgId)
     .order("entity_type_scope")
     .order("rule_id");
 
@@ -42,12 +41,11 @@ export async function POST(request: Request) {
   }
   if (!rule_id) return NextResponse.json({ error: "rule_id is required" }, { status: 400 });
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   const { data, error } = await admin
     .from("compliance_profiles")
     .upsert(
       {
-        organization_id: ctx.orgId,
         entity_type_scope,
         rule_id,
         enabled: enabled ?? true,
@@ -79,10 +77,9 @@ export async function PUT(request: Request) {
     r.entity_types.includes("all") || r.entity_types.includes(entity_type_scope),
   );
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
 
   const rows = matchingRules.map((r) => ({
-    organization_id: ctx.orgId,
     entity_type_scope,
     rule_id: r.id,
     enabled: true,

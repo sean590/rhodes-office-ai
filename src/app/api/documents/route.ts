@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "30", 10), 500);
@@ -27,10 +27,9 @@ export async function GET(request: Request) {
     // ai_extraction JSONB for list view). Investment-only docs (entity_id
     // null but investment_id set) need the investment name so the UI can
     // show "via {Investment}" instead of "Unassigned".
-    const query = admin
+    const query = db
       .from("documents")
       .select("id, name, document_type, document_category, year, entity_id, investment_id, file_path, file_size, mime_type, uploaded_by, notes, content_hash, ai_extracted, created_at, updated_at, organization_id, entities(name), investments(name)", { count: paginated ? "exact" : undefined })
-      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
@@ -42,7 +41,7 @@ export async function GET(request: Request) {
     }
 
     // Flatten entity + investment names into each doc
-    const result = (docs || []).map((doc) => ({
+    const result = (docs || []).map((doc: Record<string, unknown>) => ({
       ...doc,
       entity_name: (doc.entities as unknown as { name: string } | null)?.name || null,
       investment_name: (doc.investments as unknown as { name: string } | null)?.name || null,
@@ -71,7 +70,7 @@ export async function POST(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check for ?force=true query param (bypass duplicate check)
     const { searchParams } = new URL(request.url);
@@ -106,11 +105,10 @@ export async function POST(request: Request) {
 
     // Check for duplicate (unless force=true)
     if (!force) {
-      const { data: existing } = await admin
+      const { data: existing } = await db
         .from("documents")
         .select("id, name, entity_id, created_at")
         .eq("content_hash", contentHash)
-        .eq("organization_id", orgId)
         .is("deleted_at", null)
         .limit(1)
         .maybeSingle();
@@ -119,7 +117,7 @@ export async function POST(request: Request) {
         // Look up entity name for the existing doc
         let existingEntityName: string | null = null;
         if (existing.entity_id) {
-          const { data: ent } = await admin
+          const { data: ent } = await db
             .from("entities")
             .select("name")
             .eq("id", existing.entity_id)
@@ -141,7 +139,7 @@ export async function POST(request: Request) {
     // Look up entity short_name for canonical filename
     let shortName: string | null = null;
     if (entityId) {
-      const { data: ent } = await admin
+      const { data: ent } = await db
         .from("entities")
         .select("short_name")
         .eq("id", entityId)
@@ -154,7 +152,7 @@ export async function POST(request: Request) {
     const resolvedCategory = documentCategory || getCategoryForDocType(documentType);
 
     let collisionCount = 0;
-    const matchQuery = admin
+    const matchQuery = db
       .from("documents")
       .select("id", { count: "exact", head: true })
       .eq("document_type", documentType)
@@ -185,7 +183,7 @@ export async function POST(request: Request) {
     const folder = entityId || "unassociated";
     let filePath = `${folder}/${canonicalName}`;
 
-    let uploadError = (await admin.storage
+    let uploadError = (await db.raw.storage
       .from("documents")
       .upload(filePath, arrayBuffer, {
         contentType: file.type,
@@ -196,7 +194,7 @@ export async function POST(request: Request) {
     if (uploadError?.message?.includes("already exists")) {
       const fallbackName = `${canonicalName.replace(extension, '')}_${Date.now()}${extension}`;
       filePath = `${folder}/${fallbackName}`;
-      uploadError = (await admin.storage
+      uploadError = (await db.raw.storage
         .from("documents")
         .upload(filePath, arrayBuffer, {
           contentType: file.type,
@@ -213,10 +211,9 @@ export async function POST(request: Request) {
     }
 
     // Create document record — entity_id is optional
-    const { data: doc, error: dbError } = await admin
+    const { data: doc, error: dbError } = await db
       .from("documents")
       .insert({
-        organization_id: orgId,
         entity_id: entityId || null,
         name,
         document_type: documentType,
@@ -233,7 +230,7 @@ export async function POST(request: Request) {
       .single();
 
     if (dbError) {
-      await admin.storage.from("documents").remove([filePath]);
+      await db.raw.storage.from("documents").remove([filePath]);
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
 

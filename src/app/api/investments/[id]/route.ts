@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@/lib/utils/audit";
 import { updateInvestmentSchema } from "@/lib/validations";
@@ -29,7 +29,7 @@ export async function GET(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
 
     // Fetch investment
     const { data: investment, error } = await supabase
@@ -171,7 +171,7 @@ export async function PATCH(
     }
 
     const updates = parsed.data;
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
 
     // Fetch existing record before update for change tracking
     const { data: existing } = await supabase
@@ -236,7 +236,7 @@ export async function DELETE(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
 
     // Get name for audit log before deleting
     const { data: existing } = await supabase

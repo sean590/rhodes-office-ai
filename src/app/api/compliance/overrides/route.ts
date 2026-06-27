@@ -1,16 +1,15 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET() {
   const ctx = await requireOrg();
   if (isError(ctx)) return ctx;
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   const { data, error } = await admin
     .from("org_compliance_overrides")
     .select("*")
-    .eq("organization_id", ctx.orgId)
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -29,19 +28,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "action must be 'disable' or 'enable'" }, { status: 400 });
   }
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
 
   // Delete any existing override for this rule, then insert.
   await admin
     .from("org_compliance_overrides")
     .delete()
-    .eq("organization_id", ctx.orgId)
     .eq("rule_id", rule_id);
 
   const { data, error } = await admin
     .from("org_compliance_overrides")
     .insert({
-      organization_id: ctx.orgId,
       rule_id,
       action,
       reason: reason || null,
@@ -62,21 +59,19 @@ export async function DELETE(request: Request) {
   const id = url.searchParams.get("id");
   const ruleId = url.searchParams.get("rule_id");
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
 
   if (id) {
     const { error } = await admin
       .from("org_compliance_overrides")
       .delete()
-      .eq("id", id)
-      .eq("organization_id", ctx.orgId);
+      .eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else if (ruleId) {
     const { error } = await admin
       .from("org_compliance_overrides")
       .delete()
-      .eq("rule_id", ruleId)
-      .eq("organization_id", ctx.orgId);
+      .eq("rule_id", ruleId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   } else {
     return NextResponse.json({ error: "id or rule_id is required" }, { status: 400 });

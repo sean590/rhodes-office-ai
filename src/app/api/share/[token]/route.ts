@@ -21,7 +21,9 @@ export async function POST(
     const userAgent = h.get("user-agent");
 
     // Cheap brute-force hygiene (token is already infeasible at 32 bytes).
-    const allowed = await rateLimit("share:" + ip, 30, 60_000);
+    // Fail CLOSED: this is a public, unauthenticated endpoint — a Redis outage
+    // must not turn off the brute-force limiter on a document-access link.
+    const allowed = await rateLimit("share:" + ip, 30, 60_000, { failClosed: true });
     if (!allowed) {
       return NextResponse.json({ error: "Too many requests." }, { status: 429 });
     }

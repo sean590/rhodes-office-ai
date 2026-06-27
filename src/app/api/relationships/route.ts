@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createRelationshipSchema } from "@/lib/validations";
@@ -118,7 +118,7 @@ export async function POST(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 
-    const supabase = createAdminClient();
+    const supabase = createOrgClient(orgId);
     const body = await request.json();
 
     const parsed = createRelationshipSchema.safeParse(body);
@@ -158,7 +158,6 @@ export async function POST(request: Request) {
     }
 
     const insert: Record<string, unknown> = {
-      organization_id: orgId,
       type,
       description: description || null,
       terms: terms || null,

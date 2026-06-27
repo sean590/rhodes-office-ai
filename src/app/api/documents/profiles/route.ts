@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import {
   DOCUMENT_SCOPES,
@@ -18,11 +18,10 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const scope = url.searchParams.get("entity_type_scope");
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   let query = admin
     .from("document_profiles")
     .select("*")
-    .eq("organization_id", ctx.orgId)
     .order("entity_type_scope")
     .order("document_type");
 
@@ -49,12 +48,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "document_type is required" }, { status: 400 });
   }
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   const { data, error } = await admin
     .from("document_profiles")
     .upsert(
       {
-        organization_id: ctx.orgId,
         entity_type_scope,
         document_type,
         document_category: document_category || "other",
@@ -89,9 +87,8 @@ export async function PUT(request: Request) {
     return NextResponse.json({ seeded: 0 });
   }
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   const rows = defaults.map((d) => ({
-    organization_id: ctx.orgId,
     entity_type_scope,
     document_type: d.document_type,
     document_category: d.document_category,
@@ -123,12 +120,11 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
-  const admin = createAdminClient();
+  const admin = createOrgClient(ctx.orgId);
   const { error } = await admin
     .from("document_profiles")
     .delete()
-    .eq("id", id)
-    .eq("organization_id", ctx.orgId);
+    .eq("id", id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });

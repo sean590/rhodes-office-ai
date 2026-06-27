@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { applyActions } from "@/lib/pipeline/apply";
 import { linkProviderEntitySchema } from "@/lib/validations";
 
 // Verify the provider exists and belongs to this org (the [id] segment).
 async function providerInOrg(providerId: string, orgId: string): Promise<boolean> {
-  const admin = createAdminClient();
+  const admin = createOrgClient(orgId);
   const { data } = await admin
     .from("service_providers")
     .select("id")
     .eq("id", providerId)
-    .eq("organization_id", orgId)
     .is("deleted_at", null)
     .maybeSingle();
   return !!data;
