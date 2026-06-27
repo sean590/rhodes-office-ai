@@ -5,6 +5,10 @@ import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { headers } from "next/headers";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
+// Approving a large batch applies mutations per item; give it a budget so it
+// doesn't hit the default timeout on a big "Approve all".
+export const maxDuration = 300;
+
 export async function POST(
   _request: Request,
   { params }: { params: Promise<{ batchId: string }> }
@@ -52,19 +56,31 @@ export async function POST(
 
     const results = { approved: 0, skipped: 0, errors: [] as string[] };
 
-    for (const item of items) {
-      const result = await ingestQueueItem({
-        item,
-        userId,
-        orgId,
-        applyMutations: true,
-        finalStatus: "approved",
-      });
-
-      if (result.success) {
-        results.approved++;
-      } else {
-        results.errors.push(`${item.id}: ${result.error}`);
+    // Bounded-concurrency, not serial: a large "Approve all" applied one item at
+    // a time hit the function timeout. The items are independent ingests, so we
+    // run them in chunks (cap the concurrency so we don't fan out unbounded DB
+    // writes). Aggregate counts don't depend on order.
+    const CONCURRENCY = 5;
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      const outcomes = await Promise.all(
+        items.slice(i, i + CONCURRENCY).map(async (item) => {
+          try {
+            const r = await ingestQueueItem({
+              item,
+              userId,
+              orgId,
+              applyMutations: true,
+              finalStatus: "approved",
+            });
+            return { item, success: r.success, error: r.error };
+          } catch (err) {
+            return { item, success: false, error: err instanceof Error ? err.message : String(err) };
+          }
+        }),
+      );
+      for (const o of outcomes) {
+        if (o.success) results.approved++;
+        else results.errors.push(`${o.item.id}: ${o.error}`);
       }
     }
 

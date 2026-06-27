@@ -5,6 +5,15 @@ import { sendDocumentToProvider, SendDocumentError } from "@/lib/providers/send-
 
 // POST /api/provider-sends — send a bundle of stored documents to a provider as
 // one secure link. Body validated by sendDocumentToProviderSchema (document_ids[]).
+//
+// The default (Rhodes-link) delivery is light — it mints a share link and sends
+// one notification email; file bytes are served lazily at access time, not
+// downloaded here. But an attachment-style delivery impl would pull every
+// bundled file inline, so give the route a real budget rather than the inherited
+// default. We keep this synchronous (not after()) on purpose: the caller needs
+// the share link / send status in the response.
+export const maxDuration = 120;
+
 export async function POST(request: Request) {
   try {
     const ctx = await requireOrg();

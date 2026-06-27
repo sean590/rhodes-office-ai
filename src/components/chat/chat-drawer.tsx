@@ -627,16 +627,20 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
           };
 
           // 3. Upload each file to Supabase Storage + compute SHA-256 hash.
-          const fileHashes: string[] = [];
-          for (let i = 0; i < presignData.urls.length; i++) {
+          // Bounded-parallel (not one-at-a-time): uploading 3-4 files serially
+          // stacked their latencies. Cap concurrency so we don't open too many
+          // PUTs at once. fileHashes stays positional (indexed by i) so the
+          // register step below still lines up with currentFiles.
+          const fileHashes: string[] = new Array(presignData.urls.length);
+          const UPLOAD_CONCURRENCY = 4;
+          const uploadOne = async (i: number) => {
             const { signedUrl, token } = presignData.urls[i];
             const file = currentFiles[i];
             const buf = await file.arrayBuffer();
             const hashBuf = await crypto.subtle.digest("SHA-256", buf);
-            const hashHex = Array.from(new Uint8Array(hashBuf))
+            fileHashes[i] = Array.from(new Uint8Array(hashBuf))
               .map((b) => b.toString(16).padStart(2, "0"))
               .join("");
-            fileHashes.push(hashHex);
             const uploadRes = await fetch(signedUrl, {
               method: "PUT",
               headers: {
@@ -647,6 +651,14 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
               body: buf,
             });
             if (!uploadRes.ok) throw new Error(`Failed to upload ${file.name}`);
+          };
+          for (let i = 0; i < presignData.urls.length; i += UPLOAD_CONCURRENCY) {
+            await Promise.all(
+              Array.from(
+                { length: Math.min(UPLOAD_CONCURRENCY, presignData.urls.length - i) },
+                (_, k) => uploadOne(i + k),
+              ),
+            );
           }
 
           // 4. Register uploaded files with the batch.
