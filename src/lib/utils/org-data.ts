@@ -17,6 +17,11 @@ function getRedis(): Redis | null {
     redis = new Redis({
       url: process.env.KV_REST_API_URL,
       token: process.env.KV_REST_API_TOKEN,
+      // Fail fast when Redis is unreachable. The SDK default retries 5x with
+      // exponential backoff (~4-5s/call against a dead host), silently adding
+      // seconds to every cache/rate-limit op. Callers all fail open in a
+      // try/catch, so one quick attempt is enough.
+      retry: false,
     });
   }
   return redis;

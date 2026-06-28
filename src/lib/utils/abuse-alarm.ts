@@ -30,6 +30,7 @@ function getRedis(): Redis | null {
     redis = new Redis({
       url: process.env.KV_REST_API_URL,
       token: process.env.KV_REST_API_TOKEN,
+      retry: false, // fail fast on unreachable Redis (default retries 5x w/ ~5s backoff); caller fails open
     });
   }
   return redis;
