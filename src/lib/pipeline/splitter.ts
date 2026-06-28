@@ -149,6 +149,7 @@ export async function splitDocumentIntoChildren(
       // Insert an error queue item so the section is visible in /review
       // rather than silently disappearing.
       await admin.from("document_queue").insert({
+        organization_id: orgId, // NOT NULL since migration 068
         batch_id: parentItem.batch_id,
         status: "error",
         original_filename: filename,
@@ -204,6 +205,7 @@ export async function splitDocumentIntoChildren(
     const { data: child, error: insertErr } = await admin
       .from("document_queue")
       .insert({
+        organization_id: orgId, // NOT NULL since migration 068
         batch_id: parentItem.batch_id,
         status: "queued",
         original_filename: filename,

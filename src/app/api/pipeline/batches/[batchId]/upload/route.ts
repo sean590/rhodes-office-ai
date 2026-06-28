@@ -169,6 +169,7 @@ export async function POST(
       const { data: queueItem, error: queueError } = await admin
         .from("document_queue")
         .insert({
+          organization_id: orgId, // NOT NULL since migration 068 — required or the insert is rejected
           batch_id: batchId,
           status: 'staged',
           original_filename: file.originalName,

@@ -468,6 +468,7 @@ export const splitDocumentTool = defineTool({
     const { data: parentItem, error: parentErr } = await ctx.supabase
       .from("document_queue")
       .insert({
+        organization_id: ctx.orgId, // NOT NULL since migration 068
         batch_id: batch.id,
         status: "queued",
         original_filename: doc.name,

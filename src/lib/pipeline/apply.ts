@@ -2202,6 +2202,7 @@ export async function applyActions(
           const { data, error } = await supabase
             .from("compliance_obligations")
             .insert({
+              organization_id: options.orgId, // NOT NULL since migration 068
               entity_id: entityId,
               rule_id: ruleId,
               name,
