@@ -36,6 +36,10 @@ export function SessionTimeoutManager() {
   // last-activity timestamp, and the activity listeners will keep it fresh.
   const lastActivityRef = useRef<number>(0);
   const lastHeartbeatRef = useRef<number>(0);
+  // Absolute 12h session cap (login + 12h), from /api/auth/me. null until loaded
+  // or if no session-start cookie. Enforced by middleware; this is the graceful
+  // client-side cutoff so the user sees the overlay rather than an abrupt redirect.
+  const absoluteDeadlineRef = useRef<number | null>(null);
   const [showWarning, setShowWarning] = useState(false);
   const [remainingMs, setRemainingMs] = useState<number>(WARNING_BEFORE_MS);
   const [signingOut, setSigningOut] = useState(false);
@@ -51,18 +55,21 @@ export function SessionTimeoutManager() {
     }
   }, []);
 
-  const gracefulLogout = useCallback(async () => {
-    if (signingOutRef.current) return;
-    signingOutRef.current = true;
-    setSigningOut(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-    } catch {
-      // ignore — we're redirecting regardless
-    }
-    window.location.href = "/login?reason=inactive";
-  }, []);
+  const gracefulLogout = useCallback(
+    async (reason: "inactive" | "expired" = "inactive") => {
+      if (signingOutRef.current) return;
+      signingOutRef.current = true;
+      setSigningOut(true);
+      try {
+        const supabase = createClient();
+        await supabase.auth.signOut();
+      } catch {
+        // ignore — we're redirecting regardless
+      }
+      window.location.href = `/login?reason=${reason}`;
+    },
+    []
+  );
 
   const recordActivity = useCallback(() => {
     if (signingOutRef.current) return;
@@ -99,6 +106,26 @@ export function SessionTimeoutManager() {
     }
   }, []);
 
+  // Load the absolute session deadline (login + 12h) once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && typeof data.session_expires_at === "number") {
+          absoluteDeadlineRef.current = data.session_expires_at;
+        }
+      } catch {
+        // ignore — middleware still enforces the cap server-side
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Activity listeners.
   useEffect(() => {
     const handler = () => recordActivity();
@@ -133,6 +160,10 @@ export function SessionTimeoutManager() {
   useEffect(() => {
     const onVisibility = () => {
       if (document.visibilityState !== "visible") return;
+      if (absoluteDeadlineRef.current && Date.now() >= absoluteDeadlineRef.current) {
+        void gracefulLogout("expired");
+        return;
+      }
       const elapsed = Date.now() - lastActivityRef.current;
       if (elapsed > INACTIVITY_TIMEOUT_MS) {
         // Already past the deadline — skip the warning, log out immediately.
@@ -150,6 +181,11 @@ export function SessionTimeoutManager() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (signingOutRef.current) return;
+      // Absolute 12h cap takes precedence over inactivity.
+      if (absoluteDeadlineRef.current && Date.now() >= absoluteDeadlineRef.current) {
+        void gracefulLogout("expired");
+        return;
+      }
       const elapsed = Date.now() - lastActivityRef.current;
       if (elapsed >= INACTIVITY_TIMEOUT_MS) {
         void gracefulLogout();

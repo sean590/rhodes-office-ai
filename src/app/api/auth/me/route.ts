@@ -1,8 +1,21 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getCurrentUser } from "@/lib/utils/auth";
 import { z } from "zod";
+
+// Keep in sync with ABSOLUTE_SESSION_CAP_MS in src/lib/supabase/middleware.ts.
+const ABSOLUTE_SESSION_CAP_MS = 12 * 60 * 60 * 1000;
+
+/** Absolute session expiry (login time + 12h) from the rhodes_session_start
+ * cookie, so the client can warn before the hard cap. null if not set. */
+async function getSessionExpiresAt(): Promise<number | null> {
+  const start = (await cookies()).get("rhodes_session_start")?.value;
+  if (!start) return null;
+  const ms = parseInt(start, 10);
+  return Number.isNaN(ms) ? null : ms + ABSOLUTE_SESSION_CAP_MS;
+}
 
 export async function GET() {
   try {
@@ -27,6 +40,7 @@ export async function GET() {
         orgRole: currentUser.orgRole,
         orgName: currentUser.orgName,
         primary_entity_id: profile?.primary_entity_id ?? null,
+        session_expires_at: await getSessionExpiresAt(),
       });
     }
 
