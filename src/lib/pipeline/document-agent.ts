@@ -38,7 +38,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { redact as redactImpl } from "@/lib/mcp/redact";
 import type { ToolContext } from "@/lib/mcp/tool-context";
@@ -149,12 +149,12 @@ const REGISTRY: ToolDefinition[] = [
  *  rolling and risking a drift between what the agent thinks the tool
  *  takes and what the handler actually validates. */
 function toolDefToAnthropicTool(def: ToolDefinition): Anthropic.Messages.Tool {
-  // zod-to-json-schema's typings target zod 3; project is on zod 4 — the
-  // runtime works fine, types don't line up. Cast through unknown.
-  const generated = zodToJsonSchema(
-    def.inputSchema as unknown as Parameters<typeof zodToJsonSchema>[0],
-    { target: "openApi3" },
-  ) as {
+  // Use zod 4's native JSON-schema conversion. The old `zod-to-json-schema@3`
+  // package reads zod's v3 `_def` internals and returns an EMPTY object for a
+  // zod 4 schema — so every tool was sent to Anthropic with NO parameters, the
+  // agent couldn't call them, and it deferred everything to review. The chat
+  // orchestrator already uses this native converter.
+  const generated = z.toJSONSchema(def.inputSchema) as {
     type?: string;
     properties?: Record<string, unknown>;
     required?: string[];
