@@ -14,6 +14,7 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { SessionGuard } from "@/components/session-guard";
 import { SessionTimeoutManager } from "@/components/session-timeout-manager";
 import { RoleProvider } from "@/components/authz/role-provider";
+import { MfaGate } from "@/components/authz/mfa-gate";
 // CommandPalette intentionally not mounted — search/⌘K hidden until the
 // surface gets enough testing. Component file kept for future re-enable.
 
@@ -28,6 +29,7 @@ export default function AuthenticatedLayout({
         <ChatPanelProvider>
           <SessionGuard />
           <SessionTimeoutManager />
+          <MfaGate />
           <LayoutInner>{children}</LayoutInner>
         </ChatPanelProvider>
       </PageContextProvider>

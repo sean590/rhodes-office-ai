@@ -105,6 +105,8 @@ async function ensureUserRecords(
 ) {
   const displayName = user.user_metadata?.full_name || null;
   const avatarUrl = user.user_metadata?.avatar_url || null;
+  // 14-day MFA enrollment grace, started on first login (Increment 3).
+  const graceUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
   // Legacy users table
   const { data: existingUser } = await admin
@@ -142,4 +144,12 @@ async function ensureUserRecords(
       avatar_url: avatarUrl,
     });
   }
+
+  // Best-effort: start the 14-day MFA grace clock if not already set. A SEPARATE
+  // statement (not part of the insert) so a missing column — migration 070 not
+  // applied yet — is a silent no-op rather than a login-breaking failure.
+  await admin.from("user_profiles")
+    .update({ mfa_grace_until: graceUntil })
+    .eq("id", user.id)
+    .is("mfa_grace_until", null);
 }
