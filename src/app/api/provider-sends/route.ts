@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
-import { requireProviderSend } from "@/lib/utils/authz";
+import { requireSensitive } from "@/lib/utils/aal";
 import { sendDocumentToProviderSchema } from "@/lib/validations";
 import { sendDocumentToProvider, SendDocumentError } from "@/lib/providers/send-document";
 
@@ -17,7 +17,7 @@ export const maxDuration = 120;
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireProviderSend();
+    const ctx = await requireSensitive("providers:send");
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 

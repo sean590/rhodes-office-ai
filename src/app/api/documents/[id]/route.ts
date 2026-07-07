@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createOrgClient } from "@/lib/supabase/org-client";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
-import { requireDelete } from "@/lib/utils/authz";
+import { requireSensitive } from "@/lib/utils/aal";
 import { unsatisfyByDocument } from "@/lib/utils/document-expectations";
 import { headers } from "next/headers";
 
@@ -85,7 +85,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireDelete();
+    const ctx = await requireSensitive("records:delete");
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 

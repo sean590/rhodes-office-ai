@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
-import { requireMemberManage } from "@/lib/utils/authz";
+import { requireSensitive } from "@/lib/utils/aal";
 import { isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
     // Inviting a member is a team-management action → admin+. Uses the
     // authoritative org_role via the capability guard (not the legacy
     // user_profiles.role this route used to read).
-    const authCtx = await requireMemberManage();
+    const authCtx = await requireSensitive("members:manage");
     if (isError(authCtx)) return authCtx;
     const { orgId, user } = authCtx;
 

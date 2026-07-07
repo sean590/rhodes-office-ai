@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
-import { requireDelete } from "@/lib/utils/authz";
+import { requireSensitive } from "@/lib/utils/aal";
 import {
   DOCUMENT_SCOPES,
   getSystemDefaultsForScope,
@@ -111,7 +111,7 @@ export async function PUT(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const ctx = await requireDelete();
+  const ctx = await requireSensitive("records:delete");
   if (isError(ctx)) return ctx;
 
   const url = new URL(request.url);

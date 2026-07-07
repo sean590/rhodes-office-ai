@@ -15,6 +15,7 @@ import { SessionGuard } from "@/components/session-guard";
 import { SessionTimeoutManager } from "@/components/session-timeout-manager";
 import { RoleProvider } from "@/components/authz/role-provider";
 import { MfaGate } from "@/components/authz/mfa-gate";
+import { StepUpGuard } from "@/components/authz/step-up-guard";
 // CommandPalette intentionally not mounted — search/⌘K hidden until the
 // surface gets enough testing. Component file kept for future re-enable.
 
@@ -28,6 +29,7 @@ export default function AuthenticatedLayout({
       <PageContextProvider>
         <ChatPanelProvider>
           <SessionGuard />
+          <StepUpGuard />
           <SessionTimeoutManager />
           <MfaGate />
           <LayoutInner>{children}</LayoutInner>

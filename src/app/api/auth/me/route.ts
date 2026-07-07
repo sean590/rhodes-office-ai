@@ -27,7 +27,7 @@ export async function GET() {
       const admin = createAdminClient();
       const { data: profile } = await admin
         .from("user_profiles")
-        .select("primary_entity_id")
+        .select("primary_entity_id, mfa_grace_until")
         .eq("id", currentUser.id)
         .maybeSingle();
 
@@ -41,6 +41,9 @@ export async function GET() {
         orgName: currentUser.orgName,
         primary_entity_id: profile?.primary_entity_id ?? null,
         session_expires_at: await getSessionExpiresAt(),
+        // MFA enrollment grace deadline (null until set). The client pairs this
+        // with the AAL check to nag during grace / block after it.
+        mfa_grace_until: profile?.mfa_grace_until ?? null,
       });
     }
 
