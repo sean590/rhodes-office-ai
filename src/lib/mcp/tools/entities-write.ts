@@ -91,6 +91,7 @@ export const updateEntityTool = defineTool({
 
 export const archiveEntityTool = defineTool({
   name: "archive_entity",
+  capability: "records:delete",
   description: "Set an entity's status to 'inactive'. Reversible — update_entity can set it back to 'active'.",
   kind: "write",
   inputSchema: z.object({ entity_id: z.string().uuid() }),

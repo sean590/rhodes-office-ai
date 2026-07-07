@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 
 export async function GET() {
   const ctx = await requireOrg();
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const ctx = await requireOrg();
+  const ctx = await requireDelete();
   if (isError(ctx)) return ctx;
 
   const url = new URL(request.url);

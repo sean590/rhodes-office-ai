@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 /**
@@ -197,7 +198,7 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
-    const ctx = await requireOrg();
+    const ctx = await requireDelete();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 

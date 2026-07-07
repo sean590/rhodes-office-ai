@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireProviderSend } from "@/lib/utils/authz";
 import { sendDocumentToProviderSchema } from "@/lib/validations";
 import { sendDocumentToProvider, SendDocumentError } from "@/lib/providers/send-document";
 
@@ -16,7 +17,7 @@ export const maxDuration = 120;
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireProviderSend();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 

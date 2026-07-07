@@ -113,6 +113,7 @@ export const unlinkDocumentTool = defineTool({
 
 export const archiveDocumentTool = defineTool({
   name: "archive_document",
+  capability: "records:delete",
   description: "Soft-remove a document from active views by setting deleted_at. Reversible.",
   kind: "write",
   inputSchema: z.object({ document_id: z.string().uuid() }),

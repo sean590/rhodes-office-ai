@@ -353,6 +353,9 @@ async function runDocumentAgentInternal(
   const ctx: ToolContext = {
     userId: "",
     orgId,
+    // The background pipeline is system automation, not a user action, so it
+    // runs unrestricted by RBAC (it files/links/records during ingestion).
+    orgRole: "owner",
     sessionId: `agent-${queueItemId}`,
     supabase: createAdminClient(),
     redact: redactImpl,

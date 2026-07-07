@@ -349,6 +349,7 @@ describe("list_compliance_obligations (MCP tool)", () => {
     return {
       userId: "u",
       orgId,
+      orgRole: "owner",
       sessionId: "s",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase: makeAdmin() as any,

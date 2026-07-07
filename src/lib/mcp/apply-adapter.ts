@@ -11,6 +11,7 @@
 import type { ToolContext } from "./tool-context";
 import type { StagedAction } from "./staging";
 import type { ToolDefinition } from "./schema";
+import { toolPermissionError } from "./schema";
 import { buildToolRegistry } from "./server";
 
 export interface ApplyResult {
@@ -48,6 +49,10 @@ export async function applyMcpActions(
     if (tool.kind !== "write") {
       return { failed: { action, error: `tool "${action.tool}" is not a write tool` } };
     }
+    // RBAC gate — the real security boundary (staging is advisory; a crafted
+    // apply request that skips staging is still blocked here).
+    const permErr = toolPermissionError(tool, ctx.orgRole);
+    if (permErr) return { failed: { action, error: permErr } };
     const t0 = Date.now();
     try {
       const parsed = tool.inputSchema.parse(action.input);

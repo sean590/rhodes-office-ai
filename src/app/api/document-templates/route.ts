@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 import { applyTemplate, ALL_SYSTEM_DEFAULTS } from "@/lib/utils/document-expectations";
 
 /**
@@ -167,7 +168,7 @@ export async function POST(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireDelete();
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 

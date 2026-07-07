@@ -21,6 +21,7 @@
 import { z } from "zod";
 import type { ToolContext } from "./tool-context";
 import type { ToolDefinition } from "./schema";
+import { toolPermissionError } from "./schema";
 import { buildToolRegistry } from "./server";
 import { SYSTEM_PROMPT } from "./system-prompt";
 import { stageAction, type StagedAction } from "./staging";
@@ -225,6 +226,15 @@ async function dispatchTool(
 
   // --- Write tools → stage for approval via dry-run. -------------------------
   if (tool.kind === "write") {
+    // RBAC gate (parity with the REST API): if the caller's role can't perform
+    // this action, don't stage it — return a clean message the agent relays to
+    // the user ("your role can't do X; ask an admin") instead of a crash.
+    const permErr = toolPermissionError(tool, ctx.orgRole);
+    if (permErr) {
+      log.push({ name, args: parsed, ok: false, durationMs: Date.now() - started, error: permErr });
+      console.info("[mcp] tool denied", { name, orgRole: ctx.orgRole });
+      return { ok: false, error: permErr };
+    }
     if (!tool.dryRun) {
       const err = `write tool "${name}" has no dryRun implementation`;
       log.push({ name, args: parsed, ok: false, durationMs: Date.now() - started, error: err });

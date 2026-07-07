@@ -617,6 +617,7 @@ async function main() {
   const ctx: ToolContext = {
     userId,
     orgId,
+    orgRole: "owner",
     sessionId: "smoke-test",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     supabase: admin as any,

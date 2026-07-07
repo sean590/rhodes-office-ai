@@ -42,6 +42,7 @@ export async function POST(request: Request) {
     const mcpCtx = {
       userId: user.id,
       orgId,
+      orgRole: user.orgRole,
       sessionId,
       supabase: admin,
       redact,

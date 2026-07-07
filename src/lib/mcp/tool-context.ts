@@ -13,11 +13,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import type { OrgRole } from "@/lib/types/enums";
 import { redact as redactImpl, type RedactOptions } from "./redact";
 
 export interface ToolContext {
   userId: string;
   orgId: string;
+  /** Caller's role — write tools are gated against this (RBAC parity with the
+   *  REST routes; CLAUDE.md rule #2). See orchestrator dispatch + apply-adapter. */
+  orgRole: OrgRole;
   sessionId: string;
   supabase: SupabaseClient;
   redact: <T>(obj: T, options?: RedactOptions) => T;
@@ -41,6 +45,7 @@ export async function buildToolContext(sessionId: string): Promise<BuildToolCont
   const ctx: ToolContext = {
     userId: org.user.id,
     orgId: org.orgId,
+    orgRole: org.user.orgRole,
     sessionId,
     supabase: createAdminClient(),
     redact: redactImpl,

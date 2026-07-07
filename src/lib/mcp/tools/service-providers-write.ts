@@ -77,6 +77,7 @@ export const updateServiceProviderTool = defineTool({
 
 export const deleteServiceProviderTool = defineTool({
   name: "delete_service_provider",
+  capability: "records:delete",
   description: "Soft-delete a service provider. It no longer appears in lists or suggestions; past sends are retained.",
   kind: "write",
   inputSchema: z.object({ provider_id: z.string().uuid() }),
@@ -141,6 +142,7 @@ export const unlinkProviderEntityTool = defineTool({
 // dispatchAction. dryRun verifies ownership + a resolvable recipient (no send).
 export const sendDocumentToProviderTool = defineTool({
   name: "send_document_to_provider",
+  capability: "providers:send",
   description:
     "Send one or more documents Rhodes already holds to a service provider as a single secure, expiring link (no attachment). The recipient defaults to the provider's default contact if not given. Logs the send.",
   kind: "write",
@@ -213,6 +215,7 @@ export const sendDocumentToProviderTool = defineTool({
 
 export const revokeProviderSendTool = defineTool({
   name: "revoke_provider_send",
+  capability: "providers:send",
   description:
     "Revoke a secure document share link that was sent to a provider. The link immediately stops working; past access is retained in the log.",
   kind: "write",

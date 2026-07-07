@@ -759,6 +759,8 @@ export async function generateBatchSummary(
       ctx: {
         userId: (batchMeta.created_by as string | null) ?? "",
         orgId,
+        // System automation (background ingestion), not a user action → unrestricted.
+        orgRole: "owner",
         sessionId: session.sessionId,
         supabase: admin,
         redact,

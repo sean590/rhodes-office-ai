@@ -205,6 +205,7 @@ describe("approval flow — end-to-end integration", () => {
     const ctx: ToolContext = {
       userId: TEST_USER_ID,
       orgId: TEST_ORG_ID,
+      orgRole: "owner",
       sessionId: TEST_SESSION_ID,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase: makeRecordingSupabase(dbScript, dbOps) as any,
@@ -255,6 +256,7 @@ describe("approval flow — end-to-end integration", () => {
     const applyCtx: ToolContext = {
       userId: TEST_USER_ID,
       orgId: TEST_ORG_ID,
+      orgRole: "owner",
       sessionId: TEST_SESSION_ID,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase: makeRecordingSupabase(applyScript, applyOps) as any,
@@ -302,6 +304,7 @@ describe("approval flow — end-to-end integration", () => {
     const markCtx: ToolContext = {
       userId: TEST_USER_ID,
       orgId: TEST_ORG_ID,
+      orgRole: "owner",
       sessionId: TEST_SESSION_ID,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase: makeRecordingSupabase(markScript, markOps) as any,
@@ -333,6 +336,7 @@ describe("approval flow — end-to-end integration", () => {
     const syntheticCtx: ToolContext = {
       userId: TEST_USER_ID,
       orgId: TEST_ORG_ID,
+      orgRole: "owner",
       sessionId: TEST_SESSION_ID,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       supabase: makeRecordingSupabase(syntheticScript, syntheticOps) as any,

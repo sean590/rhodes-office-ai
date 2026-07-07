@@ -67,6 +67,7 @@ function makeCtx(
   return {
     userId: "u",
     orgId,
+    orgRole: "owner",
     sessionId: "s",
     supabase: {
       from: () => chain,

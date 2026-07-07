@@ -389,6 +389,7 @@ describe("list_document_expectations (MCP tool)", () => {
     return {
       userId: "u",
       orgId,
+      orgRole: "owner",
       sessionId: "s",
       // The mocked admin works for ToolContext too — it implements .from().
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

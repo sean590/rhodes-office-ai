@@ -15,6 +15,7 @@
 import { z } from "zod";
 import type { ToolContext } from "./tool-context";
 import type { DryRunResult } from "./staging";
+import { can, type Capability } from "@/lib/authz/policy";
 
 export interface ToolResult<T> {
   data: T;
@@ -41,12 +42,39 @@ export interface ToolDefinition<
   name: string;
   description: string;
   kind: "read" | "write";
+  /** RBAC capability required to run this (write) tool. Defaults to
+   *  `records:write` (member+) via `toolCapability()`. Sensitive tools
+   *  (delete/archive top-level or financial records, send-to-provider) set a
+   *  higher capability so the chat agent obeys the same matrix as the REST API. */
+  capability?: Capability;
   inputSchema: Schema;
   handler: ToolHandler<z.infer<Schema>, Result>;
   /** Write tools: preview-only path for the staging buffer. Runs ownership
    *  checks, Zod validation, context fetches — but NO mutation. Returns a
    *  human-readable summary + preview for the approval card. */
   dryRun?: ToolDryRun<z.infer<Schema>>;
+}
+
+/** The capability a write tool requires (default: records:write / member+). */
+export function toolCapability(tool: ToolDefinition): Capability {
+  return tool.capability ?? "records:write";
+}
+
+/**
+ * RBAC gate for a tool, shared by the orchestrator (stage time, for a graceful
+ * agent-facing message) and apply-adapter (apply time, the real boundary).
+ * Returns null if allowed, or a human-readable permission message if denied.
+ */
+export function toolPermissionError(
+  tool: ToolDefinition,
+  orgRole: import("./tool-context").ToolContext["orgRole"],
+): string | null {
+  if (tool.kind !== "write") return null;
+  const cap = toolCapability(tool);
+  if (can(orgRole, cap)) return null;
+  const who =
+    cap === "records:delete" || cap === "providers:send" ? "an admin" : "a higher role";
+  return `Your role ("${orgRole}") can't perform "${tool.name}" — this requires ${who}. Ask an admin to do it.`;
 }
 
 /**

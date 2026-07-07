@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
 export async function PUT(
@@ -87,7 +88,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireDelete();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 

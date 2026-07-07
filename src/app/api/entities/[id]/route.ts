@@ -6,6 +6,7 @@ import { normalizeName } from "@/lib/utils/name-matching";
 import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@/lib/utils/audit";
 import { updateEntitySchema } from "@/lib/validations";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 import { refreshEntityExpectations } from "@/lib/utils/document-expectations";
 import { syncComplianceForEntity } from "@/lib/utils/compliance-sync";
 import { headers } from "next/headers";
@@ -520,7 +521,7 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await requireOrg();
+  const ctx = await requireDelete();
   if (isError(ctx)) return ctx;
   const { orgId, user } = ctx;
 

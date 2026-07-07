@@ -103,6 +103,7 @@ function makeCtx(
   const ctx: ToolContext = {
     userId: "u",
     orgId,
+    orgRole: "owner",
     sessionId: "s",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     supabase: makeClient(recorder, script) as any,

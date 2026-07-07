@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireDelete } from "@/lib/utils/authz";
 import { applyActions } from "@/lib/pipeline/apply";
 import { updateServiceProviderSchema } from "@/lib/validations";
 
@@ -98,7 +99,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireDelete();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
     const { id } = await params;

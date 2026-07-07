@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireProviderSend } from "@/lib/utils/authz";
 import { applyActions } from "@/lib/pipeline/apply";
 
 // POST /api/provider-sends/[sendId]/revoke — kill a secure share link. After
@@ -10,7 +11,7 @@ export async function POST(
   { params }: { params: Promise<{ sendId: string }> },
 ) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireProviderSend();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
     const { sendId } = await params;

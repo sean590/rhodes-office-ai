@@ -106,6 +106,7 @@ export const updateInvestmentTool = defineTool({
 
 export const archiveInvestmentTool = defineTool({
   name: "archive_investment",
+  capability: "records:delete",
   description: "Set an investment's status to 'exited'.",
   kind: "write",
   inputSchema: z.object({ investment_id: z.string().uuid() }),
@@ -390,6 +391,7 @@ export const updateInvestmentTransactionTool = defineTool({
 
 export const deleteInvestmentTransactionTool = defineTool({
   name: "delete_investment_transaction",
+  capability: "records:delete",
   description: "Hard-delete a transaction that was recorded in error. For corrections, prefer update_investment_transaction.",
   kind: "write",
   inputSchema: z.object({ transaction_id: z.string().uuid() }),

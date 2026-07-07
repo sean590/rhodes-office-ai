@@ -66,6 +66,7 @@ function makeCtx(orgId: string): ToolContext {
   return {
     userId: "u-A",
     orgId,
+    orgRole: "owner",
     sessionId: "s",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     supabase: { from: () => chain } as any,

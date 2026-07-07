@@ -55,6 +55,7 @@ function makeCtx(
   return {
     userId: "u-1",
     orgId,
+    orgRole: "owner",
     sessionId: "s-1",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     supabase: { from: makeClient(script) } as any,

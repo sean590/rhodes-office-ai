@@ -56,6 +56,7 @@ export const updateDirectoryEntryTool = defineTool({
 
 export const archiveDirectoryEntryTool = defineTool({
   name: "archive_directory_entry",
+  capability: "records:delete",
   description:
     "Soft-delete a directory entry. Refuses if the entry is still referenced by active allocations, co-investors, or members.",
   kind: "write",

@@ -203,6 +203,7 @@ export async function POST(request: Request) {
           ctx: {
             userId: user.id,
             orgId,
+            orgRole: user.orgRole,
             sessionId: session_id,
             supabase: admin,
             redact,

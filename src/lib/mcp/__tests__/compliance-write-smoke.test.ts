@@ -37,6 +37,7 @@ function makeCtx(): ToolContext {
   return {
     userId: "user-1",
     orgId: ORG_ID,
+    orgRole: "owner",
     sessionId: "sess-1",
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     supabase: {} as any,
