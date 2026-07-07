@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { INVESTMENT_TYPE_COLORS, INVESTMENT_TYPE_LABELS, INVESTMENT_STATUS_COLORS, INVESTMENT_STATUS_LABELS } from "@/lib/utils/investment-colors";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { useCan } from "@/components/authz/role-provider";
 import { AllocationsTab } from "@/components/investments/AllocationsTab";
 import { TransactionsTab } from "@/components/investments/TransactionsTab";
 import { DocumentsTab } from "@/components/investments/DocumentsTab";
@@ -54,6 +55,7 @@ export default function InvestmentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const isMobile = useIsMobile();
+  const canDelete = useCan("records:delete");
   const [investment, setInvestment] = useState<InvestmentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("allocations");
@@ -217,7 +219,9 @@ export default function InvestmentDetailPage() {
               Ask about this
             </button>
             <Button variant="secondary" onClick={startEditing}>Edit</Button>
-            <button onClick={() => setShowDeleteConfirm(true)} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--red)", fontSize: 13, fontWeight: 500 }}>Delete</button>
+            {canDelete && (
+              <button onClick={() => setShowDeleteConfirm(true)} style={{ padding: "6px 14px", borderRadius: 7, border: "1px solid var(--line)", background: "none", cursor: "pointer", color: "var(--red)", fontSize: 13, fontWeight: 500 }}>Delete</button>
+            )}
           </div>
         </div>
 

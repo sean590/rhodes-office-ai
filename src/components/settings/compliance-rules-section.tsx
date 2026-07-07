@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getStateLabel } from "@/lib/constants";
+import { useCan } from "@/components/authz/role-provider";
 import type { Jurisdiction } from "@/lib/types/enums";
 
 interface RuleSummary {
@@ -65,6 +66,7 @@ const FREQ_LABELS: Record<string, string> = {
 // ───────────────────────────────────────────────────────────────────
 
 export function ComplianceRulesSection({ isMobile }: { isMobile: boolean }) {
+  const canDelete = useCan("records:delete");
   const [rules, setRules] = useState<RuleSummary[]>([]);
   const [overrides, setOverrides] = useState<OrgOverride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -188,6 +190,7 @@ export function ComplianceRulesSection({ isMobile }: { isMobile: boolean }) {
             disabledSet={disabledSet}
             saving={saving}
             onToggle={toggleRule}
+            canDelete={canDelete}
             isMobile={isMobile}
           />
         ))}
@@ -203,13 +206,14 @@ export function ComplianceRulesSection({ isMobile }: { isMobile: boolean }) {
 }
 
 function JurisdictionGroup({
-  jurisdiction, rules, disabledSet, saving, onToggle, isMobile,
+  jurisdiction, rules, disabledSet, saving, onToggle, canDelete, isMobile,
 }: {
   jurisdiction: string;
   rules: RuleSummary[];
   disabledSet: Set<string>;
   saving: string | null;
   onToggle: (ruleId: string, disabled: boolean) => void;
+  canDelete: boolean;
   isMobile: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -293,7 +297,7 @@ function JurisdictionGroup({
                   </span>
                   <ToggleSwitch
                     checked={!isDisabled}
-                    disabled={isSaving}
+                    disabled={isSaving || !canDelete}
                     onChange={() => onToggle(rule.id, isDisabled)}
                   />
                 </div>

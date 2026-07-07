@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { PlusIcon } from "@/components/ui/icons";
+import { useCan } from "@/components/authz/role-provider";
 import type { InvestmentInvestor, TransactionLineItem } from "@/lib/types/investments";
 import { AddTransactionModal } from "./AddTransactionModal";
 
@@ -86,6 +87,7 @@ type ModalState =
 
 export function TransactionsTab({ investmentId, investors, isMobile, onTransactionsChanged }: Props) {
   void isMobile;
+  const canDelete = useCan("records:delete");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedTxnIds, setExpandedTxnIds] = useState<Set<string>>(new Set());
@@ -337,6 +339,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                         Edit
                       </button>
                     )}
+                    {canDelete && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleDelete(txn.id); }}
                       style={{ background: "none", border: "none", cursor: "pointer", color: "var(--faint)", fontSize: 12, padding: "4px 8px" }}
@@ -344,6 +347,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                     >
                       Delete
                     </button>
+                    )}
                     {hasLineItems && (
                       <span
                         aria-hidden="true"

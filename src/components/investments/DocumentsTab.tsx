@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useCan } from "@/components/authz/role-provider";
 
 interface Document {
   id: string;
@@ -96,6 +97,7 @@ function DownIcon({ size = 12 }: { size?: number }) {
 }
 
 export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
+  const canDelete = useCan("records:delete");
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
@@ -292,7 +294,7 @@ export function DocumentsTab({ investmentId, isMobile: _isMobile }: Props) {
 
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "var(--blue)", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
-                          <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "var(--red)", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
+                          {canDelete && <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "var(--red)", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>}
                         </div>
                       </div>
                     )}

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { SectionHeader } from "@/components/ui/section-header";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useCan } from "@/components/authz/role-provider";
 import type { ProviderContact } from "@/lib/types/entities";
 
 const DISCIPLINE_LABELS: Record<string, string> = {
@@ -52,6 +53,8 @@ const STATUS_COLOR: Record<string, { color: string; bg: string }> = {
 
 export function ProviderRecord({ providerId, onDeleted }: { providerId: string; onDeleted: () => void }) {
   const isMobile = useIsMobile();
+  const canSend = useCan("providers:send");
+  const canDelete = useCan("records:delete");
   const [provider, setProvider] = useState<ProviderDetail | null>(null);
   const [sends, setSends] = useState<SendRow[]>([]);
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
@@ -134,9 +137,11 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
             {(provider.disciplines ?? []).map((d) => <Badge key={d} label={disciplineLabel(d)} color="#2d5a3d" bg="#eef3ef" />)}
           </div>
         </div>
+        {canDelete && (
         <button onClick={handleDelete} disabled={deleting} style={{ background: "none", border: "1px solid #f0d0d0", borderRadius: 6, padding: "6px 12px", cursor: deleting ? "default" : "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit", whiteSpace: "nowrap" }}>
           {deleting ? "Deleting…" : "Delete"}
         </button>
+        )}
       </div>
 
       <Card style={{ marginBottom: 16 }}>
@@ -194,7 +199,7 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
                   </div>
                   <div style={{ fontSize: 12, color: "#6b6b76", marginTop: 4 }}>{s.recipient_email}</div>
                   <div style={{ fontSize: 11, color: "#9494a0", marginTop: 2 }}>{fmtDate(s.created_at)} · {activityText(s.access)}</div>
-                  {ls === "active" && (
+                  {ls === "active" && canSend && (
                     <button onClick={() => handleRevoke(s.id)} disabled={revokingId === s.id} style={{ marginTop: 6, background: "none", border: "1px solid #f0d0d0", borderRadius: 6, padding: "3px 10px", fontSize: 11, color: "#c73e3e", fontFamily: "inherit", cursor: "pointer" }}>{revokingId === s.id ? "Revoking…" : "Revoke link"}</button>
                   )}
                   {ls === "revoked" && <div style={{ fontSize: 11, color: "#9494a0", marginTop: 4 }}>Link revoked</div>}
@@ -227,7 +232,7 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
                     <td style={{ ...tdStyle, color: "#6b6b76", fontSize: 12 }}>{activityText(s.access)}</td>
                     <td style={{ ...tdStyle, color: "#6b6b76", whiteSpace: "nowrap" }}>{fmtDate(s.created_at)}</td>
                     <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap" }}>
-                      {ls === "active" ? (
+                      {ls === "active" && canSend ? (
                         <button onClick={() => handleRevoke(s.id)} disabled={revokingId === s.id} style={{ background: "none", border: "1px solid #f0d0d0", borderRadius: 6, padding: "3px 10px", fontSize: 11, color: "#c73e3e", fontFamily: "inherit", cursor: "pointer" }}>{revokingId === s.id ? "Revoking…" : "Revoke"}</button>
                       ) : ls === "revoked" ? <span style={{ fontSize: 11, color: "#9494a0" }}>Revoked</span>
                         : ls === "expired" ? <span style={{ fontSize: 11, color: "#9494a0" }}>Expired</span>

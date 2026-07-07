@@ -10,6 +10,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { StagedActionsList } from "@/components/shared/StagedActionsList";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/components/authz/role-provider";
 
 interface ProviderContact {
   name: string;
@@ -57,6 +58,7 @@ function defaultRecipient(p: ProviderResponse | undefined): string {
 }
 
 export function SendToProviderCard({ documents, initialProviderId, onSubmitted, onClose }: Props) {
+  const canSend = useCan("providers:send");
   const [providers, setProviders] = useState<ProviderResponse[]>([]);
   const [suggestedIds, setSuggestedIds] = useState<string[]>([]);
   const [relevantIds, setRelevantIds] = useState<Set<string>>(new Set());
@@ -273,9 +275,11 @@ export function SendToProviderCard({ documents, initialProviderId, onSubmitted, 
           )}
 
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="primary" onClick={handleSend} disabled={sending || !providerId || !recipient.trim()}>
-              {sending ? "Sending…" : "Send"}
-            </Button>
+            {canSend && (
+              <Button variant="primary" onClick={handleSend} disabled={sending || !providerId || !recipient.trim()}>
+                {sending ? "Sending…" : "Send"}
+              </Button>
+            )}
             <Button onClick={onClose}>Cancel</Button>
           </div>
         </div>

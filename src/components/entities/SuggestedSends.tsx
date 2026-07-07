@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
+import { useCan } from "@/components/authz/role-provider";
 
 interface SuggestionDoc {
   id: string;
@@ -37,6 +38,7 @@ export function SuggestedSends({
   /** Skip the outer "Suggested sends" card chrome (used inside the Home lane). */
   bare?: boolean;
 }) {
+  const canSend = useCan("providers:send");
   const [suggestions, setSuggestions] = useState<SendSuggestion[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [openProviderId, setOpenProviderId] = useState<string | null>(null);
@@ -100,9 +102,11 @@ export function SuggestedSends({
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <Button variant="primary" onClick={() => setOpenProviderId(isOpen ? null : s.provider.id)}>
-                    {isOpen ? "Hide" : "Review & send"}
-                  </Button>
+                  {canSend && (
+                    <Button variant="primary" onClick={() => setOpenProviderId(isOpen ? null : s.provider.id)}>
+                      {isOpen ? "Hide" : "Review & send"}
+                    </Button>
+                  )}
                   <Button onClick={() => dismiss(s)} disabled={busyProviderId === s.provider.id}>
                     {busyProviderId === s.provider.id ? "…" : "Dismiss"}
                   </Button>

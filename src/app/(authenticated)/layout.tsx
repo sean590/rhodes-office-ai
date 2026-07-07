@@ -13,6 +13,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { SessionGuard } from "@/components/session-guard";
 import { SessionTimeoutManager } from "@/components/session-timeout-manager";
+import { RoleProvider } from "@/components/authz/role-provider";
 // CommandPalette intentionally not mounted — search/⌘K hidden until the
 // surface gets enough testing. Component file kept for future re-enable.
 
@@ -22,13 +23,15 @@ export default function AuthenticatedLayout({
   children: React.ReactNode;
 }) {
   return (
-    <PageContextProvider>
-      <ChatPanelProvider>
-        <SessionGuard />
-        <SessionTimeoutManager />
-        <LayoutInner>{children}</LayoutInner>
-      </ChatPanelProvider>
-    </PageContextProvider>
+    <RoleProvider>
+      <PageContextProvider>
+        <ChatPanelProvider>
+          <SessionGuard />
+          <SessionTimeoutManager />
+          <LayoutInner>{children}</LayoutInner>
+        </ChatPanelProvider>
+      </PageContextProvider>
+    </RoleProvider>
   );
 }
 

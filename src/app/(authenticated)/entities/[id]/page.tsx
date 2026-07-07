@@ -41,6 +41,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { EntityStateBanner, NeedsAttentionCard } from "@/components/entities/NeedsAttentionCard";
 import { humanizeActivity } from "@/lib/activity-humanizer";
 import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
+import { useCan } from "@/components/authz/role-provider";
 import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
 /* ------------------------------------------------------------------ */
@@ -4303,6 +4304,8 @@ function DocumentsTab({
   entityData: Record<string, unknown> | null;
 }) {
   const isMobile = useIsMobile();
+  const canSend = useCan("providers:send");
+  const canDelete = useCan("records:delete");
   const [showUpload, setShowUpload] = useState(false);
 
   // Document completeness expectations — loaded from entity data.
@@ -5505,8 +5508,10 @@ function DocumentsTab({
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
-                        <button onClick={() => setSendDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#2d5a3d", fontWeight: 500, fontFamily: "inherit" }}>Send to provider</button>
-                        <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
+                        {canSend && (
+                          <button onClick={() => setSendDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#2d5a3d", fontWeight: 500, fontFamily: "inherit" }}>Send to provider</button>
+                        )}
+                        {canDelete && <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>}
                       </div>
                       {sendDocId === doc.id && (
                         <SendToProviderCard
@@ -5690,31 +5695,34 @@ function DocumentsTab({
                 {selectedDocIds.size} selected
               </span>
               <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  onClick={() => {
-                    const ids = Array.from(selectedDocIds);
-                    const bundle = ids
-                      .map((id) => documents.find((d) => d.id === id))
-                      .filter((d): d is DocRecord => !!d)
-                      .map((d) => ({ id: d.id, name: d.name }));
-                    if (bundle.length === 0) return;
-                    setSendBundle(bundle);
-                    exitSelectMode();
-                  }}
-                  style={{
-                    background: "#2d5a3d",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 6,
-                    padding: "8px 16px",
-                    fontSize: 13,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                  }}
-                >
-                  Send to provider
-                </button>
+                {canSend && (
+                  <button
+                    onClick={() => {
+                      const ids = Array.from(selectedDocIds);
+                      const bundle = ids
+                        .map((id) => documents.find((d) => d.id === id))
+                        .filter((d): d is DocRecord => !!d)
+                        .map((d) => ({ id: d.id, name: d.name }));
+                      if (bundle.length === 0) return;
+                      setSendBundle(bundle);
+                      exitSelectMode();
+                    }}
+                    style={{
+                      background: "#2d5a3d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Send to provider
+                  </button>
+                )}
+                {canDelete && (
                 <button
                   onClick={handleBulkDelete}
                   style={{
@@ -5731,6 +5739,7 @@ function DocumentsTab({
                 >
                   Delete Selected
                 </button>
+                )}
               </div>
             </div>
           )}
@@ -5761,6 +5770,7 @@ function EntityActionMenu({ entityId, entityName, entityStatus, router, isMobile
   const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [changing, setChanging] = useState(false);
+  const canDelete = useCan("records:delete");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -5860,11 +5870,13 @@ function EntityActionMenu({ entityId, entityName, entityStatus, router, isMobile
                 </div>
               )}
             </div>
+            {canDelete && (
             <button onClick={handleDelete} style={{ ...menuBtnStyle("#c73e3e"), borderTop: "1px solid #f0eee8" }}
               onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
               <XIcon size={14} /> Delete Entity
             </button>
+            )}
           </div>
         )}
       </div>

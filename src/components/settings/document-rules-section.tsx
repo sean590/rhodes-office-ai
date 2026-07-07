@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useCan } from "@/components/authz/role-provider";
 import {
   DOCUMENT_TYPE_LABELS,
   DOCUMENT_CATEGORY_OPTIONS,
@@ -57,6 +58,7 @@ function slugify(name: string): string {
 // ───────────────────────────────────────────────────────────────────
 
 export function DocumentRulesSection({ isMobile }: { isMobile: boolean }) {
+  const canDelete = useCan("records:delete");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [overrides, setOverrides] = useState<OrgOverride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -157,6 +159,7 @@ export function DocumentRulesSection({ isMobile }: { isMobile: boolean }) {
               overrideMap={overrideMap}
               saving={saving}
               onToggle={toggleOverride}
+              canDelete={canDelete}
               isMobile={isMobile}
             />
           ))}
@@ -166,13 +169,14 @@ export function DocumentRulesSection({ isMobile }: { isMobile: boolean }) {
 }
 
 function CategoryGroup({
-  category, docTypes, overrideMap, saving, onToggle, isMobile,
+  category, docTypes, overrideMap, saving, onToggle, canDelete, isMobile,
 }: {
   category: DocumentCategory;
   docTypes: { document_type: string; category: string }[];
   overrideMap: Map<string, OrgOverride>;
   saving: string | null;
   onToggle: (docType: string, disabled: boolean) => void;
+  canDelete: boolean;
   isMobile: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -235,7 +239,7 @@ function CategoryGroup({
                 </div>
                 <ToggleSwitch
                   checked={!isDisabled}
-                  disabled={isSaving}
+                  disabled={isSaving || !canDelete}
                   onChange={() => onToggle(document_type, isDisabled)}
                 />
               </div>
@@ -252,6 +256,7 @@ function CategoryGroup({
 // ───────────────────────────────────────────────────────────────────
 
 export function DocumentProfilesSection({ isMobile }: { isMobile: boolean }) {
+  const canDelete = useCan("records:delete");
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [overrides, setOverrides] = useState<OrgOverride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -398,6 +403,7 @@ export function DocumentProfilesSection({ isMobile }: { isMobile: boolean }) {
               onToggleEnabled={toggleEnabled}
               onToggleRequired={toggleRequired}
               onDelete={deleteProfile}
+              canDelete={canDelete}
               isMobile={isMobile}
             />
           );
@@ -430,7 +436,7 @@ export function DocumentProfilesSection({ isMobile }: { isMobile: boolean }) {
 
 function ScopeProfileGroup({
   scope, profiles, orgDisabledSet, seeding, saving,
-  onSeed, onToggleEnabled, onToggleRequired, onDelete, isMobile,
+  onSeed, onToggleEnabled, onToggleRequired, onDelete, canDelete, isMobile,
 }: {
   scope: DocumentScope;
   profiles: Profile[];
@@ -441,6 +447,7 @@ function ScopeProfileGroup({
   onToggleEnabled: (profile: Profile) => void;
   onToggleRequired: (profile: Profile) => void;
   onDelete: (profile: Profile) => void;
+  canDelete: boolean;
   isMobile: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -563,6 +570,7 @@ function ScopeProfileGroup({
                         disabled={isSaving || isOrgDisabled}
                         onChange={() => onToggleEnabled(profile)}
                       />
+                      {canDelete && (
                       <button
                         onClick={() => onDelete(profile)}
                         disabled={isSaving}
@@ -576,6 +584,7 @@ function ScopeProfileGroup({
                       >
                         Remove
                       </button>
+                      )}
                     </div>
                   </div>
                 );

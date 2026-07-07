@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useCan } from "@/components/authz/role-provider";
 import { SearchInput } from "@/components/ui/search-input";
 import { FilterPills } from "@/components/ui/filter-pills";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +88,7 @@ type FormState =
 
 export default function PeoplePage() {
   const isMobile = useIsMobile();
+  const canDelete = useCan("records:delete");
   const [rows, setRows] = useState<PersonRow[]>([]);
   const [entities, setEntities] = useState<EntityOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -257,7 +259,7 @@ export default function PeoplePage() {
               {visible.map((r, i) => (
                 <PersonRowView
                   key={r.id} row={r} isMobile={isMobile} first={i === 0} busy={busyId === r.id}
-                  open={expanded === r.id}
+                  open={expanded === r.id} canDelete={canDelete}
                   onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
                   onEdit={() => { setExpanded(null); setForm({ mode: "edit", row: r }); }}
                   onDelete={() => deleteRow(r)}
@@ -301,8 +303,8 @@ const addBtn: React.CSSProperties = {
   borderRadius: "var(--radius-sm)", background: "var(--card)", cursor: "pointer", fontFamily: "inherit",
 };
 
-function PersonRowView({ row, open, onToggle, onEdit, onDelete, first, isMobile, busy }: {
-  row: PersonRow; open: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void; first: boolean; isMobile: boolean; busy: boolean;
+function PersonRowView({ row, open, onToggle, onEdit, onDelete, first, isMobile, busy, canDelete }: {
+  row: PersonRow; open: boolean; onToggle: () => void; onEdit: () => void; onDelete: () => void; first: boolean; isMobile: boolean; busy: boolean; canDelete: boolean;
 }) {
   const meta = KIND_META[row.kind];
   const secondary = row.source === "provider"
@@ -336,7 +338,7 @@ function PersonRowView({ row, open, onToggle, onEdit, onDelete, first, isMobile,
               <RowActions>
                 <Link href={`/people/${row.rawId}?type=directory`} style={{ ...actionBtn, textDecoration: "none" }}><Icon name="external-link" size={14} /> Open full record</Link>
                 <button onClick={onEdit} style={actionBtn}><Icon name="pencil" size={14} /> Edit</button>
-                <button onClick={onDelete} style={{ ...actionBtn, color: "var(--red)" }}><Icon name="trash" size={14} /> Delete</button>
+                {canDelete && <button onClick={onDelete} style={{ ...actionBtn, color: "var(--red)" }}><Icon name="trash" size={14} /> Delete</button>}
               </RowActions>
             </Detail>
           ) : (
@@ -359,7 +361,7 @@ function PersonRowView({ row, open, onToggle, onEdit, onDelete, first, isMobile,
               <RowActions>
                 <button onClick={onEdit} style={actionBtn}><Icon name="pencil" size={14} /> Edit</button>
                 {row.recordHref && <Link href={row.recordHref} style={{ ...actionBtn, textDecoration: "none" }}><Icon name="external-link" size={14} /> Open full record</Link>}
-                <button onClick={onDelete} style={{ ...actionBtn, color: "var(--red)" }}><Icon name="trash" size={14} /> Delete</button>
+                {canDelete && <button onClick={onDelete} style={{ ...actionBtn, color: "var(--red)" }}><Icon name="trash" size={14} /> Delete</button>}
               </RowActions>
             </Detail>
           )}

@@ -6,6 +6,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { Button } from "@/components/ui/button";
 import { PlusIcon, DocIcon } from "@/components/ui/icons";
 import { formatDate } from "@/lib/utils/format";
+import { useCan } from "@/components/authz/role-provider";
 import type { InvestmentAllocation, InvestmentTransaction, InvestmentTransactionType } from "@/lib/types/entities";
 
 /* ------------------------------------------------------------------ */
@@ -71,6 +72,7 @@ const inputStyle: React.CSSProperties = {
 /* ------------------------------------------------------------------ */
 
 export function InvestmentTab({ entityId, entityName: _entityName, parentEntityId, parentEntityName, isMobile }: InvestmentTabProps) {
+  const canDelete = useCan("records:delete");
   const [allocations, setAllocations] = useState<InvestmentAllocation[]>([]);
   const [transactions, setTransactions] = useState<InvestmentTransaction[]>([]);
   const [members, setMembers] = useState<MemberOption[]>([]);
@@ -766,6 +768,7 @@ export function InvestmentTab({ entityId, entityName: _entityName, parentEntityI
                         </div>
                       )}
                     </div>
+                    {canDelete && (
                     <button
                       onClick={() => deleteTransaction(txn.id)}
                       title="Delete transaction"
@@ -781,6 +784,7 @@ export function InvestmentTab({ entityId, entityName: _entityName, parentEntityI
                     >
                       &times;
                     </button>
+                    )}
                   </div>
                 </div>
               );

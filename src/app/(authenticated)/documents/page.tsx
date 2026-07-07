@@ -13,6 +13,7 @@ import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { useCan } from "@/components/authz/role-provider";
 import { SuggestedSends } from "@/components/entities/SuggestedSends";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
@@ -67,6 +68,7 @@ function getDocCategory(docType: DocumentType): string {
 export default function DocumentsPage() {
   const router = useRouter();
   const isMobile = useIsMobile();
+  const canDelete = useCan("records:delete");
   const [documents, setDocuments] = useState<DocWithEntity[]>([]);
   const [entities, setEntities] = useState<EntityBasic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -736,6 +738,7 @@ export default function DocumentsPage() {
                         >
                           Download
                         </button>
+                        {canDelete && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDelete(doc.id); }}
                           style={{
@@ -752,6 +755,7 @@ export default function DocumentsPage() {
                         >
                           Delete
                         </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1027,6 +1031,7 @@ export default function DocumentsPage() {
                         >
                           Download
                         </button>
+                        {canDelete && (
                         <button
                           onClick={() => handleDelete(doc.id)}
                           style={{
@@ -1043,6 +1048,7 @@ export default function DocumentsPage() {
                         >
                           Delete
                         </button>
+                        )}
                       </div>
                     </div>
                   )}
