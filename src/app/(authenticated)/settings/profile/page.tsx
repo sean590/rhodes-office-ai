@@ -210,11 +210,11 @@ export default function SettingsProfilePage() {
                     borderRadius: 10,
                     fontSize: 12,
                     fontWeight: 500,
-                    background: ROLE_BADGE_STYLES[currentUser.role]?.bg || "#f0f0f0",
-                    color: ROLE_BADGE_STYLES[currentUser.role]?.color || "#6b6b76",
+                    background: ROLE_BADGE_STYLES[currentUser.orgRole ?? ""]?.bg || "#f0f0f0",
+                    color: ROLE_BADGE_STYLES[currentUser.orgRole ?? ""]?.color || "#6b6b76",
                   }}
                 >
-                  {ROLE_LABELS[currentUser.role] || currentUser.role}
+                  {ROLE_LABELS[currentUser.orgRole ?? ""] || currentUser.orgRole || "—"}
                 </span>
               </div>
 

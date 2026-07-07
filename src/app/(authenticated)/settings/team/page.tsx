@@ -50,13 +50,16 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: "Viewer",
 };
 
+// Reference table — mirrors the capability matrix in @/lib/authz/policy.ts.
 const PERMISSIONS = [
-  { label: "View entities", admin: true, editor: true, viewer: true },
-  { label: "Edit entities", admin: true, editor: true, viewer: false },
-  { label: "Create entities", admin: true, editor: true, viewer: false },
-  { label: "Delete entities", admin: true, editor: false, viewer: false },
-  { label: "Manage users", admin: true, editor: false, viewer: false },
-  { label: "Manage settings", admin: true, editor: false, viewer: false },
+  { label: "View records", member: true, admin: true, owner: true },
+  { label: "Create & edit records", member: true, admin: true, owner: true },
+  { label: "Upload documents", member: true, admin: true, owner: true },
+  { label: "Delete records", member: false, admin: true, owner: true },
+  { label: "Send documents to providers", member: false, admin: true, owner: true },
+  { label: "Manage team & roles", member: false, admin: true, owner: true },
+  { label: "Organization settings", member: false, admin: true, owner: true },
+  { label: "Billing & delete organization", member: false, admin: false, owner: true },
 ];
 
 function PermissionIndicator({ allowed }: { allowed: boolean }) {
@@ -463,7 +466,6 @@ export default function SettingsTeamPage() {
                         boxSizing: "border-box",
                       }}
                     >
-                      <option value="viewer">Viewer</option>
                       <option value="member">Member</option>
                       <option value="admin">Admin</option>
                     </select>
@@ -590,7 +592,6 @@ export default function SettingsTeamPage() {
                             >
                               <option value="admin">Admin</option>
                               <option value="member">Member</option>
-                              <option value="viewer">Viewer</option>
                             </select>
                           )}
                         </div>
@@ -699,7 +700,6 @@ export default function SettingsTeamPage() {
                               >
                                 <option value="admin">Admin</option>
                                 <option value="member">Member</option>
-                                <option value="viewer">Viewer</option>
                               </select>
                             )}
                           </td>
@@ -866,16 +866,16 @@ export default function SettingsTeamPage() {
                   </div>
                   <div style={{ display: "flex", gap: 16 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <PermissionIndicator allowed={perm.member} />
+                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Member</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <PermissionIndicator allowed={perm.admin} />
                       <span style={{ fontSize: 12, color: "#6b6b76" }}>Admin</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <PermissionIndicator allowed={perm.editor} />
-                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Editor</span>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <PermissionIndicator allowed={perm.viewer} />
-                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Viewer</span>
+                      <PermissionIndicator allowed={perm.owner} />
+                      <span style={{ fontSize: 12, color: "#6b6b76" }}>Owner</span>
                     </div>
                   </div>
                 </div>
@@ -887,9 +887,9 @@ export default function SettingsTeamPage() {
                 <thead>
                   <tr>
                     <th style={{ textAlign: "left", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "40%" }}>Permission</th>
+                    <th style={{ textAlign: "center", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "20%" }}>Member</th>
                     <th style={{ textAlign: "center", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "20%" }}>Admin</th>
-                    <th style={{ textAlign: "center", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "20%" }}>Editor</th>
-                    <th style={{ textAlign: "center", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "20%" }}>Viewer</th>
+                    <th style={{ textAlign: "center", padding: "8px 12px", fontSize: 11, fontWeight: 500, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.05em", borderBottom: "1px solid #e8e6df", width: "20%" }}>Owner</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -899,13 +899,13 @@ export default function SettingsTeamPage() {
                         {perm.label}
                       </td>
                       <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0eeea", textAlign: "center" }}>
+                        <PermissionIndicator allowed={perm.member} />
+                      </td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0eeea", textAlign: "center" }}>
                         <PermissionIndicator allowed={perm.admin} />
                       </td>
                       <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0eeea", textAlign: "center" }}>
-                        <PermissionIndicator allowed={perm.editor} />
-                      </td>
-                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0eeea", textAlign: "center" }}>
-                        <PermissionIndicator allowed={perm.viewer} />
+                        <PermissionIndicator allowed={perm.owner} />
                       </td>
                     </tr>
                   ))}

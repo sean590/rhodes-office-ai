@@ -7,16 +7,17 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Redis } from "@upstash/redis";
+import { KV_REST_API_URL, KV_REST_API_TOKEN } from "@/lib/utils/kv-env";
 
 // --- Cache ---
 
 let redis: Redis | null = null;
 function getRedis(): Redis | null {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return null;
   if (!redis) {
     redis = new Redis({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN,
+      url: KV_REST_API_URL,
+      token: KV_REST_API_TOKEN,
       // Fail fast when Redis is unreachable. The SDK default retries 5x with
       // exponential backoff (~4-5s/call against a dead host), silently adding
       // seconds to every cache/rate-limit op. Callers all fail open in a

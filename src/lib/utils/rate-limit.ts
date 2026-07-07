@@ -1,13 +1,14 @@
 import { Redis } from "@upstash/redis";
+import { KV_REST_API_URL, KV_REST_API_TOKEN } from "@/lib/utils/kv-env";
 
 let redis: Redis | null = null;
 
 function getRedis(): Redis | null {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return null;
   if (!redis) {
     redis = new Redis({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN,
+      url: KV_REST_API_URL,
+      token: KV_REST_API_TOKEN,
       retry: false, // fail fast on unreachable Redis (default retries 5x w/ ~5s backoff); caller fails open
     });
   }
