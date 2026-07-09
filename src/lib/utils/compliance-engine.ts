@@ -281,6 +281,11 @@ export function calculateNextDueDateAfterCompletion(
   const completed = parseDate(completedDate);
   const formula = rule.due_date;
 
+  // Defensive: a rule without a due-date formula (e.g. an ad-hoc obligation
+  // synthesized without one) has no basis for a formula-driven next date.
+  // Callers with only a frequency should use advanceDateByFrequency instead.
+  if (!formula) return null;
+
   switch (formula.type) {
     case "fixed_date": {
       let year = completed.getFullYear();
@@ -333,6 +338,37 @@ export function calculateNextDueDateAfterCompletion(
     default:
       return null;
   }
+}
+
+/**
+ * Advance an ISO date (YYYY-MM-DD) by one interval of the given recurrence
+ * frequency. Used for ad-hoc obligations, which carry a frequency but no
+ * due-date formula — we simply roll the current cycle's due date forward.
+ * Returns null for non-recurring or unknown frequencies.
+ */
+export function advanceDateByFrequency(
+  isoDate: string,
+  frequency: string,
+): string | null {
+  const monthsByFrequency: Record<string, number> = {
+    monthly: 1,
+    quarterly: 3,
+    semi_annual: 6,
+    annual: 12,
+    biennial: 24,
+    decennial: 120,
+  };
+  const months = monthsByFrequency[frequency];
+  if (!months) return null;
+  const base = parseDate(isoDate);
+  const targetMonth = base.getMonth() + months;
+  const year = base.getFullYear() + Math.floor(targetMonth / 12);
+  const month = ((targetMonth % 12) + 12) % 12;
+  // Clamp the day to the target month's last day so e.g. a Nov 30 quarterly
+  // obligation advances to Feb 28, not Mar 2 (JS Date day-overflow).
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const day = Math.min(base.getDate(), lastDay);
+  return new Date(year, month, day).toISOString().split("T")[0];
 }
 
 export type ObligationDisplayStatus =

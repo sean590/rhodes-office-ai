@@ -4,6 +4,7 @@ import { createOrgClient } from "@/lib/supabase/org-client";
 import {
   getRuleById,
   calculateNextDueDateAfterCompletion,
+  advanceDateByFrequency,
 } from "@/lib/utils/compliance-engine";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
@@ -120,23 +121,12 @@ export async function PUT(
           obligationFrequency !== "one_time" &&
           obligationFrequency !== "continuous"
         ) {
-          // Ad-hoc obligation: synthesize a minimal rule for the
-          // next-due calculation. Same math, no rule_id required.
-          const synthesizedRule = {
-            id: `ad_hoc_${obligationId}`,
-            frequency: obligationFrequency,
-            jurisdiction: obligation.jurisdiction,
-            obligation_type: obligation.obligation_type,
-            name: obligation.name,
-            description: obligation.description,
-            fee: obligation.fee_description,
-            form_number: obligation.form_number,
-            portal_url: obligation.portal_url,
-            filed_with: obligation.filed_with,
-            penalty_description: obligation.penalty_description,
-          };
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          nextDue = calculateNextDueDateAfterCompletion(synthesizedRule as any, completedDate, null);
+          // Ad-hoc obligation (no rule_id → no due-date formula): roll the
+          // current cycle's due date forward by the frequency interval. Anchor
+          // on the existing next_due_date so the cadence stays stable; fall
+          // back to the completion date if the row has no due date yet.
+          const anchor = (obligation.next_due_date as string | null) || completedDate;
+          nextDue = advanceDateByFrequency(anchor, obligationFrequency);
         }
 
         // Advance the existing row in place: if there's a next cycle,
