@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { InboxCard, GroupCard, GroupChildRow, SectionHead } from "@/components/home/InboxCard";
 import { ReviewSheet, type SheetEntry, type SheetOption } from "@/components/home/ReviewSheet";
 import { fieldsForAction } from "@/lib/home-action-fields";
-import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
+import { DOCUMENT_TYPE_LABELS, getStateLabel } from "@/lib/constants";
 import { SuggestedSends } from "@/components/entities/SuggestedSends";
 import { formatStamp, formatDue } from "@/lib/format-time";
 import {
@@ -34,7 +34,16 @@ import {
 } from "@/lib/home-grouping";
 import { humanizeActivity, type RawActivity, type ActorKind, type HumanActivity } from "@/lib/activity-humanizer";
 
-interface Obligation { id: string; name: string; next_due_date: string; status: string; entities?: { id: string; name: string } | null; }
+interface Obligation { id: string; name: string; next_due_date: string; status: string; jurisdiction?: string | null; entities?: { id: string; name: string } | null; }
+
+// "DE" → "Delaware", "federal" → "Federal". Same-named obligations (e.g.
+// "Annual Franchise Tax") recur across states for multi-state LLCs, so the
+// jurisdiction is what tells you which filing you're acting on.
+function jurisdictionLabel(j?: string | null): string | null {
+  if (!j) return null;
+  if (j === "federal") return "Federal";
+  return getStateLabel(j as Parameters<typeof getStateLabel>[0]);
+}
 
 // Done rows sit under day headers (the date anchor), so a time-only stamp is
 // not "time alone" — it reads "Today → 11:26am". Needs-you stamps have no
@@ -533,11 +542,12 @@ export default function HomePage() {
 
   const renderObligation = (o: Obligation) => {
     const due = formatDue(o.next_due_date);
+    const jl = jurisdictionLabel(o.jurisdiction);
     return (
       <InboxCard
         key={o.id}
         icon="checklist" iconColor="var(--amber)"
-        title={o.name}
+        title={jl ? `${o.name} · ${jl}` : o.name}
         channel="compliance"
         meta={o.entities?.name ?? "Filing"}
         badge={{ text: due.text, color: due.overdue ? "var(--red)" : "var(--amber)" }}
