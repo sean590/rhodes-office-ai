@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { generateComplianceObligations } from "@/lib/utils/compliance-engine";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 
@@ -71,7 +71,7 @@ export async function GET(
       }
 
       // Upsert generated obligations
-      const admin = createAdminClient();
+      const db = createOrgClient(orgId);
       const rows = generated.map((g) => ({
         entity_id: id,
         rule_id: g.rule_id,
@@ -89,7 +89,7 @@ export async function GET(
         status: "pending",
       }));
 
-      const { data: inserted, error: insertError } = await admin
+      const { data: inserted, error: insertError } = await db
         .from("compliance_obligations")
         .upsert(rows, { onConflict: "entity_id,rule_id,next_due_date" })
         .select();

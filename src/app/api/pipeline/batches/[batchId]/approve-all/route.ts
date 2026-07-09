@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { ingestQueueItem } from "@/lib/pipeline/ingest";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { headers } from "next/headers";
@@ -19,28 +19,27 @@ export async function POST(
     const { orgId, user } = ctx;
 
     const { batchId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Verify batch belongs to this org
-    const { data: batch, error: batchError } = await admin
+    const { data: batch, error: batchError } = await db
       .from("document_batches")
       .select("id")
       .eq("id", batchId)
-      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
 
-    const { data: userRow } = await admin
+    const { data: userRow } = await db.raw
       .from("users")
       .select("id")
       .eq("id", user.id)
       .maybeSingle();
     const userId = userRow ? user.id : null;
 
-    const { data: items, error } = await admin
+    const { data: items, error } = await db
       .from("document_queue")
       .select("*")
       .eq("batch_id", batchId)
@@ -63,7 +62,7 @@ export async function POST(
     const CONCURRENCY = 5;
     for (let i = 0; i < items.length; i += CONCURRENCY) {
       const outcomes = await Promise.all(
-        items.slice(i, i + CONCURRENCY).map(async (item) => {
+        items.slice(i, i + CONCURRENCY).map(async (item: Record<string, unknown>) => {
           try {
             const r = await ingestQueueItem({
               item,

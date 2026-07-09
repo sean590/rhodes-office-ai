@@ -17,7 +17,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
@@ -84,14 +84,13 @@ export async function GET(request: Request) {
       ? Math.min(Math.max(parsedLimit, 1), 500)
       : 100;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Step 1: org-scoped batch ids. Filtering through a join on
     // document_batches.organization_id keeps the queue scan narrow.
-    const { data: batches, error: batchesErr } = await admin
+    const { data: batches, error: batchesErr } = await db
       .from("document_batches")
-      .select("id, name, context, created_at, metadata")
-      .eq("organization_id", orgId);
+      .select("id, name, context, created_at, metadata");
     if (batchesErr) {
       console.error("List batches for queue error:", batchesErr);
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -102,7 +101,7 @@ export async function GET(request: Request) {
     if (batchIds.length === 0) return NextResponse.json([]);
 
     // Step 2: queue rows in the requested status, scoped to those batches.
-    const { data: items, error: itemsErr } = await admin
+    const { data: items, error: itemsErr } = await db
       .from("document_queue")
       .select(
         "id, batch_id, document_id, status, original_filename, ai_suggested_name, ai_document_type, staged_doc_type, ai_entity_id, staged_entity_id, ai_year, staged_year, ai_confidence, ai_proposed_actions, ai_proposed_entities, ai_summary, approval_reason, extraction_error, created_at, chat_session_id",
@@ -126,7 +125,7 @@ export async function GET(request: Request) {
     );
     const entityNameMap: Record<string, string> = {};
     if (entityIds.length > 0) {
-      const { data: entities } = await admin
+      const { data: entities } = await db
         .from("entities")
         .select("id, name")
         .in("id", entityIds);

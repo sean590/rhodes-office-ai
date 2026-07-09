@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { deriveTotalsFromTransactions, type TransactionTotalRow } from "@/lib/utils/transaction-totals";
 
@@ -23,14 +23,13 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Fetch all active allocations where this entity is the parent
-    const { data: allAllocations, error: allocErr } = await supabase
+    const { data: allAllocations, error: allocErr } = await db
       .from("investment_allocations")
       .select("*, directory_entries!inner(name)")
       .eq("parent_entity_id", id)
-      .eq("organization_id", orgId)
       .eq("is_active", true)
       .order("allocation_pct", { ascending: false });
 
@@ -57,24 +56,23 @@ export async function GET(
     }
 
     // Fetch deal entity details
-    const { data: dealEntities } = await supabase
+    const { data: dealEntities } = await db
       .from("entities")
       .select("id, name, short_name, type, status")
       .in("id", dealEntityIds);
 
     // Fetch cap table entries for deal entities (to get parent's ownership %)
-    const { data: capTableEntries } = await supabase
+    const { data: capTableEntries } = await db.raw
       .from("cap_table_entries")
       .select("entity_id, investor_entity_id, ownership_pct")
       .in("entity_id", dealEntityIds)
       .eq("investor_entity_id", id);
 
     // Fetch all transactions for these deals
-    const { data: allTransactions } = await supabase
+    const { data: allTransactions } = await db
       .from("investment_transactions")
       .select("*, directory_entries:member_directory_id(name), documents:document_id(name)")
       .eq("parent_entity_id", id)
-      .eq("organization_id", orgId)
       .in("deal_entity_id", dealEntityIds)
       .order("transaction_date", { ascending: false });
 
@@ -86,7 +84,7 @@ export async function GET(
     });
 
     // Fetch documents for each deal entity
-    const { data: dealDocs } = await supabase
+    const { data: dealDocs } = await db
       .from("documents")
       .select("id, entity_id, name, document_type, document_category, year, file_path, created_at")
       .in("entity_id", dealEntityIds)

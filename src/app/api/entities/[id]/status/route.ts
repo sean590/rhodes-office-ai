@@ -8,7 +8,7 @@
 
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import {
@@ -35,13 +35,12 @@ export async function PUT(
     const { orgId, user } = ctx;
 
     const { id: entityId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data: entity } = await admin
+    const { data: entity } = await db
       .from("entities")
       .select("id, name, status")
       .eq("id", entityId)
-      .eq("organization_id", orgId)
       .single();
     if (!entity) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -58,7 +57,7 @@ export async function PUT(
       return NextResponse.json({ ok: true, old_status: oldStatus, new_status: status });
     }
 
-    await admin
+    await db
       .from("entities")
       .update({ status, updated_at: new Date().toISOString() })
       .eq("id", entityId);
@@ -70,10 +69,10 @@ export async function PUT(
       status === "active" && ["dissolved", "inactive"].includes(oldStatus);
 
     if (isDeactivating) {
-      await deactivateEntityCompliance(admin, entityId, reason);
+      await deactivateEntityCompliance(db.raw, entityId, reason);
     }
     if (isReactivating) {
-      await reactivateEntityCompliance(admin, entityId, orgId);
+      await reactivateEntityCompliance(db.raw, entityId, orgId);
     }
 
     const reqHeaders = await headers();

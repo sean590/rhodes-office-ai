@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Highest allowed number of files importing createAdminClient (excl. wrapper/defn).
-BASELINE=101
+BASELINE=70
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient

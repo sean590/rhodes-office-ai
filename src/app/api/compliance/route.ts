@@ -8,7 +8,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(request: Request) {
@@ -27,13 +27,12 @@ export async function GET(request: Request) {
     const page = parseInt(url.searchParams.get("page") || "1", 10);
     const pageSize = 100;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Get entities for this org with optional filters.
-    let entQuery = admin
+    let entQuery = db
       .from("entities")
-      .select("id, name, type, status, formation_state")
-      .eq("organization_id", orgId);
+      .select("id, name, type, status, formation_state");
     if (entityStatus && entityStatus !== "all") {
       entQuery = entQuery.eq("status", entityStatus);
     }
@@ -45,12 +44,12 @@ export async function GET(request: Request) {
     }
     const { data: entities, error: entErr } = await entQuery.order("name");
     if (entErr) throw entErr;
-    const entIds = (entities ?? []).map((e) => e.id);
+    const entIds = (entities ?? []).map((e: { id: string }) => e.id);
     if (entIds.length === 0) {
       return NextResponse.json({ rows: [], summary: { overdue: 0, due_this_month: 0, upcoming: 0, completed_this_year: 0 }, page, pageSize, total: 0 });
     }
 
-    const entMap = new Map(
+    const entMap = new Map<string, { name: string; type: string; status: string }>(
       (entities ?? []).map((e: { id: string; name: string; type: string; status: string }) => [
         e.id,
         { name: e.name, type: e.type, status: e.status },
@@ -61,7 +60,7 @@ export async function GET(request: Request) {
     const today = new Date().toISOString().slice(0, 10);
     const yearStart = `${new Date().getFullYear()}-01-01`;
 
-    let query = admin
+    let query = db
       .from("compliance_obligations")
       .select("*", { count: "exact" })
       .in("entity_id", entIds)
@@ -105,27 +104,27 @@ export async function GET(request: Request) {
 
     // Summary counts (separate queries for accuracy with filters).
     const [overdueRes, dueMonthRes, upcomingRes, completedRes] = await Promise.all([
-      admin
+      db
         .from("compliance_obligations")
         .select("id", { count: "exact", head: true })
         .in("entity_id", entIds)
         .eq("status", "pending")
         .lt("next_due_date", today),
-      admin
+      db
         .from("compliance_obligations")
         .select("id", { count: "exact", head: true })
         .in("entity_id", entIds)
         .eq("status", "pending")
         .gte("next_due_date", today)
         .lte("next_due_date", (() => { const d = new Date(); d.setDate(d.getDate() + 30); return d.toISOString().slice(0, 10); })()),
-      admin
+      db
         .from("compliance_obligations")
         .select("id", { count: "exact", head: true })
         .in("entity_id", entIds)
         .eq("status", "pending")
         .gte("next_due_date", today)
         .lte("next_due_date", (() => { const d = new Date(); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10); })()),
-      admin
+      db
         .from("compliance_obligations")
         .select("id", { count: "exact", head: true })
         .in("entity_id", entIds)

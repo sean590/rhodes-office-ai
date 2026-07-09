@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 
 /**
@@ -20,9 +20,9 @@ export async function GET(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("documents")
       .select("id, entity_id, investment_id, name, document_type, document_category, year, file_path, file_size, mime_type, created_at, ai_extraction")
       .eq("investment_id", id)

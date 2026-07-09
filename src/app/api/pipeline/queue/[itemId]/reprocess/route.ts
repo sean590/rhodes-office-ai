@@ -13,7 +13,7 @@
 
 import { NextResponse, after } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { processQueueItem } from "@/lib/pipeline/worker";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -31,10 +31,10 @@ export async function POST(
     const { orgId, user } = ctx;
 
     const { itemId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Cross-tenant guard — same shape as the other queue routes.
-    const { data: item } = await admin
+    const { data: item } = await db
       .from("document_queue")
       .select("id, batch_id, status")
       .eq("id", itemId)
@@ -42,11 +42,10 @@ export async function POST(
     if (!item) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
     }
-    const { data: batchOwn } = await admin
+    const { data: batchOwn } = await db
       .from("document_batches")
       .select("id")
       .eq("id", item.batch_id)
-      .eq("organization_id", orgId)
       .maybeSingle();
     if (!batchOwn) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
@@ -62,7 +61,7 @@ export async function POST(
     }
 
     // Reset to a clean queued state so the worker treats it as fresh.
-    await admin
+    await db
       .from("document_queue")
       .update({
         status: "queued",

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { presignRequestSchema, validateFileMetadata } from "@/lib/validations";
 
@@ -26,14 +26,13 @@ export async function POST(
     const { orgId } = ctx;
 
     const { batchId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Verify batch exists
-    const { data: batch, error: batchError } = await admin
+    const { data: batch, error: batchError } = await db
       .from("document_batches")
       .select("id")
       .eq("id", batchId)
-      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
@@ -58,7 +57,7 @@ export async function POST(
           }
           const safeName = file.name.replace(/[^a-zA-Z0-9\-_. ]/g, "_");
           const storagePath = `${orgId}/queue/${batchId}/${safeName}`;
-          const { data, error } = await admin.storage
+          const { data, error } = await db.raw.storage
             .from("documents")
             .createSignedUploadUrl(storagePath, { upsert: true });
           if (error || !data) {

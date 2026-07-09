@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireOrg, isError } from "@/lib/utils/org-context";
+import { isError } from "@/lib/utils/org-context";
 import { requireSensitive } from "@/lib/utils/aal";
 import { sendDocumentToProviderSchema } from "@/lib/validations";
 import { sendDocumentToProvider, SendDocumentError } from "@/lib/providers/send-document";

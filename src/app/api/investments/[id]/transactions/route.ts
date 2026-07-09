@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 import { requireSensitive } from "@/lib/utils/aal";
 import { logAuditEvent, getRequestContext, formatCurrency, humanizeField, buildChanges } from "@/lib/utils/audit";
@@ -34,17 +34,16 @@ export async function GET(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const url = new URL(request.url);
     const investorId = url.searchParams.get("investor_id");
     const txnType = url.searchParams.get("type");
     const parentOnly = url.searchParams.get("parent_only") === "true";
 
-    let query = supabase
+    let query = db
       .from("investment_transactions")
       .select("*, directory_entries:member_directory_id(name), documents:document_id(name)")
       .eq("investment_id", id)
-      .eq("organization_id", orgId)
       .order("transaction_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -68,7 +67,7 @@ export async function GET(
     // If investor_id was provided, fetch the investor entity name for enrichment
     let investorEntityName: string | null = null;
     if (investorId) {
-      const { data: investorRow } = await supabase
+      const { data: investorRow } = await db
         .from("investment_investors")
         .select("entities:entity_id(name)")
         .eq("id", investorId)
@@ -166,12 +165,12 @@ export async function POST(
       adjustment_reason,
     } = parsed.data;
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // If this is an adjustment, verify the referenced row belongs to the same
     // org and the same investor position. The Zod schema can't see the DB.
     if (adjusts_transaction_id) {
-      const { data: original } = await supabase
+      const { data: original } = await db
         .from("investment_transactions")
         .select("id, organization_id, investment_investor_id")
         .eq("id", adjusts_transaction_id)
@@ -189,10 +188,9 @@ export async function POST(
 
     // Create the parent (investor-level) transaction — no member_directory_id.
     // Spec 036: line_items and adjustment fields live on the parent row.
-    const { data: parentTxn, error: parentErr } = await supabase
+    const { data: parentTxn, error: parentErr } = await db
       .from("investment_transactions")
       .insert({
-        organization_id: orgId,
         investment_id: id,
         investment_investor_id,
         member_directory_id: null,
@@ -216,7 +214,7 @@ export async function POST(
     }
 
     // Fetch investment name for audit description
-    const { data: investmentRecord } = await supabase
+    const { data: investmentRecord } = await db
       .from("investments")
       .select("name")
       .eq("id", id)
@@ -274,7 +272,7 @@ export async function DELETE(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { transaction_id } = body;
 
@@ -283,14 +281,14 @@ export async function DELETE(
     }
 
     // Delete child transactions first
-    await supabase
+    await db
       .from("investment_transactions")
       .delete()
       .eq("parent_transaction_id", transaction_id)
       .eq("investment_id", id);
 
     // Delete the parent transaction
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_transactions")
       .delete()
       .eq("id", transaction_id)
@@ -359,7 +357,7 @@ export async function PATCH(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { transaction_id, ...updates } = body as Record<string, unknown>;
 
@@ -370,12 +368,11 @@ export async function PATCH(
     // Fetch the existing row so we can (a) authorize on org, (b) validate
     // line_items against the existing transaction_type and adjustment status,
     // (c) feed buildChanges() for the audit log.
-    const { data: existing, error: fetchErr } = await supabase
+    const { data: existing, error: fetchErr } = await db
       .from("investment_transactions")
       .select("*")
       .eq("id", transaction_id)
       .eq("investment_id", id)
-      .eq("organization_id", orgId)
       .maybeSingle();
 
     if (fetchErr || !existing) {
@@ -454,7 +451,7 @@ export async function PATCH(
 
     // Apply the update.
     const updatePayload: Record<string, unknown> = { ...updates, updated_at: new Date().toISOString() };
-    const { data: updated, error: updateErr } = await supabase
+    const { data: updated, error: updateErr } = await db
       .from("investment_transactions")
       .update(updatePayload)
       .eq("id", transaction_id)

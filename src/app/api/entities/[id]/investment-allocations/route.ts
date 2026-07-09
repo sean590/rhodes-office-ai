@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { requireSensitive } from "@/lib/utils/aal";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -26,16 +26,15 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const url = new URL(request.url);
     const parentEntityId = url.searchParams.get("parent_entity_id");
     const includeInactive = url.searchParams.get("include_inactive") === "true";
 
-    let query = supabase
+    let query = db
       .from("investment_allocations")
       .select("*, directory_entries!inner(name)")
       .eq("deal_entity_id", id)
-      .eq("organization_id", orgId)
       .order("allocation_pct", { ascending: false });
 
     if (parentEntityId) {
@@ -101,7 +100,7 @@ export async function POST(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const { parent_entity_id, allocations, effective_date } = body;
@@ -132,7 +131,7 @@ export async function POST(
     }
 
     // Fetch existing active allocations for this deal+parent
-    const { data: existing } = await supabase
+    const { data: existing } = await db
       .from("investment_allocations")
       .select("id, member_directory_id")
       .eq("deal_entity_id", id)
@@ -153,7 +152,7 @@ export async function POST(
       .map((e: { id: string }) => e.id);
 
     if (toDeactivate.length > 0) {
-      await supabase
+      await db
         .from("investment_allocations")
         .update({ is_active: false, updated_at: new Date().toISOString() })
         .in("id", toDeactivate);
@@ -166,7 +165,7 @@ export async function POST(
 
       if (existingId) {
         // Update existing
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("investment_allocations")
           .update({
             allocation_pct: alloc.allocation_pct,
@@ -187,10 +186,9 @@ export async function POST(
         results.push(data);
       } else {
         // Insert new
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("investment_allocations")
           .insert({
-            organization_id: orgId,
             parent_entity_id,
             deal_entity_id: id,
             member_directory_id: alloc.member_directory_id,
@@ -253,7 +251,7 @@ export async function DELETE(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { allocation_id } = body;
 
@@ -261,7 +259,7 @@ export async function DELETE(
       return NextResponse.json({ error: "allocation_id is required" }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_allocations")
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq("id", allocation_id)

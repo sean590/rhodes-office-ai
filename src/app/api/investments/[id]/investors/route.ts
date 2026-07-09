@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
@@ -22,9 +22,9 @@ export async function GET(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("investment_investors")
       .select("*, entities:entity_id(name, short_name)")
       .eq("investment_id", id)
@@ -73,7 +73,7 @@ export async function POST(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { investors } = body;
 
@@ -100,7 +100,7 @@ export async function POST(
     // Allocations and transactions hang off investment_investor.id, so
     // reusing existing rows preserves those references — strictly better than
     // delete + re-insert which would orphan downstream data.
-    const { data: existingRows, error: existingErr } = await supabase
+    const { data: existingRows, error: existingErr } = await db
       .from("investment_investors")
       .select("id, entity_id, is_active")
       .eq("investment_id", id);
@@ -130,7 +130,7 @@ export async function POST(
 
       if (existing) {
         // Reactivate / update existing row.
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("investment_investors")
           .update(fields)
           .eq("id", existing.id)
@@ -142,11 +142,10 @@ export async function POST(
         }
         results.push(data);
       } else {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from("investment_investors")
           .insert({
             investment_id: id,
-            organization_id: orgId,
             entity_id: inv.entity_id,
             ...fields,
             created_by: user.id,
@@ -163,10 +162,10 @@ export async function POST(
 
     // Deactivate any existing active rows that were dropped from the payload.
     const droppedIds = (existingRows || [])
-      .filter(r => r.is_active && !payloadEntityIds.has(r.entity_id))
-      .map(r => r.id);
+      .filter((r: { id: string; is_active: boolean; entity_id: string }) => r.is_active && !payloadEntityIds.has(r.entity_id))
+      .map((r: { id: string; is_active: boolean; entity_id: string }) => r.id);
     if (droppedIds.length > 0) {
-      const { error: deactErr } = await supabase
+      const { error: deactErr } = await db
         .from("investment_investors")
         .update({ is_active: false, updated_at: new Date().toISOString() })
         .in("id", droppedIds);
@@ -217,7 +216,7 @@ export async function PATCH(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { investor_id, entity_id, capital_pct, profit_pct, committed_capital } = body;
 
@@ -231,7 +230,7 @@ export async function PATCH(
     if (profit_pct !== undefined) updates.profit_pct = profit_pct;
     if (committed_capital !== undefined) updates.committed_capital = committed_capital;
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("investment_investors")
       .update(updates)
       .eq("id", investor_id)
@@ -284,7 +283,7 @@ export async function DELETE(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { investor_id } = body;
 
@@ -292,7 +291,7 @@ export async function DELETE(
       return NextResponse.json({ error: "investor_id is required" }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_investors")
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq("id", investor_id)

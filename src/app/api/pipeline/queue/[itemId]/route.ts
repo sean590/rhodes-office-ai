@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
@@ -14,12 +14,12 @@ export async function PATCH(
     const { user, orgId } = ctx;
 
     const { itemId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     // Cross-tenant guard: verify the item's batch belongs to the caller's
     // org before mutating. 404 (not 403) so we don't leak existence.
-    const { data: existing } = await admin
+    const { data: existing } = await db
       .from("document_queue")
       .select("id, batch_id")
       .eq("id", itemId)
@@ -27,11 +27,10 @@ export async function PATCH(
     if (!existing) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
     }
-    const { data: batchOwn } = await admin
+    const { data: batchOwn } = await db
       .from("document_batches")
       .select("id")
       .eq("id", existing.batch_id)
-      .eq("organization_id", orgId)
       .maybeSingle();
     if (!batchOwn) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
@@ -68,7 +67,7 @@ export async function PATCH(
     }
     updates.updated_at = new Date().toISOString();
 
-    const { data, error } = await admin
+    const { data, error } = await db
       .from("document_queue")
       .update(updates)
       .eq("id", itemId)

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { DOCUMENT_TYPE_LABELS } from "@/lib/constants";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
@@ -13,22 +13,37 @@ export async function GET(
     const { orgId } = ctx;
 
     const { batchId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Get batch
-    const { data: batch, error: batchError } = await admin
+    const { data: batch, error: batchError } = await db
       .from("document_batches")
       .select("*")
       .eq("id", batchId)
-      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
       return NextResponse.json({ error: "Batch not found" }, { status: 404 });
     }
 
-    // Get all queue items for this batch
-    const { data: items, error: itemsError } = await admin
+    // Get all queue items for this batch. The wrapper returns untyped rows, so
+    // shape the columns this handler reads into a local type once (rather than
+    // annotating each callback param below).
+    type QItem = {
+      id: string;
+      status: string;
+      ai_proposed_entity: unknown;
+      ai_entity_id: string | null;
+      document_id: string | null;
+      parent_queue_id: string | null;
+      ai_document_type: string | null;
+      staged_doc_type: string | null;
+      ai_suggested_name: string | null;
+      original_filename: string;
+      ai_year: number | null;
+      staged_year: number | null;
+    };
+    const { data: rawItems, error: itemsError } = await db
       .from("document_queue")
       .select("*")
       .eq("batch_id", batchId)
@@ -37,6 +52,7 @@ export async function GET(
     if (itemsError) {
       return NextResponse.json({ error: itemsError.message }, { status: 500 });
     }
+    const items = (rawItems || []) as QItem[];
 
     // Collect unique proposed entities from items
     const proposedEntities: Record<string, unknown>[] = [];
@@ -62,12 +78,12 @@ export async function GET(
     const entityIds = [...new Set(ingestedItems.map((i) => i.ai_entity_id).filter(Boolean))];
     let entityNameMap: Record<string, string> = {};
     if (entityIds.length > 0) {
-      const { data: entities } = await admin
+      const { data: entities } = await db
         .from("entities")
         .select("id, name")
         .in("id", entityIds);
       if (entities) {
-        entityNameMap = Object.fromEntries(entities.map((e) => [e.id, e.name]));
+        entityNameMap = Object.fromEntries(entities.map((e: { id: string; name: string }) => [e.id, e.name]));
       }
     }
 
@@ -86,7 +102,7 @@ export async function GET(
     if (ingestedDocIds.length > 0) {
       // Documents → investment join. We surface investment name on the row
       // so the user can see at a glance which deal each doc was filed under.
-      const { data: docRows } = await admin
+      const { data: docRows } = await db
         .from("documents")
         .select("id, investment_id, investments(id, name)")
         .in("id", ingestedDocIds);
@@ -107,7 +123,7 @@ export async function GET(
       // Transactions where document_id matches one of our docs. One doc per
       // txn (UI shows the most recent if multiple). Format: "Distribution
       // $X · Y/Y/YYYY".
-      const { data: txnRows } = await admin
+      const { data: txnRows } = await db
         .from("investment_transactions")
         .select("id, document_id, transaction_type, amount, transaction_date")
         .in("document_id", ingestedDocIds)

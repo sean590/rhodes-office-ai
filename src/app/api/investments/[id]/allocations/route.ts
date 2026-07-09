@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 import { requireSensitive } from "@/lib/utils/aal";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -31,9 +31,9 @@ export async function GET(
       return NextResponse.json({ error: "investor_id query param is required" }, { status: 400 });
     }
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("investment_allocations")
       .select("*, directory_entries:member_directory_id(name), member_entity:entities!investment_allocations_member_entity_id_fkey(name)")
       .eq("investment_investor_id", investorId)
@@ -88,7 +88,7 @@ export async function POST(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { investor_id, allocations, effective_date } = body;
 
@@ -115,7 +115,7 @@ export async function POST(
     }
 
     // Deactivate ALL existing active allocations for this investor
-    await supabase
+    await db
       .from("investment_allocations")
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq("investment_investor_id", investor_id)
@@ -125,7 +125,6 @@ export async function POST(
     const results = [];
     for (const alloc of allocations) {
       const insertData: Record<string, unknown> = {
-        organization_id: orgId,
         investment_investor_id: investor_id,
         allocation_pct: alloc.allocation_pct,
         committed_amount: alloc.committed_amount ?? null,
@@ -141,7 +140,7 @@ export async function POST(
         insertData.member_directory_id = alloc.member_directory_id;
       }
 
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("investment_allocations")
         .insert(insertData)
         .select()
@@ -155,7 +154,7 @@ export async function POST(
     }
 
     // Fetch investment name for audit description
-    const { data: investmentRecord } = await supabase
+    const { data: investmentRecord } = await db
       .from("investments")
       .select("name")
       .eq("id", id)
@@ -205,7 +204,7 @@ export async function DELETE(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { allocation_id } = body;
 
@@ -213,7 +212,7 @@ export async function DELETE(
       return NextResponse.json({ error: "allocation_id is required" }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_allocations")
       .update({ is_active: false, updated_at: new Date().toISOString() })
       .eq("id", allocation_id);

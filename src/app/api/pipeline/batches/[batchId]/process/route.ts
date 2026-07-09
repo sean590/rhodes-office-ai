@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { after } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { processBatch } from "@/lib/pipeline/worker";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -20,18 +20,17 @@ export async function POST(
     const { orgId, user } = ctx;
 
     const { batchId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     if (!(await rateLimit(`pipeline-process:${user.id}`, 5, 60000))) {
       return NextResponse.json({ error: "Too many requests" }, { status: 429 });
     }
 
     // Verify batch belongs to this org
-    const { data: batch, error: batchError } = await admin
+    const { data: batch, error: batchError } = await db
       .from("document_batches")
       .select("id")
       .eq("id", batchId)
-      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
@@ -39,7 +38,7 @@ export async function POST(
     }
 
     // Move all staged items to queued
-    const { data: items, error: updateError } = await admin
+    const { data: items, error: updateError } = await db
       .from("document_queue")
       .update({
         status: 'queued',
@@ -56,7 +55,7 @@ export async function POST(
     const queuedCount = items?.length || 0;
 
     // Update batch status
-    await admin
+    await db
       .from("document_batches")
       .update({
         status: 'processing',

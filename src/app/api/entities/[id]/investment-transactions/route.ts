@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { requireSensitive } from "@/lib/utils/aal";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -33,17 +33,16 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const url = new URL(request.url);
     const parentEntityId = url.searchParams.get("parent_entity_id");
     const txnType = url.searchParams.get("type");
     const parentOnly = url.searchParams.get("parent_only") === "true";
 
-    let query = supabase
+    let query = db
       .from("investment_transactions")
       .select("*, directory_entries:member_directory_id(name), documents:document_id(name)")
       .eq("deal_entity_id", id)
-      .eq("organization_id", orgId)
       .order("transaction_date", { ascending: false })
       .order("created_at", { ascending: false });
 
@@ -119,7 +118,7 @@ export async function POST(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const {
@@ -184,7 +183,7 @@ export async function POST(
     // If this is an adjustment, verify the referenced row exists and is on the
     // same parent entity / deal. Spec 036.
     if (adjusts_transaction_id) {
-      const { data: original } = await supabase
+      const { data: original } = await db.raw
         .from("investment_transactions")
         .select("id, organization_id, parent_entity_id, deal_entity_id")
         .eq("id", adjusts_transaction_id)
@@ -201,10 +200,9 @@ export async function POST(
     }
 
     // Create the parent (entity-level) transaction
-    const { data: parentTxn, error: parentErr } = await supabase
+    const { data: parentTxn, error: parentErr } = await db
       .from("investment_transactions")
       .insert({
-        organization_id: orgId,
         parent_entity_id,
         deal_entity_id: id,
         member_directory_id: null,
@@ -232,7 +230,7 @@ export async function POST(
 
     if (split_by_allocation !== false && !member_amounts) {
       // Default: auto-split by allocation percentages
-      const { data: allocations } = await supabase
+      const { data: allocations } = await db
         .from("investment_allocations")
         .select("member_directory_id, allocation_pct")
         .eq("deal_entity_id", id)
@@ -260,10 +258,9 @@ export async function POST(
     // Insert per-member transactions
     const memberTxns = [];
     for (const split of splits) {
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("investment_transactions")
         .insert({
-          organization_id: orgId,
           parent_entity_id,
           deal_entity_id: id,
           member_directory_id: split.member_directory_id,
@@ -339,7 +336,7 @@ export async function DELETE(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { transaction_id } = body;
 
@@ -348,14 +345,14 @@ export async function DELETE(
     }
 
     // Delete child transactions first (member splits)
-    await supabase
+    await db
       .from("investment_transactions")
       .delete()
       .eq("parent_transaction_id", transaction_id)
       .eq("deal_entity_id", id);
 
     // Delete the parent transaction
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_transactions")
       .delete()
       .eq("id", transaction_id)

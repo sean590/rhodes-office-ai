@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import {
   getRuleById,
   calculateNextDueDateAfterCompletion,
@@ -23,7 +23,7 @@ export async function PUT(
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
     const supabase = await createClient();
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     // Fetch the existing obligation
@@ -73,7 +73,7 @@ export async function PUT(
         const cycleDueDate = obligation.next_due_date as string | null;
         const completedDate = proposedCompletedAt.split("T")[0];
         if (cycleDueDate) {
-          const { error: cycleErr } = await admin
+          const { error: cycleErr } = await db.raw
             .from("compliance_obligation_cycles")
             .insert({
               obligation_id: obligationId,
@@ -152,7 +152,7 @@ export async function PUT(
     // Handle individual field updates
     if (body.notes !== undefined && !updates.notes) updates.notes = body.notes;
 
-    const { data: updated, error: updateError } = await admin
+    const { data: updated, error: updateError } = await db
       .from("compliance_obligations")
       .update(updates)
       .eq("id", obligationId)

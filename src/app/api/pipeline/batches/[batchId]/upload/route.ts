@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { classifyByFilename, matchEntityByHint, guessDirection } from "@/lib/pipeline/classify";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -19,14 +19,13 @@ export async function POST(
     const { orgId, user } = ctx;
 
     const { batchId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Verify batch exists
-    const { data: batch, error: batchError } = await admin
+    const { data: batch, error: batchError } = await db
       .from("document_batches")
       .select("id, entity_id, entity_discovery")
       .eq("id", batchId)
-      .eq("organization_id", orgId)
       .single();
 
     if (batchError || !batch) {
@@ -71,17 +70,16 @@ export async function POST(
     let entities: Array<{ id: string; name: string; short_name: string | null }> = [];
     let batchEntityName: string | null = null;
     if (batch.entity_id) {
-      const { data } = await admin
+      const { data } = await db
         .from("entities")
         .select("name")
         .eq("id", batch.entity_id)
         .single();
       batchEntityName = data?.name || null;
     } else {
-      const { data } = await admin
+      const { data } = await db
         .from("entities")
         .select("id, name, short_name")
-        .eq("organization_id", orgId)
         .order("name");
       entities = data || [];
     }
@@ -97,13 +95,12 @@ export async function POST(
 
     if (allHashes.length > 0) {
       const [docDupes, queueDupes] = await Promise.all([
-        admin
+        db
           .from("documents")
           .select("id, content_hash, name")
           .in("content_hash", allHashes)
-          .eq("organization_id", orgId)
           .is("deleted_at", null),
-        admin
+        db
           .from("document_queue")
           .select("content_hash, original_filename")
           .in("content_hash", allHashes)
@@ -166,10 +163,9 @@ export async function POST(
       const direction = classification.direction || guessDirection(file.originalName, classification.document_type);
 
       // Create queue item
-      const { data: queueItem, error: queueError } = await admin
+      const { data: queueItem, error: queueError } = await db
         .from("document_queue")
         .insert({
-          organization_id: orgId, // NOT NULL since migration 068 — required or the insert is rejected
           batch_id: batchId,
           status: 'staged',
           original_filename: file.originalName,
@@ -200,10 +196,9 @@ export async function POST(
       // worker updates it with extraction results + status='ready' when done.
       let documentId: string | null = null;
       try {
-        const { data: docRow } = await admin
+        const { data: docRow } = await db
           .from("documents")
           .insert({
-            organization_id: orgId,
             entity_id: entityId,
             name: file.originalName,
             document_type: classification.document_type || "other",
@@ -222,7 +217,7 @@ export async function POST(
           .single();
         if (docRow) {
           documentId = docRow.id;
-          await admin
+          await db
             .from("document_queue")
             .update({ document_id: docRow.id })
             .eq("id", queueItem.id);
@@ -235,13 +230,13 @@ export async function POST(
     }
 
     // Update batch stats
-    const { count: totalCount } = await admin
+    const { count: totalCount } = await db
       .from("document_queue")
       .select("id", { count: "exact", head: true })
       .eq("batch_id", batchId)
       .not("status", "in", '("rejected","error")');
 
-    const { count: stagedCount } = await admin
+    const { count: stagedCount } = await db
       .from("document_queue")
       .select("id", { count: "exact", head: true })
       .eq("batch_id", batchId)
@@ -253,7 +248,7 @@ export async function POST(
     // a page reload — and silently swallowing 5 of 6 files is what made
     // yesterday's K-1 retry look like "everything auto-ingested" when in
     // fact only 1 file actually ran through extraction.
-    const { data: existingBatch } = await admin
+    const { data: existingBatch } = await db
       .from("document_batches")
       .select("metadata")
       .eq("id", batchId)
@@ -277,7 +272,7 @@ export async function POST(
     // through several screenshots last week — same root cause.)
     const allDeduped = uploaded.length === 0 && duplicates.length > 0;
 
-    await admin
+    await db
       .from("document_batches")
       .update({
         total_documents: totalCount || 0,

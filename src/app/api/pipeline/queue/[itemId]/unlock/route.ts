@@ -14,7 +14,7 @@
  */
 
 import { NextResponse, after } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { processQueueItem, generateBatchSummary } from "@/lib/pipeline/worker";
 import { analyzePdfWithPassword } from "@/lib/pipeline/pdf-processor";
 import { requireOrg, isError } from "@/lib/utils/org-context";
@@ -36,10 +36,10 @@ export async function POST(
     const { orgId } = ctx;
 
     const { itemId } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Cross-tenant guard — same shape as the other queue routes.
-    const { data: item } = await admin
+    const { data: item } = await db
       .from("document_queue")
       .select("id, batch_id, status, file_path")
       .eq("id", itemId)
@@ -47,11 +47,10 @@ export async function POST(
     if (!item) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
     }
-    const { data: batchOwn } = await admin
+    const { data: batchOwn } = await db
       .from("document_batches")
       .select("id")
       .eq("id", item.batch_id)
-      .eq("organization_id", orgId)
       .maybeSingle();
     if (!batchOwn) {
       return NextResponse.json({ error: "Queue item not found" }, { status: 404 });
@@ -78,7 +77,7 @@ export async function POST(
     if (!item.file_path) {
       return NextResponse.json({ error: "Document file is missing" }, { status: 500 });
     }
-    const { data: fileData, error: dlErr } = await admin.storage
+    const { data: fileData, error: dlErr } = await db.raw.storage
       .from("documents")
       .download(item.file_path as string);
     if (dlErr || !fileData) {
@@ -100,13 +99,13 @@ export async function POST(
     after(async () => {
       try {
         await processQueueItem(itemId, { password });
-        const { count: remainingLocked } = await admin
+        const { count: remainingLocked } = await db
           .from("document_queue")
           .select("id", { count: "exact", head: true })
           .eq("batch_id", batchId)
           .eq("status", "password_required");
         if (!remainingLocked) {
-          await generateBatchSummary(admin, batchId, "post-unlock").catch(() => {});
+          await generateBatchSummary(db.raw, batchId, "post-unlock").catch(() => {});
         }
       } catch (err) {
         console.error("[UNLOCK] background processing failed:", err);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateInvestmentOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 
@@ -22,9 +22,9 @@ export async function GET(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await supabase
+    const { data, error } = await db
       .from("investment_co_investors")
       .select("*, directory_entries!inner(name)")
       .eq("investment_id", id)
@@ -75,7 +75,7 @@ export async function POST(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { co_investors } = body;
 
@@ -84,7 +84,7 @@ export async function POST(
     }
 
     // Delete existing co-investors
-    await supabase
+    await db
       .from("investment_co_investors")
       .delete()
       .eq("investment_id", id);
@@ -94,11 +94,10 @@ export async function POST(
     for (const ci of co_investors) {
       if (!ci.directory_entry_id) continue;
 
-      const { data, error } = await supabase
+      const { data, error } = await db
         .from("investment_co_investors")
         .insert({
           investment_id: id,
-          organization_id: orgId,
           directory_entry_id: ci.directory_entry_id,
           role: ci.role || "co_investor",
           capital_pct: ci.capital_pct ?? null,
@@ -155,7 +154,7 @@ export async function DELETE(
     const isValid = await validateInvestmentOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Investment not found" }, { status: 404 });
 
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { co_investor_id } = body;
 
@@ -163,7 +162,7 @@ export async function DELETE(
       return NextResponse.json({ error: "co_investor_id is required" }, { status: 400 });
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from("investment_co_investors")
       .delete()
       .eq("id", co_investor_id)

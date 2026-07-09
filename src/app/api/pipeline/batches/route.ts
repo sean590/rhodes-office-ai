@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { createBatchSchema } from "@/lib/validations";
 import { headers } from "next/headers";
@@ -19,11 +19,10 @@ export async function GET(request: Request) {
     const parsedLimit = limitParam ? Number(limitParam) : 10;
     const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 50) : 10;
 
-    const admin = createAdminClient();
-    const { data, error } = await admin
+    const db = createOrgClient(orgId);
+    const { data, error } = await db
       .from("document_batches")
       .select("id, name, source_type, status, context, total_documents, metadata, created_at, updated_at")
-      .eq("organization_id", orgId)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -49,7 +48,7 @@ export async function GET(request: Request) {
 
     const progressByBatch = new Map<string, { processed: number; total: number }>();
     if (inProgressIds.length > 0) {
-      const { data: queueRows } = await admin
+      const { data: queueRows } = await db
         .from("document_queue")
         .select("batch_id, status")
         .in("batch_id", inProgressIds);
@@ -80,7 +79,7 @@ export async function POST(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     const body = await request.json();
     const parsed = createBatchSchema.safeParse(body);
@@ -94,13 +93,13 @@ export async function POST(request: Request) {
     const { name, context, entity_id, entity_discovery, metadata: batchMetadata } = parsed.data;
 
     // Check if user exists in public users table (auth user may not be synced yet)
-    const { data: userRow } = await admin
+    const { data: userRow } = await db.raw
       .from("users")
       .select("id")
       .eq("id", user.id)
       .maybeSingle();
 
-    const { data, error } = await admin
+    const { data, error } = await db
       .from("document_batches")
       .insert({
         name: name || null,
@@ -109,7 +108,6 @@ export async function POST(request: Request) {
         entity_discovery,
         metadata: batchMetadata ?? {},
         created_by: userRow ? user.id : null,
-        organization_id: orgId,
       })
       .select()
       .single();

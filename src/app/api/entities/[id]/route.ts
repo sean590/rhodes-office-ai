@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { normalizeName } from "@/lib/utils/name-matching";
 import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@/lib/utils/audit";
@@ -391,7 +391,7 @@ export async function PUT(
 
   try {
     const { id } = await params;
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const parsed = updateEntitySchema.safeParse(body);
@@ -431,22 +431,20 @@ export async function PUT(
     updates.updated_at = new Date().toISOString();
 
     // Fetch existing entity before updating (for audit change tracking)
-    const { data: existing, error: fetchError } = await supabase
+    const { data: existing, error: fetchError } = await db
       .from("entities")
       .select("*")
       .eq("id", id)
-      .eq("organization_id", orgId)
       .single();
 
     if (fetchError || !existing) {
       return NextResponse.json({ error: "Entity not found" }, { status: 404 });
     }
 
-    const { data: entity, error } = await supabase
+    const { data: entity, error } = await db
       .from("entities")
       .update(updates)
       .eq("id", id)
-      .eq("organization_id", orgId)
       .select()
       .single();
 
@@ -527,14 +525,13 @@ export async function DELETE(
 
   try {
     const { id } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check entity exists and belongs to org
-    const { data: entity, error: fetchError } = await admin
+    const { data: entity, error: fetchError } = await db
       .from("entities")
       .select("id, name")
       .eq("id", id)
-      .eq("organization_id", orgId)
       .single();
 
     if (fetchError || !entity) {
@@ -542,11 +539,10 @@ export async function DELETE(
     }
 
     // Soft delete — set status to deleted
-    const { error } = await admin
+    const { error } = await db
       .from("entities")
       .update({ status: "deleted", updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("organization_id", orgId);
+      .eq("id", id);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });

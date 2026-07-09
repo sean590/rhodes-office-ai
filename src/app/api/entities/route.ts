@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -225,7 +225,7 @@ export async function POST(request: Request) {
   const { orgId, user } = ctx;
 
   try {
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const parsed = createEntitySchema.safeParse(body);
@@ -262,7 +262,7 @@ export async function POST(request: Request) {
     }
 
     // Create the entity
-    const { data: entity, error: entityError } = await supabase
+    const { data: entity, error: entityError } = await db
       .from("entities")
       .insert({
         name,
@@ -278,7 +278,6 @@ export async function POST(request: Request) {
         legal_structure: legal_structure || (type === "trust" ? "trust" : null),
         ssn_last_4: ssn_last_4 || null,
         aliases: Array.isArray(aliases) ? aliases.filter(a => a.trim()).map(a => a.trim()) : [],
-        organization_id: orgId,
       })
       .select()
       .single();
@@ -298,7 +297,7 @@ export async function POST(request: Request) {
     // joint_title entities don't have a formation-state registration concept,
     // so skip this step for them.
     if (formation_state && type !== "person" && type !== "joint_title") {
-      const { error: regError } = await supabase.from("entity_registrations").insert({
+      const { error: regError } = await db.raw.from("entity_registrations").insert({
         entity_id: entity.id,
         jurisdiction: formation_state,
       });
@@ -310,7 +309,7 @@ export async function POST(request: Request) {
 
     // Auto-create trust_details record for trust entities
     if (type === "trust") {
-      const { error: trustError } = await supabase.from("trust_details").insert({
+      const { error: trustError } = await db.raw.from("trust_details").insert({
         entity_id: entity.id,
         trust_type: "revocable",
         situs_state: formation_state,

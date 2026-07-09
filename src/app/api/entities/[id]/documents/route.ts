@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createHash } from "crypto";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { generateDocumentFilename, getExtension, getCategoryForDocType } from "@/lib/utils/document-naming";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -24,14 +24,14 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     const url = new URL(request.url);
     const limit = Math.min(parseInt(url.searchParams.get("limit") || "200", 10), 500);
     const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
     // Fetch directly-assigned documents
-    const { data: directDocs, error } = await admin
+    const { data: directDocs, error } = await db
       .from("documents")
       .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
       .eq("entity_id", id)
@@ -44,19 +44,19 @@ export async function GET(
     }
 
     // Fetch linked documents via document_entity_links (excluding primary/direct)
-    const directIds = new Set((directDocs || []).map((d) => d.id));
-    const { data: links } = await admin
+    const directIds = new Set((directDocs || []).map((d: { id: string }) => d.id));
+    const { data: links } = await db
       .from("document_entity_links")
       .select("document_id, role")
       .eq("entity_id", id);
 
     const linkedDocIds = (links || [])
-      .map((l) => l.document_id)
-      .filter((docId) => !directIds.has(docId));
+      .map((l: { document_id: string; role: string }) => l.document_id)
+      .filter((docId: string) => !directIds.has(docId));
 
     let linkedDocs: Array<NonNullable<typeof directDocs>[number]> = [];
     if (linkedDocIds.length > 0) {
-      const { data: ld } = await admin
+      const { data: ld } = await db
         .from("documents")
         .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
         .in("id", linkedDocIds)
@@ -74,7 +74,7 @@ export async function GET(
     // Joint-title union: if this entity is a person, also surface documents
     // whose primary is a joint_title entity the person is a member of. This
     // implements spec §5 surfacing rule #2.
-    const { data: entityRow } = await admin
+    const { data: entityRow } = await db
       .from("entities")
       .select("type")
       .eq("id", id)
@@ -83,26 +83,26 @@ export async function GET(
     let jointTitleDocs: JointDoc[] = [];
     const jointTitleMeta = new Map<string, { id: string; name: string }>();
     if (entityRow?.type === "person") {
-      const { data: memberships } = await admin
+      const { data: memberships } = await db.raw
         .from("joint_title_members")
         .select("joint_title_id")
         .eq("person_entity_id", id);
       const jtIds = (memberships || []).map(m => m.joint_title_id);
       if (jtIds.length > 0) {
-        const { data: jtEntities } = await admin
+        const { data: jtEntities } = await db
           .from("entities")
           .select("id, name")
           .in("id", jtIds);
         for (const e of jtEntities || []) jointTitleMeta.set(e.id, { id: e.id, name: e.name });
-        const { data: jtDocs } = await admin
+        const { data: jtDocs } = await db
           .from("documents")
           .select("id, name, document_type, document_category, year, file_path, file_size, mime_type, ai_extracted, ai_extraction, entity_id, direction, notes, created_at, updated_at")
           .in("entity_id", jtIds)
           .is("deleted_at", null)
           .order("created_at", { ascending: false });
         jointTitleDocs = (jtDocs || [])
-          .filter(d => !directIds.has(d.id))
-          .map(d => {
+          .filter((d: { id: string }) => !directIds.has(d.id))
+          .map((d: { id: string; entity_id: string | null; [k: string]: unknown }) => {
             const meta = d.entity_id ? jointTitleMeta.get(d.entity_id) : undefined;
             return { ...d, joint_title_id: meta?.id || "", joint_title_name: meta?.name || "" };
           });
@@ -111,7 +111,7 @@ export async function GET(
 
     // Merge: direct docs first, then joint-title-held, then linked docs with link_role
     const result = [
-      ...(directDocs || []).map((d) => ({ ...d, link_role: null as string | null, joint_title_id: null as string | null, joint_title_name: null as string | null })),
+      ...(directDocs || []).map((d: Record<string, unknown>) => ({ ...d, link_role: null as string | null, joint_title_id: null as string | null, joint_title_name: null as string | null })),
       ...jointTitleDocs.map((d) => ({ ...d, link_role: null as string | null })),
       ...linkedDocs
         .filter((d) => !jointTitleDocs.some(jd => jd.id === d.id))
@@ -141,7 +141,7 @@ export async function POST(
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
     const supabase = await createClient();
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check for ?force=true query param (bypass duplicate check)
     const { searchParams } = new URL(request.url);
@@ -179,7 +179,7 @@ export async function POST(
 
     // Check for duplicate (unless force=true)
     if (!force) {
-      const { data: existing } = await admin
+      const { data: existing } = await db
         .from("documents")
         .select("id, name, entity_id, created_at")
         .eq("content_hash", contentHash)
@@ -190,7 +190,7 @@ export async function POST(
       if (existing) {
         let existingEntityName: string | null = null;
         if (existing.entity_id) {
-          const { data: ent } = await admin
+          const { data: ent } = await db
             .from("entities")
             .select("name")
             .eq("id", existing.entity_id)
@@ -210,7 +210,7 @@ export async function POST(
     }
 
     // Look up entity short_name for canonical filename
-    const { data: entityData } = await admin
+    const { data: entityData } = await db
       .from("entities")
       .select("short_name")
       .eq("id", id)
@@ -221,7 +221,7 @@ export async function POST(
     const parsedYear = year ? parseInt(year) : null;
     const resolvedCategory = documentCategory || getCategoryForDocType(documentType);
 
-    let collisionQuery = admin
+    let collisionQuery = db
       .from("documents")
       .select("id", { count: "exact", head: true })
       .eq("entity_id", id)
@@ -252,7 +252,7 @@ export async function POST(
     // Upload file to Supabase Storage using admin client to bypass RLS
     let filePath = `${id}/${canonicalName}`;
 
-    let uploadError = (await admin.storage
+    let uploadError = (await db.raw.storage
       .from("documents")
       .upload(filePath, arrayBuffer, {
         contentType: file.type,
@@ -263,7 +263,7 @@ export async function POST(
     if (uploadError?.message?.includes("already exists")) {
       const fallbackName = `${canonicalName.replace(extension, '')}_${Date.now()}${extension}`;
       filePath = `${id}/${fallbackName}`;
-      uploadError = (await admin.storage
+      uploadError = (await db.raw.storage
         .from("documents")
         .upload(filePath, arrayBuffer, {
           contentType: file.type,
@@ -280,7 +280,7 @@ export async function POST(
     }
 
     // Create document record using admin client
-    const { data: doc, error: dbError } = await admin
+    const { data: doc, error: dbError } = await db
       .from("documents")
       .insert({
         entity_id: id,
@@ -300,13 +300,13 @@ export async function POST(
 
     if (dbError) {
       // Clean up uploaded file if DB insert fails
-      await admin.storage.from("documents").remove([filePath]);
+      await db.raw.storage.from("documents").remove([filePath]);
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // If relationship_id provided, create junction record
     if (relationshipId) {
-      const { error: junctionError } = await admin
+      const { error: junctionError } = await db.raw
         .from("relationship_documents")
         .insert({
           relationship_id: relationshipId,

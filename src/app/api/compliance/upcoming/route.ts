@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(request: Request) {
@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
     const { searchParams } = new URL(request.url);
     const days = parseInt(searchParams.get("days") || "90", 10);
 
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
     const cutoff = cutoffDate.toISOString().split("T")[0];
 
     // Fetch pending/overdue obligations due within N days (or already overdue)
-    const { data: obligations, error } = await admin
+    const { data: obligations, error } = await db
       .from("compliance_obligations")
       .select("*, entities!inner(id, name, type, formation_state)")
       .eq("entities.organization_id", orgId)
