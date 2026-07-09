@@ -11,6 +11,10 @@ export default function SettingsSecurityPage() {
   // CSR bailout / Suspense requirement on this route).
   const [mfaRequired, setMfaRequired] = useState(false);
   useEffect(() => {
+    // Read a client-only value (window.location) AFTER mount so SSR and the
+    // first client render agree (false → then update) — a lazy useState
+    // initializer would read window on the client and hydration-mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMfaRequired(new URLSearchParams(window.location.search).get("reason") === "mfa_required");
   }, []);
 
