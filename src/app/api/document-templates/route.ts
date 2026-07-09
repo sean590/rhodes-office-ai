@@ -37,7 +37,8 @@ export async function GET() {
       .order("document_type");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET /api/document-templates query:", error);
+      return NextResponse.json({ error: "Failed to load templates" }, { status: 500 });
     }
 
     // Fetch entity count for stats
@@ -145,7 +146,8 @@ export async function POST(request: Request) {
       if (error.code === "23505") {
         return NextResponse.json({ error: "A template for this document type already exists" }, { status: 409 });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("POST /api/document-templates insert:", error);
+      return NextResponse.json({ error: "Failed to create template" }, { status: 500 });
     }
 
     // Backfill to matching entities
@@ -198,7 +200,8 @@ export async function DELETE(request: Request) {
       .eq("id", template_id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("DELETE /api/document-templates delete:", error);
+      return NextResponse.json({ error: "Failed to delete template" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
@@ -238,7 +241,8 @@ export async function PUT(request: Request) {
       .neq("source", "system");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("PUT /api/document-templates update:", error);
+      return NextResponse.json({ error: "Failed to update template" }, { status: 500 });
     }
 
     // Re-apply template to matching entities (add to new matches, remove from non-matches)

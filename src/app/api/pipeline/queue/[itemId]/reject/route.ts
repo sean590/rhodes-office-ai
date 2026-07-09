@@ -57,7 +57,6 @@ export async function POST(
     });
   } catch (err) {
     console.error("POST /api/pipeline/queue/[itemId]/reject error:", err);
-    const message = err instanceof Error ? err.message : "Internal server error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

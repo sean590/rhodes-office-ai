@@ -33,7 +33,8 @@ export async function PUT(
     let trustDetails = fetchResult.data;
 
     if (fetchError) {
-      return NextResponse.json({ error: fetchError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/trust-details fetch:", fetchError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!trustDetails) {
@@ -49,7 +50,8 @@ export async function PUT(
         .single();
 
       if (createError) {
-        return NextResponse.json({ error: createError.message }, { status: 500 });
+        console.error("PUT /api/entities/[id]/trust-details create:", createError);
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
       trustDetails = created;
     }

@@ -31,7 +31,10 @@ export async function GET(request: Request) {
   }
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("GET /api/documents/profiles query:", error);
+    return NextResponse.json({ error: "Failed to load profiles" }, { status: 500 });
+  }
   return NextResponse.json(data);
 }
 
@@ -67,7 +70,10 @@ export async function POST(request: Request) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("POST /api/documents/profiles upsert:", error);
+    return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
+  }
   return NextResponse.json(data, { status: 201 });
 }
 
@@ -106,7 +112,10 @@ export async function PUT(request: Request) {
       ignoreDuplicates: true,
     });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("PUT /api/documents/profiles seed:", error);
+    return NextResponse.json({ error: "Failed to seed profiles" }, { status: 500 });
+  }
   return NextResponse.json({ seeded: rows.length });
 }
 
@@ -127,6 +136,9 @@ export async function DELETE(request: Request) {
     .delete()
     .eq("id", id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("DELETE /api/documents/profiles by id:", error);
+    return NextResponse.json({ error: "Failed to delete profile" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }

@@ -30,7 +30,8 @@ export async function GET(
       if (entityError.code === "PGRST116") {
         return NextResponse.json({ error: "Entity not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: entityError.message }, { status: 500 });
+      console.error("GET /api/entities/[id]/compliance entity query:", entityError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Fetch registrations
@@ -47,7 +48,8 @@ export async function GET(
       .order("next_due_date", { ascending: true, nullsFirst: false });
 
     if (oblError) {
-      return NextResponse.json({ error: oblError.message }, { status: 500 });
+      console.error("GET /api/entities/[id]/compliance obligations query:", oblError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // If no obligations exist yet, auto-sync
@@ -95,7 +97,8 @@ export async function GET(
         .select();
 
       if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
+        console.error("GET /api/entities/[id]/compliance obligations upsert:", insertError);
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
 
       return NextResponse.json({

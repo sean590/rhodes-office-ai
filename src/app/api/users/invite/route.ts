@@ -53,7 +53,7 @@ export async function POST(request: Request) {
 
     if (inviteError) {
       console.error("Invite error:", inviteError);
-      return NextResponse.json({ error: inviteError.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to send invite" }, { status: 500 });
     }
 
     // Pre-create their user_profile with the chosen role so they get it on first login

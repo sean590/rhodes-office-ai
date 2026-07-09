@@ -35,7 +35,8 @@ export async function GET(
       if (entityError.code === "PGRST116") {
         return NextResponse.json({ error: "Entity not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: entityError.message }, { status: 500 });
+      console.error("GET /api/entities/[id] entity query:", entityError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Fetch all related data in parallel
@@ -181,7 +182,8 @@ export async function GET(
         .eq("trust_detail_id", trustDetailsRes.data.id);
 
       if (rolesError) {
-        return NextResponse.json({ error: rolesError.message }, { status: 500 });
+        console.error("GET /api/entities/[id] trust roles query:", rolesError);
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
       trustRoles = roles || [];
     }
@@ -459,11 +461,9 @@ export async function PUT(
           { status: 409 }
         );
       }
-      // Surface the actual Postgres error (code + message) so client devtools
-      // shows something diagnostic instead of a bare 500.
       console.error("PUT /api/entities/[id] update error:", error);
       return NextResponse.json(
-        { error: `Database error${error.code ? ` (${error.code})` : ""}: ${error.message || "unknown"}` },
+        { error: "Failed to update entity" },
         { status: 500 }
       );
     }

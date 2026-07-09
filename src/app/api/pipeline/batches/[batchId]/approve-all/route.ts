@@ -73,13 +73,17 @@ export async function POST(
             });
             return { item, success: r.success, error: r.error };
           } catch (err) {
-            return { item, success: false, error: err instanceof Error ? err.message : String(err) };
+            console.error(`POST /api/pipeline/batches/[batchId]/approve-all ingest item ${item.id}:`, err);
+            return { item, success: false, error: "Ingest failed" };
           }
         }),
       );
       for (const o of outcomes) {
         if (o.success) results.approved++;
-        else results.errors.push(`${o.item.id}: ${o.error}`);
+        else {
+          if (o.error) console.error(`POST /api/pipeline/batches/[batchId]/approve-all item ${o.item.id} failed:`, o.error);
+          results.errors.push(`${o.item.id}: Ingest failed`);
+        }
       }
     }
 

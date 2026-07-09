@@ -50,7 +50,8 @@ export async function GET(
       .order("created_at");
 
     if (itemsError) {
-      return NextResponse.json({ error: itemsError.message }, { status: 500 });
+      console.error("GET /api/pipeline/batches/[batchId] items query:", itemsError);
+      return NextResponse.json({ error: "Failed to load batch items" }, { status: 500 });
     }
     const items = (rawItems || []) as QItem[];
 

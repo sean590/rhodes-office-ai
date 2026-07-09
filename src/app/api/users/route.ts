@@ -23,7 +23,8 @@ export async function GET() {
       .order("joined_at", { ascending: true });
 
     if (membersError) {
-      return NextResponse.json({ error: membersError.message }, { status: 500 });
+      console.error("GET /api/users members query:", membersError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!orgMembers || orgMembers.length === 0) {

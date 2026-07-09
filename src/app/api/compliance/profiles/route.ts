@@ -25,7 +25,10 @@ export async function GET(request: Request) {
   }
 
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("GET /api/compliance/profiles query:", error);
+    return NextResponse.json({ error: "Failed to load profiles" }, { status: 500 });
+  }
   return NextResponse.json(data);
 }
 
@@ -57,7 +60,10 @@ export async function POST(request: Request) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("POST /api/compliance/profiles upsert:", error);
+    return NextResponse.json({ error: "Failed to save profile" }, { status: 500 });
+  }
   return NextResponse.json(data, { status: 201 });
 }
 
@@ -94,6 +100,9 @@ export async function PUT(request: Request) {
     .from("compliance_profiles")
     .upsert(rows, { onConflict: "organization_id,entity_type_scope,rule_id", ignoreDuplicates: true });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("PUT /api/compliance/profiles seed:", error);
+    return NextResponse.json({ error: "Failed to seed profiles" }, { status: 500 });
+  }
   return NextResponse.json({ seeded: rows.length });
 }

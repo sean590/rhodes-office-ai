@@ -205,7 +205,7 @@ export async function POST(request: Request) {
     if (uploadError) {
       console.error("Storage upload error:", uploadError);
       return NextResponse.json(
-        { error: `Storage upload failed: ${uploadError.message}` },
+        { error: "Storage upload failed" },
         { status: 500 }
       );
     }
@@ -230,8 +230,9 @@ export async function POST(request: Request) {
       .single();
 
     if (dbError) {
+      console.error("POST /api/documents insert:", dbError);
       await db.raw.storage.from("documents").remove([filePath]);
-      return NextResponse.json({ error: dbError.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to save document" }, { status: 500 });
     }
 
     // Check document completeness expectations

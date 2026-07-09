@@ -40,8 +40,8 @@ export async function GET(
       .order("document_type");
 
     if (error) {
-      console.error("GET expectations error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET expectations error:", error);
+      return NextResponse.json({ error: "Failed to load expectations" }, { status: 500 });
     }
 
     return NextResponse.json(data || []);
@@ -79,7 +79,7 @@ export async function POST(
         await recheckEntityExpectations(id);
       } catch (refreshErr) {
         console.error("Expectations refresh error:", refreshErr);
-        return NextResponse.json({ error: String(refreshErr) }, { status: 500 });
+        return NextResponse.json({ error: "Failed to refresh expectations" }, { status: 500 });
       }
       return NextResponse.json({ success: true });
     }
@@ -111,7 +111,10 @@ export async function POST(
         .select()
         .single();
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        console.error("POST /api/entities/[id]/expectations add:", error);
+        return NextResponse.json({ error: "Failed to add expectation" }, { status: 500 });
+      }
 
       const reqHeaders = await headers();
       const reqCtx = getRequestContext(reqHeaders, orgId);

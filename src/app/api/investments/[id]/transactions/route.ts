@@ -460,7 +460,7 @@ export async function PATCH(
 
     if (updateErr) {
       console.error("PATCH transaction update error:", updateErr);
-      return NextResponse.json({ error: updateErr.message || "Internal server error" }, { status: 500 });
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Audit log — same shape as the investment PATCH route, with full

@@ -13,7 +13,10 @@ export async function GET() {
     .select("*")
     .order("created_at", { ascending: false });
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("GET /api/compliance/overrides query:", error);
+    return NextResponse.json({ error: "Failed to load overrides" }, { status: 500 });
+  }
   return NextResponse.json(data);
 }
 
@@ -48,7 +51,10 @@ export async function POST(request: Request) {
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("POST /api/compliance/overrides insert:", error);
+    return NextResponse.json({ error: "Failed to save override" }, { status: 500 });
+  }
   return NextResponse.json(data, { status: 201 });
 }
 
@@ -67,13 +73,19 @@ export async function DELETE(request: Request) {
       .from("org_compliance_overrides")
       .delete()
       .eq("id", id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      console.error("DELETE /api/compliance/overrides by id:", error);
+      return NextResponse.json({ error: "Failed to delete override" }, { status: 500 });
+    }
   } else if (ruleId) {
     const { error } = await admin
       .from("org_compliance_overrides")
       .delete()
       .eq("rule_id", ruleId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      console.error("DELETE /api/compliance/overrides by rule_id:", error);
+      return NextResponse.json({ error: "Failed to delete override" }, { status: 500 });
+    }
   } else {
     return NextResponse.json({ error: "id or rule_id is required" }, { status: 400 });
   }

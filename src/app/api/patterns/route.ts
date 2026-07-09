@@ -25,8 +25,8 @@ export async function GET() {
       .order("confidence", { ascending: false });
 
     if (error) {
-      console.error("GET patterns error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET patterns error:", error);
+      return NextResponse.json({ error: "Failed to load patterns" }, { status: 500 });
     }
 
     // Get entity names for display

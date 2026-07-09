@@ -41,7 +41,8 @@ export async function PUT(
           { status: 404 }
         );
       }
-      return NextResponse.json({ error: oblError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/compliance/[obligationId] obligation fetch:", oblError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const updates: Record<string, unknown> = {
@@ -160,7 +161,8 @@ export async function PUT(
       .single();
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/compliance/[obligationId] update:", updateError);
+      return NextResponse.json({ error: "Failed to update obligation" }, { status: 500 });
     }
 
     const reqHeaders = await headers();

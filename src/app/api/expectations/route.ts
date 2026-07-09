@@ -25,7 +25,8 @@ export async function GET() {
       .order("document_type");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET /api/expectations query:", error);
+      return NextResponse.json({ error: "Failed to load expectations" }, { status: 500 });
     }
 
     // Fetch entity names for grouping

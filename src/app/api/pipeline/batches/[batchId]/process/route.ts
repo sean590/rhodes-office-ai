@@ -49,7 +49,8 @@ export async function POST(
       .select("id");
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      console.error("POST /api/pipeline/batches/[batchId]/process queue update:", updateError);
+      return NextResponse.json({ error: "Failed to queue batch items" }, { status: 500 });
     }
 
     const queuedCount = items?.length || 0;

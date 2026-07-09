@@ -42,7 +42,8 @@ export async function POST(
       .single();
 
     if (defError) {
-      return NextResponse.json({ error: defError.message }, { status: 500 });
+      console.error("POST /api/entities/[id]/custom-fields definition insert:", defError);
+      return NextResponse.json({ error: "Failed to create custom field" }, { status: 500 });
     }
 
     // If an initial value is provided, create the value record
@@ -121,7 +122,8 @@ export async function PUT(
           { status: 404 }
         );
       }
-      return NextResponse.json({ error: defError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/custom-fields definition lookup:", defError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const valueColumns = getValueColumns(fieldDef.field_type, value);

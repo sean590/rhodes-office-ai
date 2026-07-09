@@ -37,7 +37,8 @@ export async function POST(
       .maybeSingle();
 
     if (trustError) {
-      return NextResponse.json({ error: trustError.message }, { status: 500 });
+      console.error("POST /api/entities/[id]/trust-roles trust lookup:", trustError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!trustDetails) {
@@ -118,7 +119,8 @@ export async function DELETE(
       .maybeSingle();
 
     if (trustError) {
-      return NextResponse.json({ error: trustError.message }, { status: 500 });
+      console.error("DELETE /api/entities/[id]/trust-roles trust lookup:", trustError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     if (!trustDetails) {
