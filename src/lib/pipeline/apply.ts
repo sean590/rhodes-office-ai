@@ -4,7 +4,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getRuleById, calculateNextDueDateAfterCompletion } from "@/lib/utils/compliance-engine";
+import { getRuleById, calculateNextDueDateAfterCompletion, advanceDateByFrequency } from "@/lib/utils/compliance-engine";
 import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
 import { invalidateOrgCaches } from "@/lib/utils/chat-context";
 import { logAuditEvent } from "@/lib/utils/audit";
@@ -943,26 +943,13 @@ export async function applyActions(
               );
             }
           } else if (obligationFrequency !== "one_time" && obligationFrequency !== "continuous") {
-            // Ad-hoc obligation with a frequency hint — roll the due date
-            // forward by that frequency. Same calculation the rule-based
-            // path uses, but the rule object is synthesized inline.
-            const synthesizedRule = {
-              id: `ad_hoc_${obligationId}`,
-              frequency: obligationFrequency,
-              // calculateNextDueDateAfterCompletion expects these but they
-              // don't affect the next-due math for most frequencies.
-              jurisdiction: currentObligation.jurisdiction as string,
-              obligation_type: currentObligation.obligation_type as string,
-              name: currentObligation.name as string,
-              description: currentObligation.description as string | null,
-              fee: currentObligation.fee_description as string | null,
-              form_number: currentObligation.form_number as string | null,
-              portal_url: currentObligation.portal_url as string | null,
-              filed_with: currentObligation.filed_with as string | null,
-              penalty_description: currentObligation.penalty_description as string | null,
-            };
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            nextDueDate = calculateNextDueDateAfterCompletion(synthesizedRule as any, proposedCompletedAt, null);
+            // Ad-hoc obligation (no rule_id → no due-date formula): roll the
+            // current cycle's due date forward by the frequency interval,
+            // anchored on the existing due date so the cadence stays stable
+            // (anchoring on the completion date rolls an early filing back to
+            // the same overdue cycle). Mirrors the compliance PUT route.
+            const anchor = (currentObligation.next_due_date as string | null) || proposedCompletedAt;
+            nextDueDate = advanceDateByFrequency(anchor, obligationFrequency);
           }
 
           // Advance the existing row in place. If there's a next cycle,

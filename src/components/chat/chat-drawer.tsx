@@ -1789,6 +1789,12 @@ function DrawerMessages({
                   sessionId={msg.session_id}
                   metadata={meta!}
                   onActionsApplied={(summary) => {
+                    // The agent just mutated org data (completed an obligation,
+                    // filed a doc, etc.). Broadcast so open surfaces (e.g. the
+                    // home queue) refetch instead of showing a stale snapshot.
+                    if (summary.applied > 0 && typeof window !== "undefined") {
+                      window.dispatchEvent(new CustomEvent("rhodes:data-changed"));
+                    }
                     const confirmText = summary.failed > 0
                       ? `Applied ${summary.applied} action${summary.applied !== 1 ? "s" : ""}, ${summary.failed} failed.`
                       : summary.applied > 0

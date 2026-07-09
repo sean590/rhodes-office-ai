@@ -30,8 +30,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
+    // The home "needs you" queue is action-driven — a completion (via the
+    // page or the chat agent) must disappear immediately. A 5-min cache made
+    // completed obligations linger as "overdue" even across a hard refresh, so
+    // this endpoint must never be cached.
     return NextResponse.json({ obligations: obligations || [] }, {
-      headers: { "Cache-Control": "private, max-age=300" },
+      headers: { "Cache-Control": "no-store" },
     });
   } catch (err) {
     console.error("GET /api/compliance/upcoming error:", err);

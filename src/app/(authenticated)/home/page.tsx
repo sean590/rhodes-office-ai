@@ -171,12 +171,15 @@ export default function HomePage() {
 
   const fetchAll = useCallback(async () => {
     try {
+      // no-store: the home queue is live — an action elsewhere (chat agent,
+      // another tab) must reflect on the next load, never a cached snapshot.
+      const noStore = { cache: "no-store" as const };
       const [meRes, sRes, qRes, cRes, aRes] = await Promise.all([
-        fetch("/api/auth/me"),
-        fetch("/api/home/staged"),
-        fetch("/api/pipeline/queue?status=review_ready&limit=100"),
-        fetch("/api/compliance/upcoming"),
-        fetch("/api/audit?limit=60").catch(() => null),
+        fetch("/api/auth/me", noStore),
+        fetch("/api/home/staged", noStore),
+        fetch("/api/pipeline/queue?status=review_ready&limit=100", noStore),
+        fetch("/api/compliance/upcoming", noStore),
+        fetch("/api/audit?limit=60", noStore).catch(() => null),
       ]);
       if (meRes.ok) setUserId((await meRes.json())?.id ?? null);
       if (sRes.ok) setStaged(await sRes.json());
@@ -190,6 +193,15 @@ export default function HomePage() {
     }
   }, []);
   useEffect(() => { fetchAll(); }, [fetchAll]);
+
+  // The chat agent can mutate the same data this queue shows (complete an
+  // obligation, file a doc). It broadcasts "rhodes:data-changed" on apply, so
+  // refetch here rather than making the user reload to clear a stale row.
+  useEffect(() => {
+    const onChanged = () => fetchAll();
+    window.addEventListener("rhodes:data-changed", onChanged);
+    return () => window.removeEventListener("rhodes:data-changed", onChanged);
+  }, [fetchAll]);
 
   const setBusyFor = (k: string, v: boolean) => setBusy((b) => ({ ...b, [k]: v }));
 
