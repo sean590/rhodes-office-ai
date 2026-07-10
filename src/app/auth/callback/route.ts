@@ -55,10 +55,12 @@ export async function GET(request: Request) {
             .eq("id", data.user.id);
         }
 
-        if (next) {
-          return setFreshSessionCookies(NextResponse.redirect(`${origin}${next}`));
-        }
-        return setFreshSessionCookies(NextResponse.redirect(`${origin}/home`));
+        // OAuth just established an aal1 session. If the user has MFA enrolled,
+        // route through the challenge BEFORE the app renders — otherwise the
+        // client-side MfaGate redirects after paint and the user sees /home
+        // flash for a beat before the OTP prompt appears.
+        const dest = await mfaAwareDestination(supabase, next || "/home");
+        return setFreshSessionCookies(NextResponse.redirect(`${origin}${dest}`));
       }
 
       // 2. Check for pending invite by email
@@ -96,6 +98,30 @@ export async function GET(request: Request) {
 
   // Auth error — redirect back to login
   return NextResponse.redirect(`${origin}/login`);
+}
+
+/**
+ * Post-OAuth the session is aal1. If the user has a verified MFA factor, send
+ * them to /auth/mfa (the challenge) before the app renders, so /home never
+ * paints behind the OTP prompt. Falls back to the intended path on any error —
+ * the client MfaGate remains the backstop.
+ */
+async function mfaAwareDestination(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  intended: string,
+): Promise<string> {
+  try {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal?.currentLevel === "aal2") return intended; // already stepped up
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    const hasVerified =
+      (factors?.totp ?? []).some((f) => f.status === "verified") ||
+      (factors?.phone ?? []).some((f) => f.status === "verified");
+    if (hasVerified) return `/auth/mfa?next=${encodeURIComponent(intended)}`;
+  } catch {
+    /* non-fatal — MfaGate backstops on the client */
+  }
+  return intended;
 }
 
 /** Create users + user_profiles records if they don't exist yet */
