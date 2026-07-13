@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { applyActions } from "@/lib/pipeline/apply";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError } from "@/lib/utils/org-context";
@@ -15,7 +15,7 @@ export async function POST(
     const { orgId, user } = ctx;
 
     const { id } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
     const { actions, action_indices, dismiss_all } = body;
 
@@ -24,11 +24,10 @@ export async function POST(
     }
 
     // Get current document to preserve existing ai_extraction data
-    const { data: doc, error: docError } = await admin
+    const { data: doc, error: docError } = await db
       .from("documents")
       .select("ai_extraction, entity_id")
       .eq("id", id)
-      .eq("organization_id", orgId)
       .single();
 
     if (docError) {
@@ -62,7 +61,7 @@ export async function POST(
 
     const previousResults = (existingExtraction.applied_results || []) as unknown[];
 
-    await admin
+    await db
       .from("documents")
       .update({
         ...docUpdate,

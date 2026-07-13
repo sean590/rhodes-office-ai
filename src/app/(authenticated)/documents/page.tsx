@@ -7,12 +7,14 @@ import { Card } from "@/components/ui/card";
 // StatCard available for future use
 // import { StatCard } from "@/components/ui/stat-card";
 import { Button } from "@/components/ui/button";
-import { DocIcon, SearchIcon, XIcon, SparkleIcon, PlusIcon, DownIcon } from "@/components/ui/icons";
+import { DocIcon, SearchIcon, XIcon, SparkleIcon, DownIcon, ChatIcon } from "@/components/ui/icons";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_LABELS } from "@/lib/constants";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { useCan } from "@/components/authz/role-provider";
+import { SuggestedSends } from "@/components/entities/SuggestedSends";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
@@ -66,6 +68,7 @@ function getDocCategory(docType: DocumentType): string {
 export default function DocumentsPage() {
   const router = useRouter();
   const isMobile = useIsMobile();
+  const canDelete = useCan("records:delete");
   const [documents, setDocuments] = useState<DocWithEntity[]>([]);
   const [entities, setEntities] = useState<EntityBasic[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,16 +95,6 @@ export default function DocumentsPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [pipelineBatchId, setPipelineBatchId] = useState<string | null>(null);
   const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
-
-  // AI processing state
-  const [processingId, setProcessingId] = useState<string | null>(null);
-  const [processResult, setProcessResult] = useState<{
-    docId: string;
-    count: number;
-    entityId: string | null;
-    actions: Array<{ action: string; data: Record<string, unknown>; reason?: string; confidence?: string }>;
-  } | null>(null);
-  const [applyingEntity, setApplyingEntity] = useState(false);
 
   /* ---- Fetch all documents + entities list ---- */
   const fetchAll = useCallback(async () => {
@@ -189,96 +182,9 @@ export default function DocumentsPage() {
 
   /* ---- Stats ---- */
 
-  /* ---- AI Process ---- */
-  const handleProcess = async (docId: string) => {
-    setProcessingId(docId);
-    try {
-      const res = await fetch(`/api/documents/${docId}/process`, { method: "POST" });
-      if (res.ok) {
-        const result = await res.json();
-        const actions = result.actions || [];
-        // Use entity_id from AI response (auto-associated), falling back to doc's existing entity
-        const doc = documents.find((d) => d.id === docId);
-        const entityId = result.entity_id || doc?.entity_id || null;
-        setProcessResult({
-          docId,
-          count: actions.length,
-          entityId,
-          actions,
-        });
-      }
-      fetchAll();
-    } catch (err) {
-      console.error("Process error:", err);
-    } finally {
-      setProcessingId(null);
-    }
-  };
-
-  /* ---- Create entity only + redirect to review remaining changes ---- */
-  const handleCreateAndRedirect = async () => {
-    if (!processResult) return;
-    setApplyingEntity(true);
-    try {
-      const createActionIndex = processResult.actions.findIndex((a) => a.action === "create_entity");
-      const createAction = createActionIndex >= 0 ? processResult.actions[createActionIndex] : null;
-
-      if (createAction) {
-        // Only apply the create_entity action — everything else stays for review
-        const res = await fetch(`/api/documents/${processResult.docId}/apply`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ actions: [createAction], action_indices: [createActionIndex] }),
-        });
-
-        if (!res.ok) throw new Error("Failed to create entity");
-        const result = await res.json();
-
-        const createdEntity = result.results?.find(
-          (r: { action: string; success: boolean; data?: { id?: string } }) =>
-            r.action === "create_entity" && r.success && r.data?.id
-        );
-
-        if (createdEntity?.data?.id) {
-          router.push(`/entities/${createdEntity.data.id}?tab=documents`);
-          return;
-        }
-      }
-
-      // AI identified an existing entity (auto-associated by process endpoint)
-      if (processResult.entityId) {
-        router.push(`/entities/${processResult.entityId}?tab=documents`);
-        return;
-      }
-
-      // No create_entity action and no identified entity — try update_entity actions
-      const updateAction = processResult.actions.find((a) => a.action === "update_entity");
-      const entityId = updateAction?.data?.entity_id as string | undefined;
-      if (entityId) {
-        router.push(`/entities/${entityId}?tab=documents`);
-        return;
-      }
-
-      // Fallback
-      setProcessResult(null);
-      fetchAll();
-    } catch (err) {
-      console.error("Create error:", err);
-    } finally {
-      setApplyingEntity(false);
-    }
-  };
-
   /* ---- Download ---- */
-  const handleDownload = async (docId: string) => {
-    try {
-      const res = await fetch(`/api/documents/${docId}/download`);
-      if (!res.ok) throw new Error("Download failed");
-      const data = await res.json();
-      window.open(data.url, "_blank");
-    } catch (err) {
-      console.error("Download error:", err);
-    }
+  const handleDownload = (docId: string) => {
+    window.open(`/api/documents/${docId}/download`, "_blank");
   };
 
   /* ---- Delete ---- */
@@ -353,236 +259,20 @@ export default function DocumentsPage() {
             All documents across entities
           </p>
         </div>
-        <Button
-          variant="primary"
-          onClick={async () => {
-            if (showUpload) {
-              setShowUpload(false);
-              setPipelineBatchId(null);
-              setPipelinePhase("upload");
-              return;
-            }
-            // Create a new pipeline batch
-            try {
-              const res = await fetch("/api/pipeline/batches", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ context: "global" }),
-              });
-              if (res.ok) {
-                const batch = await res.json();
-                setPipelineBatchId(batch.id);
-                setShowUpload(true);
-              }
-            } catch { /* ignore */ }
+        <button
+          onClick={() => { window.dispatchEvent(new CustomEvent("rhodes:open-chat")); }}
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+            borderRadius: 7, border: "1px solid #ddd9d0", background: "none",
+            cursor: "pointer", color: "#6b6b76", fontSize: 13, fontWeight: 500,
           }}
         >
-          <PlusIcon size={14} /> {isMobile ? "Upload" : "Upload Documents"}
-        </Button>
+          <ChatIcon size={14} /> Upload via chat
+        </button>
       </div>
 
-      {/* AI Processing Banner */}
-      {processingId && (
-        <div
-          style={{
-            background: "rgba(45,90,61,0.06)",
-            border: "1px solid rgba(45,90,61,0.2)",
-            borderRadius: 10,
-            padding: "12px 16px",
-            marginBottom: 16,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            fontSize: 13,
-            color: "#2d5a3d",
-          }}
-        >
-          <SparkleIcon size={16} />
-          <span>Processing document with AI...</span>
-          <span
-            style={{
-              display: "inline-block",
-              width: 14,
-              height: 14,
-              border: "2px solid rgba(45,90,61,0.3)",
-              borderTopColor: "#2d5a3d",
-              borderRadius: "50%",
-              animation: "spin 1s linear infinite",
-            }}
-          />
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-        </div>
-      )}
-
-      {/* AI Result Banner */}
-      {processResult && (() => {
-        const createEntityAction = processResult.actions.find((a) => a.action === "create_entity");
-        const hasEntity = !!processResult.entityId;
-        const proposedEntityName = (createEntityAction?.data?.name as string) || "New Entity";
-        const otherCount = processResult.count - (createEntityAction ? 1 : 0);
-
-        // If document is associated with an entity (either already had one, or AI identified one)
-        if (hasEntity) {
-          return (
-            <div
-              style={{
-                background: "rgba(45,90,61,0.06)",
-                border: "1px solid rgba(45,90,61,0.2)",
-                borderRadius: 10,
-                padding: "12px 16px",
-                marginBottom: 16,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                fontSize: 13,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#2d5a3d" }}>
-                <SparkleIcon size={16} />
-                <span>
-                  {processResult.count > 0
-                    ? <>AI found <strong>{processResult.count}</strong> proposed change{processResult.count !== 1 ? "s" : ""}. Document linked to entity.</>
-                    : <>Analysis complete. Document linked to entity — no changes needed.</>
-                  }
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <Link
-                  href={`/entities/${processResult.entityId}?tab=documents`}
-                  style={{
-                    padding: "5px 12px",
-                    background: "#2d5a3d",
-                    color: "#fff",
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    textDecoration: "none",
-                  }}
-                >
-                  {processResult.count > 0 ? "Review on Entity Page" : "View Entity"}
-                </Link>
-                <button
-                  onClick={() => setProcessResult(null)}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "#6b6b76", padding: 2 }}
-                >
-                  <XIcon size={12} />
-                </button>
-              </div>
-            </div>
-          );
-        }
-
-        // Unassociated document — show proposed entity + apply button
-        return (
-          <Card style={{ marginBottom: 16, padding: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <SparkleIcon size={18} />
-              <span style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f" }}>
-                AI Analysis Complete
-              </span>
-              <span style={{ fontSize: 12, color: "#6b6b76" }}>
-                {processResult.count} proposed change{processResult.count !== 1 ? "s" : ""}
-              </span>
-            </div>
-
-            {createEntityAction && (
-              <div
-                style={{
-                  background: "#fafaf7",
-                  border: "1px solid #ddd9d0",
-                  borderRadius: 8,
-                  padding: "12px 16px",
-                  marginBottom: 12,
-                }}
-              >
-                <div style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Create New Entity
-                </div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>
-                  {proposedEntityName}
-                </div>
-                <div style={{ fontSize: 12, color: "#6b6b76", display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  {createEntityAction.data?.type ? (
-                    <span>Type: <strong>{String(createEntityAction.data.type).replace(/_/g, " ")}</strong></span>
-                  ) : null}
-                  {createEntityAction.data?.formation_state ? (
-                    <span>State: <strong>{String(createEntityAction.data.formation_state)}</strong></span>
-                  ) : null}
-                  {createEntityAction.data?.ein ? (
-                    <span>EIN: <strong>{String(createEntityAction.data.ein)}</strong></span>
-                  ) : null}
-                </div>
-                {createEntityAction.reason && (
-                  <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6, fontStyle: "italic" }}>
-                    {createEntityAction.reason}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {otherCount > 0 && (
-              <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 12 }}>
-                Plus <strong>{otherCount}</strong> other change{otherCount !== 1 ? "s" : ""} (members, managers, registrations, etc.) to review on the entity page.
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={handleCreateAndRedirect}
-                disabled={applyingEntity}
-                style={{
-                  padding: "8px 16px",
-                  background: "#2d5a3d",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 6,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: applyingEntity ? "wait" : "pointer",
-                  fontFamily: "inherit",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {applyingEntity ? (
-                  <>
-                    <span
-                      style={{
-                        display: "inline-block",
-                        width: 12,
-                        height: 12,
-                        border: "2px solid rgba(255,255,255,0.3)",
-                        borderTopColor: "#fff",
-                        borderRadius: "50%",
-                        animation: "spin 1s linear infinite",
-                      }}
-                    />
-                    Creating...
-                  </>
-                ) : (
-                  <>Create Entity & Review Changes</>
-                )}
-              </button>
-              <button
-                onClick={() => setProcessResult(null)}
-                style={{
-                  padding: "8px 16px",
-                  background: "none",
-                  border: "1px solid #ddd9d0",
-                  borderRadius: 6,
-                  fontSize: 13,
-                  color: "#6b6b76",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Dismiss
-              </button>
-            </div>
-          </Card>
-        );
-      })()}
+      {/* Proactive "Suggested sends" — renders nothing when there's nothing to suggest */}
+      <SuggestedSends onSent={() => fetchAll()} />
 
       {/* Pipeline Upload */}
       {showUpload && pipelineBatchId && (
@@ -882,6 +572,21 @@ export default function DocumentsPage() {
                       >
                         {doc.entity_name}
                       </Link>
+                    ) : doc.investment_id && doc.investment_name ? (
+                      <Link
+                        href={`/investments/${doc.investment_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          color: "#7b4db5",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`Investment: ${doc.investment_name}`}
+                      >
+                        {doc.investment_name}
+                      </Link>
                     ) : (
                       <span style={{ fontStyle: "italic" }}>Unassigned</span>
                     )}
@@ -1018,27 +723,6 @@ export default function DocumentsPage() {
                       {/* Action buttons */}
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleProcess(doc.id); }}
-                          disabled={processingId === doc.id}
-                          style={{
-                            background: "none",
-                            border: "1px solid #e8e6df",
-                            borderRadius: 6,
-                            padding: "5px 12px",
-                            cursor: processingId === doc.id ? "wait" : "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 5,
-                            fontSize: 12,
-                            color: "#c47520",
-                            fontWeight: 500,
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          <SparkleIcon size={12} />
-                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process" : "AI Process"}
-                        </button>
-                        <button
                           onClick={(e) => { e.stopPropagation(); handleDownload(doc.id); }}
                           style={{
                             background: "none",
@@ -1054,6 +738,7 @@ export default function DocumentsPage() {
                         >
                           Download
                         </button>
+                        {canDelete && (
                         <button
                           onClick={(e) => { e.stopPropagation(); handleDelete(doc.id); }}
                           style={{
@@ -1070,6 +755,7 @@ export default function DocumentsPage() {
                         >
                           Delete
                         </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -1148,7 +834,9 @@ export default function DocumentsPage() {
                       )}
                     </div>
 
-                    {/* Entity link */}
+                    {/* Entity link, or fall back to investment if doc is
+                        only investment-linked (common for investment
+                        correspondence where there's no specific investor). */}
                     {doc.entity_id ? (
                       <Link
                         href={`/entities/${doc.entity_id}`}
@@ -1163,6 +851,22 @@ export default function DocumentsPage() {
                         }}
                       >
                         {doc.entity_name}
+                      </Link>
+                    ) : doc.investment_id && doc.investment_name ? (
+                      <Link
+                        href={`/investments/${doc.investment_id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          fontSize: 12,
+                          color: "#7b4db5",
+                          textDecoration: "none",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`Investment: ${doc.investment_name}`}
+                      >
+                        {doc.investment_name}
                       </Link>
                     ) : (
                       <span style={{ fontSize: 12, color: "#9494a0", fontStyle: "italic" }}>
@@ -1312,27 +1016,6 @@ export default function DocumentsPage() {
                       {/* Action buttons */}
                       <div style={{ display: "flex", gap: 8 }}>
                         <button
-                          onClick={() => handleProcess(doc.id)}
-                          disabled={processingId === doc.id}
-                          style={{
-                            background: "none",
-                            border: "1px solid #e8e6df",
-                            borderRadius: 6,
-                            padding: "5px 12px",
-                            cursor: processingId === doc.id ? "wait" : "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 5,
-                            fontSize: 12,
-                            color: "#c47520",
-                            fontWeight: 500,
-                            fontFamily: "inherit",
-                          }}
-                        >
-                          <SparkleIcon size={12} />
-                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
-                        </button>
-                        <button
                           onClick={() => handleDownload(doc.id)}
                           style={{
                             background: "none",
@@ -1348,6 +1031,7 @@ export default function DocumentsPage() {
                         >
                           Download
                         </button>
+                        {canDelete && (
                         <button
                           onClick={() => handleDelete(doc.id)}
                           style={{
@@ -1364,6 +1048,7 @@ export default function DocumentsPage() {
                         >
                           Delete
                         </button>
+                        )}
                       </div>
                     </div>
                   )}

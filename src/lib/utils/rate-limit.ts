@@ -1,13 +1,15 @@
 import { Redis } from "@upstash/redis";
+import { KV_REST_API_URL, KV_REST_API_TOKEN } from "@/lib/utils/kv-env";
 
 let redis: Redis | null = null;
 
 function getRedis(): Redis | null {
-  if (!process.env.KV_REST_API_URL || !process.env.KV_REST_API_TOKEN) return null;
+  if (!KV_REST_API_URL || !KV_REST_API_TOKEN) return null;
   if (!redis) {
     redis = new Redis({
-      url: process.env.KV_REST_API_URL,
-      token: process.env.KV_REST_API_TOKEN,
+      url: KV_REST_API_URL,
+      token: KV_REST_API_TOKEN,
+      retry: false, // fail fast on unreachable Redis (default retries 5x w/ ~5s backoff); caller fails open
     });
   }
   return redis;
@@ -15,16 +17,22 @@ function getRedis(): Redis | null {
 
 /**
  * Distributed rate limiter backed by Upstash Redis.
- * Falls back to allowing requests if Redis is unavailable.
  * Returns true if allowed, false if rate limited.
+ *
+ * Fail behavior when Redis is unavailable/errors is controlled by `failClosed`:
+ *  - default (false): fail OPEN — allow the request (availability over strictness).
+ *  - failClosed: true: fail CLOSED — DENY the request. Use for public/unauthenticated
+ *    and auth-sensitive endpoints (share/download, login), where a Redis outage must
+ *    not become an open door.
  */
 export async function rateLimit(
   key: string,
   limit: number,
-  windowMs: number
+  windowMs: number,
+  opts: { failClosed?: boolean } = {}
 ): Promise<boolean> {
   const client = getRedis();
-  if (!client) return true;
+  if (!client) return !opts.failClosed;
 
   try {
     const windowSec = Math.ceil(windowMs / 1000);
@@ -37,7 +45,7 @@ export async function rateLimit(
 
     return count <= limit;
   } catch (err) {
-    console.error("[RATE-LIMIT] Redis error, allowing request:", err);
-    return true;
+    console.error(`[RATE-LIMIT] Redis error, ${opts.failClosed ? "DENYING" : "allowing"} request:`, err);
+    return !opts.failClosed;
   }
 }

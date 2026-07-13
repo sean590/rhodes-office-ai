@@ -1,6 +1,20 @@
+/**
+ * @deprecated Superseded by /api/documents/overrides and /api/documents/profiles
+ * (PR 4 of the compliance redesign). The refreshEntityExpectations engine no
+ * longer reads from document_expectation_templates, so writes through this
+ * route have no effect on entity expectations. No frontend code calls it as
+ * of PR 4.4a. Kept for one release cycle as a rollback fallback, then deleted
+ * along with the underlying table.
+ *
+ * Only remaining caller: the inference engine's "promote pattern to template"
+ * action (lib/utils/inference-engine.ts). That path needs rewiring to write
+ * to document_profiles — tracked as part of the inference engine activation
+ * (original spec's PR 6).
+ */
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireSensitive } from "@/lib/utils/aal";
 import { applyTemplate, ALL_SYSTEM_DEFAULTS } from "@/lib/utils/document-expectations";
 
 /**
@@ -13,25 +27,24 @@ export async function GET() {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Fetch templates
-    const { data: templates, error } = await admin
+    const { data: templates, error } = await db
       .from("document_expectation_templates")
       .select("*")
-      .eq("organization_id", orgId)
       .order("document_category")
       .order("document_type");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET /api/document-templates query:", error);
+      return NextResponse.json({ error: "Failed to load templates" }, { status: 500 });
     }
 
     // Fetch entity count for stats
-    const { count: entityCount } = await admin
+    const { count: entityCount } = await db
       .from("entities")
       .select("id", { count: "exact", head: true })
-      .eq("organization_id", orgId)
       .neq("status", "deleted");
 
     // Fetch expectation stats per template
@@ -39,7 +52,7 @@ export async function GET() {
     const stats: Record<string, { applied: number; satisfied: number }> = {};
 
     if (templateIds.length > 0) {
-      const { data: expectations } = await admin
+      const { data: expectations } = await db
         .from("entity_document_expectations")
         .select("template_id, is_satisfied")
         .in("template_id", templateIds);
@@ -53,10 +66,9 @@ export async function GET() {
     }
 
     // Also count system expectations (no template_id)
-    const { data: systemExpectations } = await admin
+    const { data: systemExpectations } = await db
       .from("entity_document_expectations")
       .select("document_type, is_satisfied")
-      .eq("organization_id", orgId)
       .eq("source", "system");
 
     const systemStats: Record<string, { applied: number; satisfied: number }> = {};
@@ -115,12 +127,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "document_type and document_category required" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await admin
+    const { data, error } = await db
       .from("document_expectation_templates")
       .insert({
-        organization_id: orgId,
         document_type: document_type.trim().toLowerCase().replace(/\s+/g, "_"),
         document_category,
         is_required: is_required ?? true,
@@ -135,7 +146,8 @@ export async function POST(request: Request) {
       if (error.code === "23505") {
         return NextResponse.json({ error: "A template for this document type already exists" }, { status: 409 });
       }
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("POST /api/document-templates insert:", error);
+      return NextResponse.json({ error: "Failed to create template" }, { status: 500 });
     }
 
     // Backfill to matching entities
@@ -154,7 +166,7 @@ export async function POST(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
-    const ctx = await requireOrg();
+    const ctx = await requireSensitive("records:delete");
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
@@ -165,31 +177,31 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: "template_id required" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check if any expectations from this template are satisfied — convert to manual
-    await admin
+    await db
       .from("entity_document_expectations")
       .update({ source: "manual", template_id: null, updated_at: new Date().toISOString() })
       .eq("template_id", template_id)
       .eq("is_satisfied", true);
 
     // Remove unsatisfied expectations from this template
-    await admin
+    await db
       .from("entity_document_expectations")
       .delete()
       .eq("template_id", template_id)
       .eq("is_satisfied", false);
 
     // Delete the template itself
-    const { error } = await admin
+    const { error } = await db
       .from("document_expectation_templates")
       .delete()
-      .eq("id", template_id)
-      .eq("organization_id", orgId);
+      .eq("id", template_id);
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("DELETE /api/document-templates delete:", error);
+      return NextResponse.json({ error: "Failed to delete template" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true });
@@ -216,21 +228,21 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: "template_id required" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
     if (applies_to_filter !== undefined) updates.applies_to_filter = applies_to_filter;
     if (is_required !== undefined) updates.is_required = is_required;
 
-    const { error } = await admin
+    const { error } = await db
       .from("document_expectation_templates")
       .update(updates)
       .eq("id", template_id)
-      .eq("organization_id", orgId)
       .neq("source", "system");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("PUT /api/document-templates update:", error);
+      return NextResponse.json({ error: "Failed to update template" }, { status: 500 });
     }
 
     // Re-apply template to matching entities (add to new matches, remove from non-matches)
@@ -238,15 +250,15 @@ export async function PUT(request: Request) {
 
     // Remove expectations from entities that no longer match the filter
     if (applies_to_filter) {
-      const { data: allExpectations } = await admin
+      const { data: allExpectations } = await db
         .from("entity_document_expectations")
         .select("id, entity_id")
         .eq("template_id", template_id)
         .eq("is_satisfied", false);
 
       if (allExpectations && allExpectations.length > 0) {
-        const entityIds = [...new Set(allExpectations.map((e) => e.entity_id))];
-        const { data: entities } = await admin
+        const entityIds = [...new Set(allExpectations.map((e: { entity_id: string }) => e.entity_id))];
+        const { data: entities } = await db
           .from("entities")
           .select("id, type, legal_structure, organization_id")
           .in("id", entityIds);
@@ -260,7 +272,7 @@ export async function PUT(request: Request) {
         }
 
         if (nonMatchingIds.length > 0) {
-          await admin
+          await db
             .from("entity_document_expectations")
             .delete()
             .eq("template_id", template_id)
@@ -306,13 +318,12 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: "Not a system default" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check if override row already exists
-    const { data: existing } = await admin
+    const { data: existing } = await db
       .from("document_expectation_templates")
       .select("id")
-      .eq("organization_id", orgId)
       .eq("document_type", document_type)
       .eq("source", "system")
       .maybeSingle();
@@ -321,7 +332,7 @@ export async function PATCH(request: Request) {
     const required = is_required ?? systemDefault.is_required;
 
     if (existing) {
-      await admin
+      await db
         .from("document_expectation_templates")
         .update({
           is_required: required,
@@ -330,10 +341,9 @@ export async function PATCH(request: Request) {
         })
         .eq("id", existing.id);
     } else {
-      await admin
+      await db
         .from("document_expectation_templates")
         .insert({
-          organization_id: orgId,
           document_type,
           document_category: systemDefault.document_category,
           is_required: required,
@@ -345,10 +355,9 @@ export async function PATCH(request: Request) {
 
     // If disabling, remove unsatisfied expectations of this type across all entities
     if (disabled) {
-      await admin
+      await db
         .from("entity_document_expectations")
         .delete()
-        .eq("organization_id", orgId)
         .eq("document_type", document_type)
         .eq("source", "system")
         .eq("is_satisfied", false);

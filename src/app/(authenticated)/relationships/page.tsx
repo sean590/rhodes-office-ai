@@ -11,6 +11,7 @@ import { DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES } from "@/lib/constants"
 import type { DocumentType } from "@/lib/types/enums";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { useCan } from "@/components/authz/role-provider";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -126,6 +127,7 @@ function picklistValueFromRel(
 
 export default function RelationshipsPage() {
   const isMobile = useIsMobile();
+  const canDelete = useCan("records:delete");
 
   // Data
   const [relationships, setRelationships] = useState<Relationship[]>([]);
@@ -1436,6 +1438,7 @@ export default function RelationshipsPage() {
                   >
                     {/* Left: destructive actions */}
                     <div style={{ display: "flex", gap: 8 }}>
+                      {canDelete && (
                       <button
                         onClick={() => handleDelete(rel.id)}
                         style={{
@@ -1452,6 +1455,7 @@ export default function RelationshipsPage() {
                       >
                         Delete
                       </button>
+                      )}
                       {isActive(rel.status) && (
                         <button
                           onClick={() => handleCloseRelationship(rel.id)}

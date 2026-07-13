@@ -5,7 +5,23 @@
  */
 
 import { PDFDocument } from "pdf-lib";
-import { extractText } from "unpdf";
+import { extractText, getDocumentProxy } from "unpdf";
+
+/**
+ * Thrown when a PDF requires a password to decrypt. Caught by the pipeline
+ * worker and translated into queue status "password_required" so the user
+ * can supply the password via chat or the inline UI.
+ *
+ * The password itself is NEVER stored — it's used transiently inside
+ * extractFullText to decrypt the buffer for text extraction; the extracted
+ * text is what gets persisted.
+ */
+export class PdfPasswordRequiredError extends Error {
+  constructor(public readonly filename: string = "unknown") {
+    super(`Password required for "${filename}"`);
+    this.name = "PdfPasswordRequiredError";
+  }
+}
 
 // --- Page Selection Strategies ---
 
@@ -78,6 +94,22 @@ const PAGE_STRATEGIES: Record<string, PageSelectionStrategy> = {
       "This is a trust agreement. Key provisions are in the first 20-30 pages. Extract: trust name, trust type (revocable/irrevocable), trust date, grantor, trustees, successor trustees, beneficiaries, situs state, purpose.",
   },
 
+  // Investment / equity financing agreements
+  series_seed_agreement: {
+    visual_pages: "first_n",
+    visual_first_n: 30,
+    include_full_text: true,
+    extraction_hint:
+      "This is an equity financing agreement (Series Seed, Series A, SAFE, convertible note, or similar). Key terms — company name, investor list, share class, price per share, valuation, closing date, ownership percentages, board composition — are typically in the first 20-30 pages. Signature pages, exhibits, schedules, and stock certificates follow. Extract: company (investment target) name, investment round name, closing date, investors and their investment amounts, share counts, post-money valuation, and any pro-rata or anti-dilution terms. The user's entity (the investor) should be identifiable from the investor schedule. This is an EXTERNAL INVESTMENT — use create_investment, not create_entity.",
+  },
+  investment_agreement: {
+    visual_pages: "first_n",
+    visual_first_n: 30,
+    include_full_text: true,
+    extraction_hint:
+      "This is an investment agreement. Key terms are typically in the first 20-30 pages; exhibits and schedules follow. Extract: counterparty/target name, investment amount, closing date, share class or instrument type, and any material terms (liquidation preference, pro-rata, board rights). This is an EXTERNAL INVESTMENT — use create_investment, not create_entity.",
+  },
+
   // Default
   _default: {
     visual_pages: "first_n",
@@ -99,6 +131,15 @@ export interface PDFAnalysis {
 
 /**
  * Analyze a PDF and determine the extraction strategy.
+ *
+ * Tier thresholds are governed by the Anthropic context window (200k tokens),
+ * NOT Claude's nominal 100-page PDF file limit. Each rendered PDF page costs
+ * roughly 1700 input tokens, so a 96-page PDF alone would consume ~163k
+ * tokens before any system prompt — well past the 200k window once you add
+ * the org context (~30-50k) and extraction schema (~5k). The "short" tier
+ * sends the whole PDF as a single base64 document and is only safe for ~20
+ * pages of full-resolution rendering. Anything larger takes the text +
+ * selective-visual path.
  */
 export async function analyzePdf(
   buffer: Buffer,
@@ -108,12 +149,43 @@ export async function analyzePdf(
   const pageCount = pdfDoc.getPageCount();
 
   let tier: "short" | "medium" | "long";
-  if (pageCount <= 100) tier = "short";
-  else if (pageCount <= 200) tier = "medium";
+  if (pageCount <= 20) tier = "short";
+  else if (pageCount <= 100) tier = "medium";
   else tier = "long";
 
-  const strategy =
+  // Clone the strategy so we can clamp visual page counts without mutating
+  // the shared PAGE_STRATEGIES map.
+  const baseStrategy =
     PAGE_STRATEGIES[stagedDocType || ""] || PAGE_STRATEGIES["_default"];
+  const strategy: PageSelectionStrategy = { ...baseStrategy };
+
+  // Defense in depth: no matter what the strategy says, never send more
+  // visual pages than fit in a realistic token budget. Claude renders each
+  // PDF page as ~1700 input tokens. Reserve ~80k for visual content
+  // (~47 pages), leaving headroom for system prompt + schema + extracted
+  // text + output budget inside the 200k window.
+  const TOKENS_PER_PDF_PAGE = 1700;
+  const VISUAL_TOKEN_BUDGET = 80_000;
+  const maxVisualPages = Math.floor(VISUAL_TOKEN_BUDGET / TOKENS_PER_PDF_PAGE);
+
+  if (strategy.visual_pages === "first_n" && strategy.visual_first_n) {
+    strategy.visual_first_n = Math.min(strategy.visual_first_n, maxVisualPages);
+  } else if (strategy.visual_pages === "specific_ranges" && strategy.visual_page_ranges) {
+    let budgetRemaining = maxVisualPages;
+    const clampedRanges: Array<[number, number]> = [];
+    for (const [start, end] of strategy.visual_page_ranges) {
+      if (budgetRemaining <= 0) break;
+      const rangeLength = end - start + 1;
+      if (rangeLength <= budgetRemaining) {
+        clampedRanges.push([start, end]);
+        budgetRemaining -= rangeLength;
+      } else {
+        clampedRanges.push([start, start + budgetRemaining - 1]);
+        budgetRemaining = 0;
+      }
+    }
+    strategy.visual_page_ranges = clampedRanges;
+  }
 
   return { page_count: pageCount, file_size: buffer.length, tier, strategy };
 }
@@ -122,15 +194,88 @@ export async function analyzePdf(
  * Extract raw text from all pages of a PDF.
  * Uses unpdf which bundles its own PDF.js — no worker file needed,
  * works reliably on Vercel serverless with pnpm.
+ *
+ * Password-protected PDFs throw a PdfPasswordRequiredError so the worker
+ * can mark the queue item and resume the rest of the batch. Other extraction
+ * failures still return "" (callers fall back to visual-only).
  */
-export async function extractFullText(buffer: Buffer): Promise<string> {
+export async function extractFullText(
+  buffer: Buffer,
+  options?: { password?: string },
+): Promise<string> {
   try {
+    if (options?.password) {
+      const proxy = await getDocumentProxy(new Uint8Array(buffer), {
+        password: options.password,
+      });
+      const result = await extractText(proxy, { mergePages: true });
+      return typeof result.text === "string" ? result.text : (result.text as string[]).join("\n");
+    }
     const result = await extractText(new Uint8Array(buffer), { mergePages: true });
     return typeof result.text === "string" ? result.text : (result.text as string[]).join("\n");
   } catch (err) {
+    // pdfjs throws PasswordException with name === "PasswordException".
+    // Bubble that up as PdfPasswordRequiredError so callers can branch.
+    if (err && typeof err === "object" && "name" in err && (err as Error).name === "PasswordException") {
+      throw new PdfPasswordRequiredError();
+    }
     console.error("[PDF] Text extraction failed, falling back to visual-only:", err instanceof Error ? err.message : err);
     return ""; // Caller handles empty text gracefully
   }
+}
+
+/**
+ * Lightweight password-protection probe. Tries to open the PDF; if it
+ * throws PasswordException, surfaces a PdfPasswordRequiredError. Other
+ * errors are swallowed (we don't want to block extraction on a malformed
+ * file the AI path can still recover from).
+ *
+ * Used at the top of the document agent so short-tier PDFs (which send raw
+ * base64 to Claude without ever calling extractFullText) still trip the
+ * password gate before reaching the model.
+ */
+export async function probePdfRequiresPassword(buffer: Buffer): Promise<boolean> {
+  try {
+    await getDocumentProxy(new Uint8Array(buffer));
+    return false;
+  } catch (err) {
+    if (err && typeof err === "object" && "name" in err && (err as Error).name === "PasswordException") {
+      return true;
+    }
+    return false;
+  }
+}
+
+/**
+ * Password-aware sibling of analyzePdf. pdf-lib opens encrypted PDFs with
+ * ignoreEncryption=true to read top-level metadata, but the page tree
+ * dictionaries are still encrypted indirect references — calling
+ * pdfDoc.getPageCount() walks that tree and blows up with
+ * "Expected instance of PDFDict, but got instance of undefined".
+ *
+ * unpdf (pdfjs under the hood) decrypts the page tree natively when given
+ * the password, so we use it for page counting on locked files. The rest
+ * of the analysis collapses to a no-op since buildPdfContent's password
+ * branch only consumes page_count anyway (it sends Claude text-only).
+ */
+export async function analyzePdfWithPassword(
+  buffer: Buffer,
+  password: string,
+): Promise<PDFAnalysis> {
+  let pageCount = 0;
+  try {
+    const proxy = await getDocumentProxy(new Uint8Array(buffer), { password });
+    pageCount = proxy.numPages;
+  } catch {
+    // Wrong-password / corrupt-file errors will be surfaced downstream by
+    // extractFullText. Returning a zero page count is cosmetic only.
+  }
+  return {
+    page_count: pageCount,
+    file_size: buffer.length,
+    tier: "medium", // value unused — buildPdfContent's password branch ignores tier/strategy
+    strategy: PAGE_STRATEGIES["_default"],
+  };
 }
 
 /**
@@ -168,9 +313,32 @@ export async function buildPdfContent(
   analysis: PDFAnalysis,
   docName: string,
   docType: string | null,
-  year: number | null
+  year: number | null,
+  options?: { password?: string },
 ): Promise<unknown[]> {
   const content: unknown[] = [];
+
+  // Password-protected path: send extracted text only. We can decrypt for
+  // text via pdfjs but we'd have to re-encode the decrypted PDF to send a
+  // visual base64 block, which is heavyweight. Text-only is good enough
+  // for the common case (tax returns, K-1s) and keeps the unlock flow
+  // simple. If quality is poor on a specific file, the user can decrypt
+  // out-of-band and re-upload.
+  if (options?.password) {
+    const fullText = await extractFullText(buffer, options);
+    if (fullText) {
+      content.push({
+        type: "text",
+        text: `## Document Text (decrypted from password-protected PDF, ${analysis.page_count} pages)\n\n${fullText}`,
+      });
+    } else {
+      content.push({
+        type: "text",
+        text: `## Document Text\n\n(Empty extraction — the PDF unlocked but pdfjs could not extract text.)`,
+      });
+    }
+    return content;
+  }
 
   if (analysis.tier === "short") {
     // Tier 1: send whole PDF as-is
@@ -188,11 +356,20 @@ export async function buildPdfContent(
 
     // Extract and send full text
     if (strategy.include_full_text) {
-      const fullText = await extractFullText(buffer);
+      const fullText = await extractFullText(buffer, options);
       if (fullText) {
+        // Cap extracted text at ~120k tokens (~480k chars at 4 chars/token)
+        // to leave room for visual pages, system prompt, and output budget.
+        // Covers the "500-page deposition transcript" edge case where even
+        // the text alone could blow the input budget.
+        const MAX_TEXT_CHARS = 480_000;
+        const clipped = fullText.length > MAX_TEXT_CHARS
+          ? fullText.slice(0, MAX_TEXT_CHARS) +
+            `\n\n[... text truncated: showing first ${MAX_TEXT_CHARS.toLocaleString()} of ${fullText.length.toLocaleString()} characters from ${analysis.page_count} total pages. Key terms are typically in the earlier pages; exhibits and schedules follow. Focus on extracting structured data from the text shown above plus the visual pages that follow.]`
+          : fullText;
         content.push({
           type: "text",
-          text: `## Full Document Text (${analysis.page_count} pages)\n\n${fullText}`,
+          text: `## Full Document Text (${analysis.page_count} pages)\n\n${clipped}`,
         });
       }
       // If text extraction failed, we'll rely on visual pages only (below).

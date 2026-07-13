@@ -27,6 +27,7 @@ const PATTERNS: PatternRule[] = [
   { pattern: /operating\s*agree/i, type: 'operating_agreement', category: 'formation', confidence: 'high' },
   { pattern: /amended\s*(operating\s*agree|oa\b)/i, type: 'amended_operating_agreement', category: 'formation', confidence: 'high' },
   { pattern: /cert(ificate)?\s*(of\s*)?form(ation)?/i, type: 'certificate_of_formation', category: 'formation', confidence: 'high' },
+  { pattern: /\bcof\b/i, type: 'certificate_of_formation', category: 'formation', confidence: 'medium' },
   { pattern: /articles?\s*(of\s*)?incorp/i, type: 'articles_of_incorporation', category: 'formation', confidence: 'high' },
   { pattern: /articles?\s*(of\s*)?org/i, type: 'articles_of_organization', category: 'formation', confidence: 'high' },
   { pattern: /bylaws/i, type: 'bylaws', category: 'formation', confidence: 'high' },
@@ -35,7 +36,8 @@ const PATTERNS: PatternRule[] = [
   { pattern: /trust\s*amend/i, type: 'trust_amendment', category: 'formation', confidence: 'high' },
 
   // Tax
-  { pattern: /ein\s*(letter|confirmation|notice)/i, type: 'ein_letter', category: 'tax', confidence: 'high' },
+  { pattern: /ein\s*(letter|confirmation|notice|assignment)/i, type: 'ein_letter', category: 'tax', confidence: 'high' },
+  { pattern: /\bss[\s-]?4\b/i, type: 'ein_letter', category: 'tax', confidence: 'high' },
   { pattern: /\b1065\b/i, type: 'tax_return_1065', category: 'tax', confidence: 'high' },
   { pattern: /\b1120[\s-]?s\b/i, type: 'tax_return_1120s', category: 'tax', confidence: 'high' },
   { pattern: /\b1041\b/i, type: 'tax_return_1041', category: 'tax', confidence: 'high' },
@@ -52,8 +54,12 @@ const PATTERNS: PatternRule[] = [
 
   // Investor
   { pattern: /subscription\s*agree/i, type: 'subscription_agreement', category: 'investor', confidence: 'high' },
-  { pattern: /capital\s*call/i, type: 'capital_call_notice', category: 'investor', confidence: 'high', direction: 'issued' },
-  { pattern: /distribution\s*notice/i, type: 'distribution_notice', category: 'investor', confidence: 'high', direction: 'issued' },
+  // composite: true — these are commonly bundled per-investor packages.
+  // Setting it here flips the worker's isCompositeCandidate check so the
+  // pipeline runs the per-section split path instead of treating the file
+  // as one monolithic doc.
+  { pattern: /capital\s*call/i, type: 'capital_call_notice', category: 'investor', confidence: 'high', direction: 'issued', composite: true },
+  { pattern: /distribution\s*notice/i, type: 'distribution_notice', category: 'investor', confidence: 'high', direction: 'issued', composite: true },
   { pattern: /investor\s*quest/i, type: 'investor_questionnaire', category: 'investor', confidence: 'high' },
   { pattern: /side\s*letter/i, type: 'side_letter', category: 'investor', confidence: 'high' },
   { pattern: /\bppm\b|private\s*placement/i, type: 'ppm', category: 'investor', confidence: 'high' },

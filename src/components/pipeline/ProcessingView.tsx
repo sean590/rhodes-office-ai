@@ -5,13 +5,32 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { QueueItem } from "@/lib/types/entities";
 import { SuccessSummary } from "./SuccessSummary";
-import { ApprovalCard } from "./ApprovalCard";
+import { ReviewCard } from "./ReviewCard";
+import { useChatPanel } from "@/components/chat/chat-panel-provider";
 
 interface ProcessingViewProps {
   batchId: string;
   entities: Array<{ id: string; name: string }>;
   onComplete?: () => void;
   onDocumentsChanged?: () => void;
+}
+
+interface DocSummaryRow {
+  id: string;
+  document_id: string | null;
+  name: string;
+  type: string;
+  type_label: string;
+  year: number | null;
+  status: string;
+  // Enrichment from migration 057+ (review/chat unification, batch route):
+  // shows the linkage chain — investment + transaction summary — so the
+  // user can verify what the agent did at a glance instead of clicking
+  // into each doc.
+  investment_name?: string | null;
+  transaction_summary?: string | null;
+  is_parent?: boolean;
+  child_count?: number;
 }
 
 interface BatchSummary {
@@ -22,28 +41,18 @@ interface BatchSummary {
   rejected: number;
   errors: number;
   processing: number;
+  duplicates?: Array<{
+    filename: string;
+    reason: string;
+    existing_document_id?: string | null;
+  }>;
   entities_affected: Array<{
     entity_id: string | null;
     entity_name: string;
-    documents: Array<{
-      id: string;
-      document_id: string | null;
-      name: string;
-      type: string;
-      type_label: string;
-      year: number | null;
-      status: string;
-    }>;
+    documents: DocSummaryRow[];
   }>;
-  unassociated_documents: Array<{
-    id: string;
-    document_id: string | null;
-    name: string;
-    type: string;
-    type_label: string;
-    year: number | null;
-    status: string;
-  }>;
+  unassociated_documents: DocSummaryRow[];
+  parent_documents?: DocSummaryRow[];
 }
 
 const STATUS_ICONS: Record<string, string> = {
@@ -62,6 +71,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   const [phase, setPhase] = useState<"processing" | "results">("processing");
   const [fetchedEntities, setFetchedEntities] = useState<Array<{ id: string; name: string }>>([]);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chatPanel = useChatPanel();
 
   // Derive liveEntities: prefer parent prop, fall back to fetched
   const liveEntities = initialEntities.length > 0 ? initialEntities : fetchedEntities;
@@ -91,14 +101,34 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
       setItems(data.items || []);
       setSummary(data.summary || null);
 
-      // Transition to results when no more processing
-      // "staged" = waiting for process endpoint, "extracted" = mid-auto-ingest
+      // Phase and polling are two separate concerns; conflating them was the
+      // root cause of two bugs in 24 hours:
+      //   1. (yesterday) password_required not in the active list ⇒ polling
+      //      stopped the moment all items reached password_required, so a
+      //      successful unlock-then-extract never showed in the UI.
+      //   2. (today) password_required added to the active list to fix #1
+      //      ⇒ phase stayed stuck on "processing" forever, so the
+      //      LockedQueueItem unlock controls (which only render in the
+      //      results phase) never appeared at all.
+      //
+      // ACTIVELY_PROCESSING = items the pipeline is currently working on.
+      // Only these block the transition to results. password_required is
+      // *not* "actively processing"; it's waiting on the user.
+      //
+      // NEEDS_POLLING = items that can still change state, whether by the
+      // pipeline (extracting → auto_ingested) or by user action (password
+      // submitted → extracting again). Polling continues while any of these
+      // exist; it only stops once everything is in a true terminal state.
       const allItems = data.items || [];
-      const ACTIVE_STATUSES = ["staged", "queued", "extracting", "extracted"];
-      const stillProcessing = allItems.some(
-        (i: QueueItem) => ACTIVE_STATUSES.includes(i.status)
+      const ACTIVELY_PROCESSING = ["staged", "queued", "extracting", "extracted"];
+      const NEEDS_POLLING = [...ACTIVELY_PROCESSING, "password_required"];
+      const isActivelyProcessing = allItems.some(
+        (i: QueueItem) => ACTIVELY_PROCESSING.includes(i.status)
       );
-      if (!stillProcessing && allItems.length > 0) {
+      const needsPolling = allItems.some(
+        (i: QueueItem) => NEEDS_POLLING.includes(i.status)
+      );
+      if (!isActivelyProcessing && allItems.length > 0) {
         setPhase((prev) => {
           // When transitioning from processing → results, refresh documents
           // (auto-ingested items created documents during processing)
@@ -107,10 +137,10 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
           }
           return "results";
         });
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
+      }
+      if (!needsPolling && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
       }
     } catch {
       // Ignore polling errors
@@ -119,82 +149,16 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
 
   useEffect(() => {
     fetchBatch(); // eslint-disable-line react-hooks/set-state-in-effect -- initial fetch + polling
-    pollRef.current = setInterval(fetchBatch, 2500);
+    pollRef.current = setInterval(fetchBatch, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [fetchBatch]);
 
   // --- Actions ---
-  const approveItem = async (itemId: string, excludedActionIndices?: number[]) => {
-    try {
-      const fetchOptions: RequestInit = {
-        method: "POST",
-        ...(excludedActionIndices && excludedActionIndices.length > 0
-          ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ excluded_actions: excludedActionIndices }) }
-          : {}),
-      };
-      const res = await fetch(`/api/pipeline/queue/${itemId}/approve`, fetchOptions);
-      if (res.ok) {
-        const data = await res.json();
-        // If a new entity was created, refresh the entities list
-        if (data.new_entity_id) {
-          await refreshEntities();
-        }
-      } else {
-        console.error("Approve failed:", res.status, await res.json().catch(() => ({})));
-      }
-    } catch (err) {
-      console.error("Approve error:", err);
-    }
-    await fetchBatch();
-    onDocumentsChanged?.();
-  };
-
-  const ingestOnly = async (itemId: string) => {
-    try {
-      const res = await fetch(`/api/pipeline/queue/${itemId}/ingest-only`, { method: "POST" });
-      if (!res.ok) console.error("Ingest-only failed:", res.status, await res.json().catch(() => ({})));
-    } catch (err) {
-      console.error("Ingest-only error:", err);
-    }
-    await fetchBatch();
-    onDocumentsChanged?.();
-  };
-
-  const assignEntity = async (itemId: string, entityId: string) => {
-    // Update the queue item's entity and mark user_corrected so approve
-    // doesn't create the proposed entity
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        staged_entity_id: entityId,
-        ai_entity_id: entityId,
-        user_corrected: true,
-      }),
-    });
-    // Now approve (ingest with the assigned entity)
-    await approveItem(itemId);
-  };
-
-  const reassignEntity = async (itemId: string, entityId: string) => {
-    // Just update the entity assignment without approving
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ staged_entity_id: entityId, ai_entity_id: entityId }),
-    });
-  };
-
-  const updateRelatedEntities = async (itemId: string, relatedEntities: Array<{ entity_id: string; entity_name: string; role: string; confidence: string; reason: string }>) => {
-    await fetch(`/api/pipeline/queue/${itemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ai_related_entities: relatedEntities }),
-    });
-  };
-
+  // Per-item approval is owned by ReviewCard now (it composes the actions
+  // and POSTs to /api/chat/apply-actions). What's left here is just the
+  // "retry an errored item" affordance.
   const retryItem = async (itemId: string) => {
     await fetch(`/api/pipeline/queue/${itemId}`, {
       method: "PATCH",
@@ -205,7 +169,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
     // Resume polling — clear any existing interval first to prevent stacking
     if (pollRef.current) clearInterval(pollRef.current);
     setPhase("processing");
-    pollRef.current = setInterval(fetchBatch, 2500);
+    pollRef.current = setInterval(fetchBatch, 1000);
     await fetchBatch();
   };
 
@@ -316,16 +280,35 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
   // --- Results Phase ---
   const reviewItems = items.filter((i) => i.status === "review_ready");
   const errorItems = items.filter((i) => i.status === "error");
+  const lockedItems = items.filter((i) => i.status === "password_required");
   const ingestedCount = summary ? summary.auto_ingested + summary.approved : 0;
-  const allDone = !items.some((i) => i.status === "review_ready" || i.status === "error");
+  const allDone = !items.some(
+    (i) => i.status === "review_ready" || i.status === "error" || i.status === "password_required",
+  );
 
   // Headline
+  const duplicatesCount = summary?.duplicates?.length ?? 0;
   const totalFileCount = items.filter((i) => !i.parent_queue_id).length;
+  // Raw upload count = files that hit the register endpoint, including the
+  // ones that dedupe'd silently. Surface this so "1 ingested from 1 file"
+  // doesn't quietly hide the fact that the user uploaded 6.
+  const uploadAttemptedCount = totalFileCount + duplicatesCount;
   let headline: string;
-  if (reviewItems.length === 0 && errorItems.length === 0) {
-    headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${totalFileCount} file${totalFileCount !== 1 ? "s" : ""}`;
+  if (reviewItems.length === 0 && errorItems.length === 0 && lockedItems.length === 0) {
+    if (duplicatesCount > 0 && totalFileCount === 0) {
+      headline = `${duplicatesCount} file${duplicatesCount !== 1 ? "s" : ""} already filed \u2014 nothing new to process`;
+    } else if (duplicatesCount > 0) {
+      headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${uploadAttemptedCount} file${uploadAttemptedCount !== 1 ? "s" : ""} (${duplicatesCount} already filed)`;
+    } else {
+      headline = `${ingestedCount} document${ingestedCount !== 1 ? "s" : ""} ingested from ${totalFileCount} file${totalFileCount !== 1 ? "s" : ""}`;
+    }
   } else {
-    headline = `${totalFileCount} file${totalFileCount !== 1 ? "s" : ""} processed \u2014 ${ingestedCount} ingested, ${reviewItems.length} need${reviewItems.length === 1 ? "s" : ""} review`;
+    const parts: string[] = [];
+    if (ingestedCount > 0) parts.push(`${ingestedCount} ingested`);
+    if (reviewItems.length > 0) parts.push(`${reviewItems.length} need${reviewItems.length === 1 ? "s" : ""} review`);
+    if (lockedItems.length > 0) parts.push(`${lockedItems.length} need${lockedItems.length === 1 ? "s" : ""} a password`);
+    if (duplicatesCount > 0) parts.push(`${duplicatesCount} already filed`);
+    headline = `${uploadAttemptedCount} file${uploadAttemptedCount !== 1 ? "s" : ""} processed \u2014 ${parts.join(", ")}`;
   }
 
   return (
@@ -358,6 +341,7 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
             <SuccessSummary
               entitiesAffected={summary.entities_affected}
               unassociatedDocuments={summary.unassociated_documents}
+              parentDocuments={summary.parent_documents ?? []}
             />
           </div>
         )}
@@ -368,16 +352,121 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
             <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
               Needs Review
             </div>
-            {reviewItems.map((item) => (
-              <ApprovalCard
+            {reviewItems.map((item) => {
+              // Items without a chat_session_id reach here in two ways:
+              //   1. True legacy rows from before the review/chat unification.
+              //   2. Recent rows where the agent deferred but the worker
+              //      couldn't seed a chat_sessions row — typically because
+              //      the parent batch's created_by is null (auth user not
+              //      synced to public.users).
+              // Either way the user can still see the agent's summary +
+              // proposed actions on the queue row, so render those here as
+              // a fallback rather than just the stub message.
+              if (!item.chat_session_id) {
+                return (
+                  <div
+                    key={item.id}
+                    style={{
+                      background: "#f8f7f4",
+                      border: "1px solid #e8e6df",
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 12,
+                      fontSize: 12,
+                      color: "#6b6b76",
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: "#1a1a1f", marginBottom: 4 }}>
+                      {item.original_filename}
+                    </div>
+                    {item.ai_summary ? (
+                      <div style={{ color: "#1a1a1f", marginBottom: 6, whiteSpace: "pre-wrap" }}>
+                        {item.ai_summary}
+                      </div>
+                    ) : null}
+                    <div>
+                      Review session unavailable — re-upload or reject to clear.
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <ReviewCard
+                  key={item.id}
+                  item={{
+                    id: item.id,
+                    document_id: item.document_id,
+                    chat_session_id: item.chat_session_id,
+                    ai_summary: item.ai_summary,
+                    ai_entity_id: item.ai_entity_id,
+                    ai_document_type: item.ai_document_type,
+                    ai_document_category: item.ai_document_category,
+                    ai_year: item.ai_year,
+                    original_filename: item.original_filename,
+                  }}
+                  entities={liveEntities}
+                  onSubmitted={fetchBatch}
+                  onOpenChat={(sessionId) =>
+                    chatPanel.open(undefined, undefined, sessionId)
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Already-filed section — duplicates the register endpoint
+            detected by content_hash. Surface them explicitly so the user
+            isn't left wondering why their 6-file upload only produced 1
+            queue row. Each line links back to the existing document. */}
+        {summary?.duplicates && summary.duplicates.length > 0 && (
+          <div style={{ marginBottom: lockedItems.length > 0 || reviewItems.length > 0 || errorItems.length > 0 ? 20 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
+              Already filed — skipped
+            </div>
+            <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 8 }}>
+              These files matched documents already in your library by content. Re-uploading the same file does not create a duplicate.
+            </div>
+            {summary.duplicates.map((dup, i) => (
+              <div key={i} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 0",
+                borderBottom: i < summary.duplicates!.length - 1 ? "1px solid #f0eeea" : "none",
+                fontSize: 13,
+              }}>
+                <span style={{ color: "#9494a0", fontSize: 14 }}>&#10005;</span>
+                <span style={{ flex: 1, color: "#1a1a1f" }}>{dup.filename}</span>
+                {dup.existing_document_id && (
+                  <a
+                    href={`/documents/${dup.existing_document_id}`}
+                    style={{ fontSize: 12, color: "#2d5a3d", textDecoration: "none" }}
+                  >
+                    Open existing →
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Needs Passwords section — inline unlock UI for password-protected
+            PDFs that paused during extraction. The chat drawer also shows a
+            password_request message for the same items; either entry point
+            unlocks them. */}
+        {lockedItems.length > 0 && (
+          <div style={{ marginBottom: errorItems.length > 0 ? 20 : 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#c47520", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8, paddingTop: 8, borderTop: "1px solid #e8e6df" }}>
+              Needs Passwords
+            </div>
+            <div style={{ fontSize: 12, color: "#6b6b76", marginBottom: 8 }}>
+              Enter the password below or share it in chat — Claude will unlock it.
+            </div>
+            {lockedItems.map((item) => (
+              <LockedQueueItem
                 key={item.id}
-                item={item}
-                entities={liveEntities}
-                onApprove={approveItem}
-                onIngestOnly={ingestOnly}
-                onAssignEntity={assignEntity}
-                onReassignEntity={reassignEntity}
-                onUpdateRelatedEntities={updateRelatedEntities}
+                itemId={item.id}
+                filename={item.original_filename}
+                onUnlocked={fetchBatch}
               />
             ))}
           </div>
@@ -408,5 +497,115 @@ export function ProcessingView({ batchId, entities: initialEntities, onComplete,
         )}
       </div>
     </Card>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  LockedQueueItem                                                    */
+/* ------------------------------------------------------------------ */
+
+// Inline unlock form for one password-protected queue item. Mirrors the
+// shape used by the /review page's LockedItemRow but stripped of source
+// context (this component already lives inside a single batch view).
+function LockedQueueItem({
+  itemId,
+  filename,
+  onUnlocked,
+}: {
+  itemId: string;
+  filename: string;
+  onUnlocked: () => void;
+}) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    if (!password) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/pipeline/queue/${itemId}/unlock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        setPassword("");
+        onUnlocked();
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setError(typeof body?.error === "string" ? body.error : "Unlock failed");
+      // Refresh the batch even on failure: if the previous attempt actually
+      // succeeded server-side and the row moved to auto_ingested/review_ready,
+      // a 400 here means our state is stale. Refetching pulls the new status
+      // and unmounts this row — better than stranding the user with a stuck
+      // password input that can never succeed.
+      onUnlocked();
+    } catch {
+      setError("Unlock failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "flex-start", gap: 10,
+        padding: "10px 0",
+        borderBottom: "1px solid #f0eeea",
+      }}
+    >
+      <span
+        aria-label="Locked"
+        style={{
+          width: 22, height: 22, borderRadius: 5,
+          background: "rgba(196,117,32,0.1)", color: "#c47520",
+          display: "inline-flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: "#1a1a1f" }}>{filename}</div>
+        <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="password"
+            value={password}
+            disabled={busy}
+            onChange={(e) => { setPassword(e.target.value); setError(null); }}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+            placeholder="Enter password"
+            style={{
+              flex: 1, minWidth: 180,
+              padding: "6px 10px", fontSize: 13, fontFamily: "inherit",
+              background: "#fafaf7",
+              border: `1px solid ${error ? "#c44520" : "#ddd9d0"}`,
+              borderRadius: 6, outline: "none",
+            }}
+          />
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={busy || !password}
+            onClick={submit}
+          >
+            {busy ? "Unlocking…" : "Unlock"}
+          </Button>
+        </div>
+        {error && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "#c44520" }}>
+            {error}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

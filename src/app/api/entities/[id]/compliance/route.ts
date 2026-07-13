@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { generateComplianceObligations } from "@/lib/utils/compliance-engine";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 
@@ -22,7 +22,7 @@ export async function GET(
     // Fetch entity
     const { data: entity, error: entityError } = await supabase
       .from("entities")
-      .select("id, legal_structure, formation_state, formed_date")
+      .select("id, type, legal_structure, tax_classification, formation_state, formed_date")
       .eq("id", id)
       .single();
 
@@ -30,7 +30,8 @@ export async function GET(
       if (entityError.code === "PGRST116") {
         return NextResponse.json({ error: "Entity not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: entityError.message }, { status: 500 });
+      console.error("GET /api/entities/[id]/compliance entity query:", entityError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Fetch registrations
@@ -47,7 +48,8 @@ export async function GET(
       .order("next_due_date", { ascending: true, nullsFirst: false });
 
     if (oblError) {
-      return NextResponse.json({ error: oblError.message }, { status: 500 });
+      console.error("GET /api/entities/[id]/compliance obligations query:", oblError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // If no obligations exist yet, auto-sync
@@ -58,7 +60,9 @@ export async function GET(
 
       const generated = generateComplianceObligations({
         id: entity.id,
+        type: entity.type,
         legal_structure: entity.legal_structure,
+        tax_classification: entity.tax_classification ?? null,
         formation_state: entity.formation_state,
         formed_date: entity.formed_date,
         registrations: registrations || [],
@@ -69,7 +73,7 @@ export async function GET(
       }
 
       // Upsert generated obligations
-      const admin = createAdminClient();
+      const db = createOrgClient(orgId);
       const rows = generated.map((g) => ({
         entity_id: id,
         rule_id: g.rule_id,
@@ -87,13 +91,14 @@ export async function GET(
         status: "pending",
       }));
 
-      const { data: inserted, error: insertError } = await admin
+      const { data: inserted, error: insertError } = await db
         .from("compliance_obligations")
         .upsert(rows, { onConflict: "entity_id,rule_id,next_due_date" })
         .select();
 
       if (insertError) {
-        return NextResponse.json({ error: insertError.message }, { status: 500 });
+        console.error("GET /api/entities/[id]/compliance obligations upsert:", insertError);
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
 
       return NextResponse.json({
@@ -101,7 +106,34 @@ export async function GET(
       });
     }
 
-    return NextResponse.json({ obligations }, {
+    // Attach the most recent completion cycles for each obligation so the
+    // UI can show a "completion history" expander without a per-row round
+    // trip. Cap at 10 cycles per obligation — enough to show the
+    // recent history without bloating the response for long-lived
+    // obligations with many cycles.
+    const obligationIds = obligations.map((o) => o.id);
+    let cyclesByObligation: Record<string, Array<Record<string, unknown>>> = {};
+    if (obligationIds.length > 0) {
+      const { data: cycles } = await supabase
+        .from("compliance_obligation_cycles")
+        .select(
+          "id, obligation_id, cycle_due_date, completed_at, completed_by, document_id, payment_amount, confirmation, notes",
+        )
+        .in("obligation_id", obligationIds)
+        .order("completed_at", { ascending: false });
+      cyclesByObligation = (cycles ?? []).reduce<Record<string, Array<Record<string, unknown>>>>((acc, c) => {
+        const oid = c.obligation_id as string;
+        if (!acc[oid]) acc[oid] = [];
+        if (acc[oid].length < 10) acc[oid].push(c as Record<string, unknown>);
+        return acc;
+      }, {});
+    }
+    const obligationsWithCycles = obligations.map((o) => ({
+      ...o,
+      cycles: cyclesByObligation[o.id as string] ?? [],
+    }));
+
+    return NextResponse.json({ obligations: obligationsWithCycles }, {
       headers: { "Cache-Control": "private, max-age=60" },
     });
   } catch (err) {

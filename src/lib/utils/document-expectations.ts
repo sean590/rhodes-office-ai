@@ -9,6 +9,20 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  ALL_SYSTEM_DEFAULTS,
+  mapToDocumentScope,
+} from "@/lib/data/document-defaults";
+import { documentTypeSatisfies } from "@/lib/data/document-type-aliases";
+
+// Re-export so existing importers don't need to change.
+export {
+  ALL_SYSTEM_DEFAULTS,
+  DOCUMENT_SCOPES,
+  mapToDocumentScope,
+  getSystemDefaultsForScope,
+} from "@/lib/data/document-defaults";
+export type { SystemDefault, DocumentScope } from "@/lib/data/document-defaults";
 
 // --- Types ---
 
@@ -33,41 +47,6 @@ interface TemplateFilter {
   legal_structure?: string[];
   state?: string[];
 }
-
-// --- System Default Expectations ---
-
-export interface SystemDefault {
-  document_type: string;
-  document_category: string;
-  is_required: boolean;
-  applies_to: string[]; // list of entity types or legal structures this applies to (empty = all non-trust)
-  notes?: string;
-}
-
-/**
- * Full list of all system defaults (exported for settings UI).
- * Each document_type appears once with its list of applicable structures/types.
- */
-export const ALL_SYSTEM_DEFAULTS: SystemDefault[] = [
-  // Base — applies to LLC-family structures (not trusts, which have their own set)
-  { document_type: "operating_agreement", document_category: "formation", is_required: true, applies_to: ["llc", "gp"] },
-  { document_type: "certificate_of_formation", document_category: "formation", is_required: true, applies_to: ["llc", "corporation", "lp", "gp"] },
-  { document_type: "ein_letter", document_category: "tax", is_required: true, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
-  { document_type: "registered_agent_appointment", document_category: "compliance", is_required: true, applies_to: ["llc", "corporation", "lp", "gp"] },
-  { document_type: "certificate_of_good_standing", document_category: "compliance", is_required: false, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
-  { document_type: "federal_tax_return", document_category: "tax", is_required: false, applies_to: ["llc", "corporation", "lp", "gp", "non_grantor_trust"] },
-  // Trust-specific
-  { document_type: "trust_agreement", document_category: "formation", is_required: true, applies_to: ["grantor_trust", "non_grantor_trust"] },
-  // Type-specific
-  { document_type: "ppm", document_category: "investor", is_required: false, applies_to: ["investment_fund"], notes: "Private Placement Memorandum or offering documents" },
-  { document_type: "subscription_agreement", document_category: "investor", is_required: false, applies_to: ["investment_fund"] },
-  { document_type: "certificate_of_insurance", document_category: "insurance", is_required: false, applies_to: ["real_estate"], notes: "Property insurance certificate" },
-  { document_type: "lease_agreement", document_category: "contracts", is_required: false, applies_to: ["real_estate"], notes: "If rental property" },
-  // Structure-specific
-  { document_type: "articles_of_incorporation", document_category: "formation", is_required: true, applies_to: ["corporation"] },
-  { document_type: "bylaws", document_category: "governance", is_required: true, applies_to: ["corporation"] },
-  { document_type: "partnership_agreement", document_category: "formation", is_required: true, applies_to: ["lp"] },
-];
 
 /**
  * Org-level override for a system default.
@@ -128,6 +107,12 @@ const STRUCTURE_EXPECTATIONS: Record<string, ExpectedDocument[]> = {
 // --- Core Functions ---
 
 /**
+ * @deprecated Legacy system-default generator. Superseded by the three-tier
+ * profiles + overrides model read directly from document_profiles /
+ * org_document_overrides by refreshEntityExpectations. No production caller
+ * remains as of PR 4.3. Kept for the deprecation window alongside
+ * /api/document-templates.
+ *
  * Generate system expectations for an entity based on its type, structure, and registrations.
  * Does NOT insert — returns the list for the caller to upsert.
  */
@@ -193,6 +178,13 @@ export function generateSystemExpectations(
 }
 
 /**
+ * @deprecated applies_to_filter is a concept from the legacy
+ * document_expectation_templates model. The three-tier model replaces it
+ * with document_profiles.entity_type_scope, which is a scalar per row — no
+ * filter matching needed at engine time. This helper only remains for the
+ * legacy /api/document-templates route + applyTemplate during the
+ * deprecation window.
+ *
  * Check if an entity matches a template's applies_to_filter.
  */
 export function matchesFilter(
@@ -215,92 +207,63 @@ export function matchesFilter(
 }
 
 /**
- * Populate expectations for a single entity — system defaults + matching templates.
- * Uses upsert to avoid duplicates. Skips expectations already marked is_not_applicable.
+ * Populate expectations for a single entity from the three-tier model:
+ *   Tier 1: org_document_overrides (action='disable' kills a doc_type org-wide)
+ *   Tier 2: document_profiles (per scope, with enabled + is_required + category)
+ *   Tier 3: entity_document_expectations.is_not_applicable (per-entity dismiss)
+ *
+ * Entities whose legal_structure doesn't map to one of the four document scopes
+ * (llc/corporation/lp/trust) get no system-generated expectations — manual and
+ * inferred items are preserved untouched.
  */
 export async function refreshEntityExpectations(entityId: string): Promise<void> {
   const admin = createAdminClient();
 
-  // Fetch entity info
   const { data: entity } = await admin
     .from("entities")
-    .select("id, type, legal_structure, organization_id")
+    .select("id, type, status, legal_structure, organization_id")
     .eq("id", entityId)
     .single();
   if (!entity) return;
 
-  // Fetch registration states for filter matching
-  const { data: registrations } = await admin
-    .from("entity_registrations")
-    .select("jurisdiction")
-    .eq("entity_id", entityId);
-  const regStates = (registrations || []).map((r: { jurisdiction: string }) => r.jurisdiction);
+  if (entity.status && entity.status !== "active") return;
 
-  // 1. Fetch org templates (includes system overrides with source='system')
-  const { data: templates } = await admin
-    .from("document_expectation_templates")
-    .select("*")
-    .eq("organization_id", entity.organization_id);
+  const orgId = entity.organization_id as string;
+  const scope = mapToDocumentScope(entity.legal_structure);
 
-  // Extract system default overrides
-  const systemOverrides: SystemDefaultOverride[] = (templates || [])
-    .filter((t: Record<string, unknown>) => t.source === "system")
-    .map((t: Record<string, unknown>) => ({
-      document_type: t.document_type as string,
-      is_disabled: (t.applies_to_filter as Record<string, unknown>)?.disabled === true,
-      is_required: t.is_required as boolean,
+  // Fetch org overrides + scoped profiles in parallel.
+  const [overridesResult, profilesResult] = await Promise.all([
+    admin
+      .from("org_document_overrides")
+      .select("document_type, action")
+      .eq("organization_id", orgId),
+    scope
+      ? admin
+          .from("document_profiles")
+          .select("document_type, document_category, is_required, enabled, notes")
+          .eq("organization_id", orgId)
+          .eq("entity_type_scope", scope)
+      : Promise.resolve({ data: [] as Record<string, unknown>[], error: null }),
+  ]);
+
+  const disabledDocTypes = new Set(
+    (overridesResult.data || [])
+      .filter((o: Record<string, unknown>) => o.action === "disable")
+      .map((o: Record<string, unknown>) => o.document_type as string)
+  );
+
+  const expected: ExpectedDocument[] = (profilesResult.data || [])
+    .filter((p: Record<string, unknown>) => p.enabled !== false)
+    .filter((p: Record<string, unknown>) => !disabledDocTypes.has(p.document_type as string))
+    .map((p: Record<string, unknown>) => ({
+      document_type: p.document_type as string,
+      document_category: (p.document_category as string) || "other",
+      is_required: p.is_required as boolean,
+      source: "system" as const,
+      notes: (p.notes as string) || undefined,
     }));
 
-  // 2. Generate system defaults with org overrides applied
-  const systemExpectations = generateSystemExpectations(entity.type, entity.legal_structure, systemOverrides);
-
-  // Build a set of doc types that system defaults explicitly exclude for this entity.
-  // If a system default has an applies_to list and this entity's structure/type isn't in it,
-  // that doc type is "system-excluded" — templates without an explicit legal_structure filter
-  // should not re-add it.
-  const systemExcludedTypes = new Set<string>();
-  for (const sd of ALL_SYSTEM_DEFAULTS) {
-    if (sd.applies_to.length > 0) {
-      const structureMatch = entity.legal_structure && sd.applies_to.includes(entity.legal_structure);
-      const typeMatch = sd.applies_to.includes(entity.type);
-      if (!structureMatch && !typeMatch) {
-        systemExcludedTypes.add(sd.document_type);
-      }
-    }
-  }
-
-  // 3. Apply non-system templates
-  const templateExpectations: ExpectedDocument[] = [];
-  for (const tpl of templates || []) {
-    if ((tpl.source as string) === "system") continue; // already handled via overrides
-    const filter: TemplateFilter = tpl.applies_to_filter || {};
-    if (!matchesFilter(entity as EntityInfo, filter, regStates)) continue;
-
-    // If template has no legal_structure filter (i.e. "all entities") and the doc type
-    // is system-excluded for this entity, skip it — don't re-add what the system removed.
-    const hasExplicitStructureFilter = filter.legal_structure && filter.legal_structure.length > 0;
-    if (!hasExplicitStructureFilter && systemExcludedTypes.has(tpl.document_type)) continue;
-
-    templateExpectations.push({
-      document_type: tpl.document_type,
-      document_category: tpl.document_category,
-      is_required: tpl.is_required,
-      source: "template",
-      template_id: tpl.id,
-      notes: tpl.description,
-    });
-  }
-
-  // 3. Merge (system first, template overrides)
-  const allExpectations = [...systemExpectations, ...templateExpectations];
-  const seen = new Set<string>();
-  const deduped = allExpectations.filter((e) => {
-    if (seen.has(e.document_type)) return false;
-    seen.add(e.document_type);
-    return true;
-  });
-
-  // 4. Fetch existing expectations to preserve user state (is_not_applicable, manual items, satisfaction)
+  // Fetch existing expectations to preserve user state.
   const { data: existing } = await admin
     .from("entity_document_expectations")
     .select("document_type, is_not_applicable, is_satisfied, satisfied_by, source, notes")
@@ -309,19 +272,19 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
     (existing || []).map((e: Record<string, unknown>) => [e.document_type as string, e])
   );
 
-  // 5. Upsert expectations (bulk)
-  const rows = deduped
+  // Upsert expected rows. Skip any document_type the user has dismissed or
+  // tracks as a manual item — those stay as-is.
+  const rows = expected
     .filter((exp) => {
       const prev = existingMap.get(exp.document_type);
-      // Don't overwrite user-dismissed items or manual items
       return !(prev && (prev.is_not_applicable || prev.source === "manual"));
     })
     .map((exp) => {
       const prev = existingMap.get(exp.document_type);
       return {
         entity_id: entityId,
-        organization_id: entity.organization_id,
-        template_id: exp.template_id || null,
+        organization_id: orgId,
+        template_id: null,
         document_type: exp.document_type,
         document_category: exp.document_category,
         is_required: exp.is_required,
@@ -341,17 +304,16 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
     }
   }
 
-  // Remove stale system/template expectations that no longer apply
-  // (e.g., trust changed from non-grantor to grantor — remove EIN requirement)
-  const validDocTypes = new Set(deduped.map((e) => e.document_type));
+  // Remove stale system/template rows that aren't in the new expected set.
+  // Preserves manual, inferred, and user-dismissed rows. The 'template' source
+  // exists in legacy data from before this engine rewrite — we still clean
+  // those up so a re-sync removes obsolete items the old system created.
+  const validDocTypes = new Set(expected.map((e) => e.document_type));
   const staleRows = (existing || []).filter((e: Record<string, unknown>) => {
     const source = e.source as string;
-    const docType = e.document_type as string;
-    // Only remove system/template items that aren't in the new set
-    // Preserve manual, inferred, and user-dismissed items
     if (source !== "system" && source !== "template") return false;
     if (e.is_not_applicable) return false;
-    return !validDocTypes.has(docType);
+    return !validDocTypes.has(e.document_type as string);
   });
 
   if (staleRows.length > 0) {
@@ -366,6 +328,13 @@ export async function refreshEntityExpectations(entityId: string): Promise<void>
 }
 
 /**
+ * @deprecated Writes + reads document_expectation_templates, which the new
+ * engine ignores. Callers remaining as of PR 4.5: the legacy
+ * /api/document-templates route and the inference engine's "promote pattern
+ * to template" action. Both paths produce rows the engine no longer acts on;
+ * the inference-side promotion will be rewired to write to document_profiles
+ * when the inference engine activation PR (original spec's PR 6) lands.
+ *
  * Apply a template to all matching entities in the org.
  */
 export async function applyTemplate(templateId: string): Promise<number> {
@@ -485,7 +454,7 @@ export async function checkAndSatisfyExpectations(documentId: string): Promise<v
   const satisfiedByType = new Set<string>();
 
   for (const exp of expectations || []) {
-    const typeMatch = exp.document_type === doc.document_type;
+    const typeMatch = documentTypeSatisfies(exp.document_type, doc.document_type);
     // Category-only match: only for generic expectations (document_type "other" or empty),
     // NOT when the expectation has a specific document_type like "federal_tax_return"
     const isGenericExpectation = !exp.document_type || exp.document_type === "other";

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { calculateFilingStatus, getWorstFilingStatus } from "@/lib/utils/filing-status";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
@@ -225,14 +225,16 @@ export async function POST(request: Request) {
   const { orgId, user } = ctx;
 
   try {
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const parsed = createEntitySchema.safeParse(body);
     if (!parsed.success) {
       const firstError = parsed.error.issues[0];
+      const path = firstError?.path?.length ? firstError.path.join(".") : null;
+      const msg = firstError?.message || "Invalid input";
       return NextResponse.json(
-        { error: firstError?.message || "Invalid input" },
+        { error: path ? `${path}: ${msg}` : msg },
         { status: 400 }
       );
     }
@@ -249,6 +251,8 @@ export async function POST(request: Request) {
       parent_entity_id,
       notes,
       legal_structure,
+      ssn_last_4,
+      aliases,
     } = parsed.data;
 
     // Validate short_name format
@@ -258,12 +262,12 @@ export async function POST(request: Request) {
     }
 
     // Create the entity
-    const { data: entity, error: entityError } = await supabase
+    const { data: entity, error: entityError } = await db
       .from("entities")
       .insert({
         name,
         type,
-        formation_state,
+        formation_state: formation_state || null,
         short_name,
         ein: ein || null,
         formed_date: formed_date || null,
@@ -272,7 +276,8 @@ export async function POST(request: Request) {
         parent_entity_id: parent_entity_id || null,
         notes: notes || null,
         legal_structure: legal_structure || (type === "trust" ? "trust" : null),
-        organization_id: orgId,
+        ssn_last_4: ssn_last_4 || null,
+        aliases: Array.isArray(aliases) ? aliases.filter(a => a.trim()).map(a => a.trim()) : [],
       })
       .select()
       .single();
@@ -288,19 +293,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
-    // Create the initial registration for the formation state
-    const { error: regError } = await supabase.from("entity_registrations").insert({
-      entity_id: entity.id,
-      jurisdiction: formation_state,
-    });
+    // Create the initial registration for the formation state. Persons and
+    // joint_title entities don't have a formation-state registration concept,
+    // so skip this step for them.
+    if (formation_state && type !== "person" && type !== "joint_title") {
+      const { error: regError } = await db.raw.from("entity_registrations").insert({
+        entity_id: entity.id,
+        jurisdiction: formation_state,
+      });
 
-    if (regError) {
-      console.error("Failed to create initial registration:", regError.message);
+      if (regError) {
+        console.error("Failed to create initial registration:", regError.message);
+      }
     }
 
     // Auto-create trust_details record for trust entities
     if (type === "trust") {
-      const { error: trustError } = await supabase.from("trust_details").insert({
+      const { error: trustError } = await db.raw.from("trust_details").insert({
         entity_id: entity.id,
         trust_type: "revocable",
         situs_state: formation_state,
@@ -309,6 +318,13 @@ export async function POST(request: Request) {
       if (trustError) {
         console.error("Failed to create trust details:", trustError.message);
       }
+    }
+
+    // Auto-generate compliance obligations for the new entity (fire-and-forget).
+    if (entity.legal_structure && entity.formation_state && entity.status === "active") {
+      import("@/lib/utils/compliance-sync").then(({ syncComplianceForEntity }) =>
+        syncComplianceForEntity(entity.id, orgId).catch(console.error),
+      );
     }
 
     // Audit log
@@ -320,7 +336,12 @@ export async function POST(request: Request) {
       resourceType: "entity",
       resourceId: entity.id,
       entityId: entity.id,
-      metadata: { name, type },
+      metadata: {
+        name,
+        type,
+        description: `Created entity: ${name} (${type})`,
+        entity_name: name,
+      },
       ...reqCtx,
     });
 

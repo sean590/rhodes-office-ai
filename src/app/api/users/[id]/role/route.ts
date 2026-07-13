@@ -64,7 +64,8 @@ export async function PUT(
       .eq("user_id", targetUserId);
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      console.error("PUT /api/users/[id]/role update:", updateError);
+      return NextResponse.json({ error: "Failed to update role" }, { status: 500 });
     }
 
     const reqHeaders = await headers();

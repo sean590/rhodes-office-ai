@@ -57,6 +57,10 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
       setPhoneFactors(phone);
       if (totp.length > 0) setStep("enabled");
       if (phone.length > 0) setPhoneStep("enabled");
+      // Keep the server-side rhodes_mfa_state cookie (used by middleware for MFA
+      // enforcement) in sync with the current enrollment. Runs on mount and
+      // after every enroll (those call fetchFactors); fire-and-forget.
+      void fetch("/api/auth/mfa-state", { method: "POST" });
     } catch {
       // Non-critical
     } finally {
@@ -214,6 +218,9 @@ export function MfaSection({ isMobile }: { isMobile: boolean }) {
         setPhoneStep("idle");
         setPhoneFactors([]);
       }
+      // Refresh the middleware MFA-enforcement cookie now that a factor is gone
+      // (removing the last factor drops the user back to enroll-or-grace).
+      void fetch("/api/auth/mfa-state", { method: "POST" });
     } catch (err) {
       setErr(err instanceof Error ? err.message : "Failed to disable");
     } finally {

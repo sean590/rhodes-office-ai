@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import {
@@ -29,9 +29,9 @@ export async function GET(
     const isValid = await validateEntityOrg(id, orgId);
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await admin
+    const { data, error } = await db
       .from("entity_document_expectations")
       .select("*")
       .eq("entity_id", id)
@@ -40,8 +40,8 @@ export async function GET(
       .order("document_type");
 
     if (error) {
-      console.error("GET expectations error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET expectations error:", error);
+      return NextResponse.json({ error: "Failed to load expectations" }, { status: 500 });
     }
 
     return NextResponse.json(data || []);
@@ -71,7 +71,7 @@ export async function POST(
 
     const body = await request.json();
     const action = body.action as string;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     if (action === "refresh") {
       try {
@@ -79,7 +79,7 @@ export async function POST(
         await recheckEntityExpectations(id);
       } catch (refreshErr) {
         console.error("Expectations refresh error:", refreshErr);
-        return NextResponse.json({ error: String(refreshErr) }, { status: 500 });
+        return NextResponse.json({ error: "Failed to refresh expectations" }, { status: 500 });
       }
       return NextResponse.json({ success: true });
     }
@@ -95,12 +95,11 @@ export async function POST(
         return NextResponse.json({ error: "document_type and document_category required" }, { status: 400 });
       }
 
-      const { data, error } = await admin
+      const { data, error } = await db
         .from("entity_document_expectations")
         .upsert(
           {
             entity_id: id,
-            organization_id: orgId,
             document_type,
             document_category,
             is_required: is_required ?? true,
@@ -112,7 +111,10 @@ export async function POST(
         .select()
         .single();
 
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        console.error("POST /api/entities/[id]/expectations add:", error);
+        return NextResponse.json({ error: "Failed to add expectation" }, { status: 500 });
+      }
 
       const reqHeaders = await headers();
       const reqCtx = getRequestContext(reqHeaders, orgId);
@@ -180,14 +182,14 @@ export async function POST(
       }
 
       // Fetch the expectation details for audit
-      const { data: exp } = await admin
+      const { data: exp } = await db
         .from("entity_document_expectations")
         .select("document_type")
         .eq("id", expectation_id)
         .eq("entity_id", id)
         .single();
 
-      await admin
+      await db
         .from("entity_document_expectations")
         .update({
           is_not_applicable: action === "mark_na",

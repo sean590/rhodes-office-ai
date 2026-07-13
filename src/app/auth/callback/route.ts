@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MFA_STATE_COOKIE, buildMfaStateValue, mfaStateCookieOptions } from "@/lib/utils/mfa-state";
 
 const ACTIVITY_COOKIE = "rhodes_last_activity";
 const SESSION_START_COOKIE = "rhodes_session_start";
@@ -55,10 +56,11 @@ export async function GET(request: Request) {
             .eq("id", data.user.id);
         }
 
-        if (next) {
-          return setFreshSessionCookies(NextResponse.redirect(`${origin}${next}`));
-        }
-        return setFreshSessionCookies(NextResponse.redirect(`${origin}/entities`));
+        // OAuth just established an aal1 session. Compute the MFA state cookie
+        // (so middleware can enforce on every later navigation) and, if the user
+        // is already enrolled, route straight to the challenge — so the app
+        // never renders behind the OTP prompt.
+        return resolvePostLogin(supabase, admin, data.user.id, origin, next || "/home");
       }
 
       // 2. Check for pending invite by email
@@ -98,6 +100,61 @@ export async function GET(request: Request) {
   return NextResponse.redirect(`${origin}/login`);
 }
 
+/**
+ * Post-OAuth the session is aal1. Build the redirect response that (a) sets the
+ * rhodes_mfa_state cookie so middleware can enforce MFA on every later request,
+ * and (b) if the user has a verified factor, sends them to /auth/mfa (the
+ * challenge) before the app renders — so /home never paints behind the OTP
+ * prompt. Both the enrollment check and grace read are best-effort; on any error
+ * we fall back to the intended path with no cookie, and the client MfaGate
+ * remains the backstop.
+ */
+async function resolvePostLogin(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  origin: string,
+  intended: string,
+): Promise<NextResponse> {
+  let hasVerified = false;
+  let currentAal: string | null = null;
+  try {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    currentAal = aal?.currentLevel ?? null;
+    const { data: factors } = await supabase.auth.mfa.listFactors();
+    hasVerified =
+      (factors?.totp ?? []).some((f) => f.status === "verified") ||
+      (factors?.phone ?? []).some((f) => f.status === "verified");
+  } catch {
+    /* non-fatal */
+  }
+
+  let graceIso: string | null = null;
+  try {
+    const { data: prof } = await admin
+      .from("user_profiles")
+      .select("mfa_grace_until")
+      .eq("id", userId)
+      .maybeSingle();
+    graceIso = prof?.mfa_grace_until ?? null;
+  } catch {
+    /* non-fatal — mfa_grace_until column may be absent pre-migration-070 */
+  }
+
+  const needsChallenge = hasVerified && currentAal !== "aal2";
+  const destPath = needsChallenge
+    ? `/auth/mfa?next=${encodeURIComponent(intended)}`
+    : intended;
+
+  const response = setFreshSessionCookies(NextResponse.redirect(`${origin}${destPath}`));
+  response.cookies.set(
+    MFA_STATE_COOKIE,
+    buildMfaStateValue(hasVerified, graceIso),
+    mfaStateCookieOptions(),
+  );
+  return response;
+}
+
 /** Create users + user_profiles records if they don't exist yet */
 async function ensureUserRecords(
   admin: ReturnType<typeof createAdminClient>,
@@ -105,6 +162,8 @@ async function ensureUserRecords(
 ) {
   const displayName = user.user_metadata?.full_name || null;
   const avatarUrl = user.user_metadata?.avatar_url || null;
+  // 14-day MFA enrollment grace, started on first login (Increment 3).
+  const graceUntil = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
 
   // Legacy users table
   const { data: existingUser } = await admin
@@ -142,4 +201,12 @@ async function ensureUserRecords(
       avatar_url: avatarUrl,
     });
   }
+
+  // Best-effort: start the 14-day MFA grace clock if not already set. A SEPARATE
+  // statement (not part of the insert) so a missing column — migration 070 not
+  // applied yet — is a silent no-op rather than a login-breaking failure.
+  await admin.from("user_profiles")
+    .update({ mfa_grace_until: graceUntil })
+    .eq("id", user.id)
+    .is("mfa_grace_until", null);
 }

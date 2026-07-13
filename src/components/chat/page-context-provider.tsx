@@ -6,6 +6,8 @@ export interface PageContext {
   page: string;
   entityId?: string;
   entityName?: string;
+  investmentId?: string;
+  investmentName?: string;
   documentId?: string;
   filters?: Record<string, string>;
 }

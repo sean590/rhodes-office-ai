@@ -1,35 +1,21 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
-import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireSensitive } from "@/lib/utils/aal";
+import { isError } from "@/lib/utils/org-context";
 import { headers } from "next/headers";
 
 // TODO: migrate to /api/organizations/[orgId]/invites
 export async function POST(request: Request) {
   try {
-    const orgCtx = await requireOrg();
-    if (isError(orgCtx)) return orgCtx;
-    const { orgId } = orgCtx;
+    // Inviting a member is a team-management action → admin+. Uses the
+    // authoritative org_role via the capability guard (not the legacy
+    // user_profiles.role this route used to read).
+    const authCtx = await requireSensitive("members:manage");
+    if (isError(authCtx)) return authCtx;
+    const { orgId, user } = authCtx;
 
-    const supabase = await createClient();
     const admin = createAdminClient();
-
-    // Check current user is admin
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: profile } = await admin
-      .from("user_profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "admin") {
-      return NextResponse.json({ error: "Admin access required" }, { status: 403 });
-    }
 
     const body = await request.json();
     const { email, role } = body;
@@ -67,7 +53,7 @@ export async function POST(request: Request) {
 
     if (inviteError) {
       console.error("Invite error:", inviteError);
-      return NextResponse.json({ error: inviteError.message }, { status: 500 });
+      return NextResponse.json({ error: "Failed to send invite" }, { status: 500 });
     }
 
     // Pre-create their user_profile with the chosen role so they get it on first login

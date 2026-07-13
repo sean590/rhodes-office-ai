@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { validateShortName } from "@/lib/utils/document-naming";
 import { normalizeName } from "@/lib/utils/name-matching";
-import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
+import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@/lib/utils/audit";
 import { updateEntitySchema } from "@/lib/validations";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { requireSensitive } from "@/lib/utils/aal";
 import { refreshEntityExpectations } from "@/lib/utils/document-expectations";
+import { syncComplianceForEntity } from "@/lib/utils/compliance-sync";
 import { headers } from "next/headers";
 
 export async function GET(
@@ -33,7 +35,8 @@ export async function GET(
       if (entityError.code === "PGRST116") {
         return NextResponse.json({ error: "Entity not found" }, { status: 404 });
       }
-      return NextResponse.json({ error: entityError.message }, { status: 500 });
+      console.error("GET /api/entities/[id] entity query:", entityError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     // Fetch all related data in parallel
@@ -111,10 +114,11 @@ export async function GET(
         .select("*")
         .eq("entity_id", id)
         .order("next_due_date", { ascending: true, nullsFirst: false }),
-      // Document completeness expectations
+      // Document completeness expectations (joined with satisfying doc metadata
+      // so the checklist UI can link "✓ Operating Agreement" to the filename).
       supabase
         .from("entity_document_expectations")
-        .select("*")
+        .select("*, satisfied_doc:documents!satisfied_by(id, name, document_type, year, created_at)")
         .eq("entity_id", id)
         .order("document_category")
         .order("is_required", { ascending: false })
@@ -178,7 +182,8 @@ export async function GET(
         .eq("trust_detail_id", trustDetailsRes.data.id);
 
       if (rolesError) {
-        return NextResponse.json({ error: rolesError.message }, { status: 500 });
+        console.error("GET /api/entities/[id] trust roles query:", rolesError);
+        return NextResponse.json({ error: "Internal server error" }, { status: 500 });
       }
       trustRoles = roles || [];
     }
@@ -236,7 +241,8 @@ export async function GET(
       const { data: refDirectory } = await supabase
         .from("directory_entries")
         .select("id, name")
-        .in("id", Array.from(directoryIdsToResolve));
+        .in("id", Array.from(directoryIdsToResolve))
+        .is("deleted_at", null);
 
       if (refDirectory) {
         for (const d of refDirectory) {
@@ -327,7 +333,8 @@ export async function GET(
       const { data: invDir } = await supabase
         .from("directory_entries")
         .select("id, name")
-        .in("id", Array.from(capInvestorDirIds));
+        .in("id", Array.from(capInvestorDirIds))
+        .is("deleted_at", null);
 
       if (invDir) {
         for (const d of invDir) {
@@ -386,7 +393,7 @@ export async function PUT(
 
   try {
     const { id } = await params;
-    const supabase = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     const parsed = updateEntitySchema.safeParse(body);
@@ -406,6 +413,11 @@ export async function PUT(
       }
     }
 
+    // Sanitize aliases: trim and drop empties.
+    if (Array.isArray(updates.aliases)) {
+      updates.aliases = (updates.aliases as string[]).map(a => a.trim()).filter(Boolean);
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
     }
@@ -420,11 +432,21 @@ export async function PUT(
 
     updates.updated_at = new Date().toISOString();
 
-    const { data: entity, error } = await supabase
+    // Fetch existing entity before updating (for audit change tracking)
+    const { data: existing, error: fetchError } = await db
+      .from("entities")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !existing) {
+      return NextResponse.json({ error: "Entity not found" }, { status: 404 });
+    }
+
+    const { data: entity, error } = await db
       .from("entities")
       .update(updates)
       .eq("id", id)
-      .eq("organization_id", orgId)
       .select()
       .single();
 
@@ -439,17 +461,36 @@ export async function PUT(
           { status: 409 }
         );
       }
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+      console.error("PUT /api/entities/[id] update error:", error);
+      return NextResponse.json(
+        { error: "Failed to update entity" },
+        { status: 500 }
+      );
     }
 
-    // If legal_structure or type changed, refresh document expectations
+    // If legal_structure or type changed, refresh document expectations.
     if ("legal_structure" in updates || "type" in updates) {
       refreshEntityExpectations(id).catch((err) =>
         console.error("Failed to refresh expectations after entity update:", err)
       );
     }
 
+    // If legal_structure, formation_state, or tax_classification changed on
+    // an active entity, re-sync compliance obligations. These three fields
+    // drive state / federal rule matching, so a change means the set of
+    // applicable obligations has shifted. Same hook as apply.ts update_entity.
+    if (
+      entity &&
+      entity.status === "active" &&
+      ("legal_structure" in updates || "formation_state" in updates || "tax_classification" in updates)
+    ) {
+      syncComplianceForEntity(id, orgId).catch((err) =>
+        console.error("Failed to sync compliance after entity update:", err)
+      );
+    }
+
     // Audit log
+    const changedFields = Object.keys(updates).filter((k) => k !== "updated_at");
     const reqHeaders = await headers();
     const reqCtx = getRequestContext(reqHeaders, orgId);
     await logAuditEvent({
@@ -458,7 +499,12 @@ export async function PUT(
       resourceType: "entity",
       resourceId: id,
       entityId: id,
-      metadata: { fields: Object.keys(updates) },
+      metadata: {
+        fields: changedFields,
+        description: `Updated ${existing.name}: ${changedFields.map(humanizeField).join(", ")}`,
+        changes: buildChanges(existing, updates),
+        entity_name: existing.name,
+      },
       ...reqCtx,
     });
 
@@ -473,20 +519,19 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await requireOrg();
+  const ctx = await requireSensitive("records:delete");
   if (isError(ctx)) return ctx;
   const { orgId, user } = ctx;
 
   try {
     const { id } = await params;
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
     // Check entity exists and belongs to org
-    const { data: entity, error: fetchError } = await admin
+    const { data: entity, error: fetchError } = await db
       .from("entities")
       .select("id, name")
       .eq("id", id)
-      .eq("organization_id", orgId)
       .single();
 
     if (fetchError || !entity) {
@@ -494,11 +539,10 @@ export async function DELETE(
     }
 
     // Soft delete — set status to deleted
-    const { error } = await admin
+    const { error } = await db
       .from("entities")
       .update({ status: "deleted", updated_at: new Date().toISOString() })
-      .eq("id", id)
-      .eq("organization_id", orgId);
+      .eq("id", id);
 
     if (error) {
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -513,7 +557,11 @@ export async function DELETE(
       resourceType: "entity",
       resourceId: id,
       entityId: id,
-      metadata: { name: entity.name },
+      metadata: {
+        name: entity.name,
+        description: `Deleted entity: ${entity.name}`,
+        entity_name: entity.name,
+      },
       ...reqCtx,
     });
 

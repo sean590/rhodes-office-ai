@@ -516,7 +516,8 @@ export async function detectServiceProviderPatterns(orgId: string): Promise<Infe
   const { data: dirEntries } = await admin
     .from("directory_entries")
     .select("id, name")
-    .eq("organization_id", orgId);
+    .eq("organization_id", orgId)
+    .is("deleted_at", null);
   const dirMap = new Map((dirEntries || []).map((d: { id: string; name: string }) => [d.id, d.name]));
 
   // Get all docs
@@ -1246,12 +1247,22 @@ export async function dismissSuggestion(expectationId: string): Promise<void> {
 }
 
 /**
- * Promote a pattern to an org-wide template.
+ * Promote a detected pattern into the three-tier document requirements model.
+ *
+ * Inserts document_profiles rows for each scope the pattern applies to (derived
+ * from the entities in its evidence, or all four scopes as a fallback). The
+ * engine reads directly from document_profiles, so promoted patterns take
+ * effect immediately on the next refreshEntityExpectations call — and this
+ * function triggers refreshes for affected entities inline, fire-and-forget.
+ *
+ * org_document_patterns.promoted_to_template_id is reused as a "was promoted"
+ * marker pointing at the first created profile row's id (migration 051 dropped
+ * the old FK to document_expectation_templates).
  */
 export async function promoteToTemplate(
   patternId: string,
   orgId: string,
-  userId: string,
+  _userId: string,
 ): Promise<string | null> {
   const admin = createAdminClient();
 
@@ -1262,40 +1273,69 @@ export async function promoteToTemplate(
     .single();
   if (!pattern) return null;
 
-  // Create template
-  const { data: template, error } = await admin
-    .from("document_expectation_templates")
-    .insert({
-      organization_id: orgId,
-      document_type: pattern.document_type,
-      document_category: pattern.document_category,
-      is_required: false,
-      description: pattern.description,
-      source: "custom",
-      created_by: userId,
+  // Derive applicable scopes from the pattern's evidence. If we can't, fall
+  // back to all four scopes (matches the legacy "applies to all" default).
+  const { DOCUMENT_SCOPES, mapToDocumentScope } = await import("@/lib/data/document-defaults");
+  type PatternEvidence = { entities_with?: string[]; entities_without?: string[] };
+  const evidence = (pattern.evidence || {}) as PatternEvidence;
+  const relevantIds = [
+    ...(evidence.entities_with || []),
+    ...(evidence.entities_without || []),
+  ];
+  let scopes: (typeof DOCUMENT_SCOPES)[number][] = [...DOCUMENT_SCOPES];
+  if (relevantIds.length > 0) {
+    const { data: ents } = await admin
+      .from("entities")
+      .select("legal_structure")
+      .in("id", relevantIds);
+    const derived = new Set<(typeof DOCUMENT_SCOPES)[number]>();
+    for (const e of (ents || []) as Array<{ legal_structure: string | null }>) {
+      const s = mapToDocumentScope(e.legal_structure);
+      if (s) derived.add(s);
+    }
+    if (derived.size > 0) scopes = [...derived];
+  }
+
+  // Upsert a document_profiles row per matching scope. Promoted patterns
+  // start as optional (is_required=false) — the user can flip them to
+  // required in Settings → Documents if appropriate.
+  const rows = scopes.map((scope) => ({
+    organization_id: orgId,
+    entity_type_scope: scope,
+    document_type: pattern.document_type,
+    document_category: pattern.document_category,
+    enabled: true,
+    is_required: false,
+    notes: pattern.description,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { data: upserted, error } = await admin
+    .from("document_profiles")
+    .upsert(rows, {
+      onConflict: "organization_id,entity_type_scope,document_type",
     })
-    .select()
-    .single();
+    .select("id");
 
   if (error) {
-    // Likely duplicate — template already exists
-    console.error("Promote to template error:", error.message);
+    console.error("Promote to profile error:", error.message);
     return null;
   }
 
-  // Link pattern to template and boost confidence (promotion is strongest positive signal)
+  const firstProfileId = (upserted?.[0]?.id as string | undefined) ?? null;
+
+  // Link pattern to the promoted profile; boost confidence/times_confirmed.
   await admin
     .from("org_document_patterns")
     .update({
-      promoted_to_template_id: template.id,
+      promoted_to_template_id: firstProfileId,
       times_confirmed: (pattern.times_confirmed || 0) + 5,
       confidence: Math.min(1.0, (pattern.confidence || 0) + 0.15),
       updated_at: new Date().toISOString(),
     })
     .eq("id", patternId);
 
-  // Boost related patterns of the same type (promoting a cross-entity pattern
-  // signals the user cares about document coverage, so similar patterns get a nudge)
+  // Boost related cross-entity patterns.
   if (pattern.pattern_type === "cross_entity") {
     const { data: siblings } = await admin
       .from("org_document_patterns")
@@ -1317,11 +1357,26 @@ export async function promoteToTemplate(
     }
   }
 
-  // Apply template to all matching entities (backfill)
-  const { applyTemplate } = await import("./document-expectations");
-  await applyTemplate(template.id);
+  // Backfill: refresh expectations for active entities whose scope matches.
+  // Each refresh is fire-and-forget so a large org doesn't block the response.
+  const { data: activeEntities } = await admin
+    .from("entities")
+    .select("id, legal_structure")
+    .eq("organization_id", orgId)
+    .eq("status", "active");
 
-  return template.id;
+  const { refreshEntityExpectations } = await import("./document-expectations");
+  const scopeSet = new Set<string>(scopes);
+  for (const e of (activeEntities || []) as Array<{ id: string; legal_structure: string | null }>) {
+    const s = mapToDocumentScope(e.legal_structure);
+    if (s && scopeSet.has(s)) {
+      refreshEntityExpectations(e.id).catch((err) =>
+        console.error(`refresh failed for entity ${e.id}:`, err),
+      );
+    }
+  }
+
+  return firstProfileId;
 }
 
 // --- Helpers ---

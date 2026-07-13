@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import {
   getRuleById,
   calculateNextDueDateAfterCompletion,
+  advanceDateByFrequency,
 } from "@/lib/utils/compliance-engine";
 import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { requireOrg, isError, validateEntityOrg } from "@/lib/utils/org-context";
@@ -23,7 +24,7 @@ export async function PUT(
     if (!isValid) return NextResponse.json({ error: "Entity not found" }, { status: 404 });
 
     const supabase = await createClient();
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
     const body = await request.json();
 
     // Fetch the existing obligation
@@ -41,7 +42,8 @@ export async function PUT(
           { status: 404 }
         );
       }
-      return NextResponse.json({ error: oblError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/compliance/[obligationId] obligation fetch:", oblError);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
     const updates: Record<string, unknown> = {
@@ -50,10 +52,15 @@ export async function PUT(
 
     // Handle status changes
     if (body.status) {
+      // Default: write whatever status the caller asked for. For
+      // completion, we may override below based on whether a next cycle
+      // exists (rolling obligation goes back to 'pending', one_time stays
+      // 'completed').
       updates.status = body.status;
 
       if (body.status === "completed") {
-        updates.completed_at = body.completed_at || new Date().toISOString();
+        const proposedCompletedAt = body.completed_at || new Date().toISOString();
+        updates.completed_at = proposedCompletedAt;
         if (body.completed_by) updates.completed_by = body.completed_by;
         if (body.payment_amount !== undefined)
           updates.payment_amount = body.payment_amount;
@@ -62,46 +69,73 @@ export async function PUT(
         if (body.document_id) updates.document_id = body.document_id;
         if (body.notes !== undefined) updates.notes = body.notes;
 
-        // After completion, create the next cycle's obligation
-        const rule = getRuleById(obligation.rule_id);
+        // Append a history row so we keep the audit trail of every
+        // completion. The cycle_due_date is captured BEFORE we advance
+        // next_due_date on the parent row below.
+        const cycleDueDate = obligation.next_due_date as string | null;
+        const completedDate = proposedCompletedAt.split("T")[0];
+        if (cycleDueDate) {
+          const { error: cycleErr } = await db.raw
+            .from("compliance_obligation_cycles")
+            .insert({
+              obligation_id: obligationId,
+              cycle_due_date: cycleDueDate,
+              completed_at: proposedCompletedAt,
+              completed_by: body.completed_by ?? orgCtx.user?.id ?? null,
+              document_id: body.document_id ?? null,
+              payment_amount:
+                body.payment_amount !== undefined ? body.payment_amount : null,
+              confirmation:
+                body.confirmation !== undefined ? body.confirmation : null,
+              notes: body.notes !== undefined ? body.notes : null,
+            });
+          if (cycleErr) {
+            console.error(
+              `[compliance] failed to append cycle history for obligation ${obligationId}:`,
+              cycleErr.message,
+            );
+            // Non-fatal — the parent row update is the user-visible part.
+          }
+        }
+
+        // Determine next cycle's due date. Rule-driven obligations use
+        // the rule's frequency; ad-hoc obligations use their own
+        // frequency column. one_time / continuous don't advance.
+        let nextDue: string | null = null;
+        const rule = obligation.rule_id ? getRuleById(obligation.rule_id) : null;
+        const obligationFrequency = (obligation.frequency as string) || "one_time";
+
         if (rule && rule.frequency !== "one_time" && rule.frequency !== "continuous") {
-          // Fetch entity for formed_date
           const { data: entity } = await supabase
             .from("entities")
             .select("formed_date")
             .eq("id", id)
             .single();
-
-          const completedDate =
-            (body.completed_at || new Date().toISOString()).split("T")[0];
-          const nextDue = calculateNextDueDateAfterCompletion(
+          nextDue = calculateNextDueDateAfterCompletion(
             rule,
             completedDate,
-            entity?.formed_date || null
+            entity?.formed_date || null,
           );
+        } else if (
+          !rule &&
+          obligationFrequency !== "one_time" &&
+          obligationFrequency !== "continuous"
+        ) {
+          // Ad-hoc obligation (no rule_id → no due-date formula): roll the
+          // current cycle's due date forward by the frequency interval. Anchor
+          // on the existing next_due_date so the cadence stays stable; fall
+          // back to the completion date if the row has no due date yet.
+          const anchor = (obligation.next_due_date as string | null) || completedDate;
+          nextDue = advanceDateByFrequency(anchor, obligationFrequency);
+        }
 
-          if (nextDue) {
-            // Upsert next cycle obligation
-            await admin.from("compliance_obligations").upsert(
-              {
-                entity_id: id,
-                rule_id: obligation.rule_id,
-                jurisdiction: obligation.jurisdiction,
-                obligation_type: obligation.obligation_type,
-                name: obligation.name,
-                description: obligation.description,
-                frequency: obligation.frequency,
-                next_due_date: nextDue,
-                fee_description: obligation.fee_description,
-                form_number: obligation.form_number,
-                portal_url: obligation.portal_url,
-                filed_with: obligation.filed_with,
-                penalty_description: obligation.penalty_description,
-                status: "pending",
-              },
-              { onConflict: "entity_id,rule_id,next_due_date" }
-            );
-          }
+        // Advance the existing row in place: if there's a next cycle,
+        // status returns to pending with the new due date. If not
+        // (one_time / continuous), the row stays 'completed' so the
+        // completion record is preserved.
+        if (nextDue) {
+          updates.next_due_date = nextDue;
+          updates.status = "pending";
         }
       }
     }
@@ -109,7 +143,7 @@ export async function PUT(
     // Handle individual field updates
     if (body.notes !== undefined && !updates.notes) updates.notes = body.notes;
 
-    const { data: updated, error: updateError } = await admin
+    const { data: updated, error: updateError } = await db
       .from("compliance_obligations")
       .update(updates)
       .eq("id", obligationId)
@@ -117,7 +151,8 @@ export async function PUT(
       .single();
 
     if (updateError) {
-      return NextResponse.json({ error: updateError.message }, { status: 500 });
+      console.error("PUT /api/entities/[id]/compliance/[obligationId] update:", updateError);
+      return NextResponse.json({ error: "Failed to update obligation" }, { status: 500 });
     }
 
     const reqHeaders = await headers();

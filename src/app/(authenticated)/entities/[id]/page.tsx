@@ -9,15 +9,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
-import { BuildingIcon, PlusIcon, XIcon, CheckIcon, UploadIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
+import { BuildingIcon, PlusIcon, XIcon, CheckIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, ChatIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
+import { DocumentChecklist, type ChecklistExpectation } from "@/components/entities/DocumentChecklist";
 import { ENTITY_TYPE_LABELS } from "@/lib/utils/entity-colors";
 import { RELATIONSHIP_TYPE_COLORS } from "@/lib/utils/entity-colors";
 import { TRUST_ROLE_ORDER, TRUST_ROLE_LABELS, TRUST_ROLE_COLORS, getStateLabel, US_STATES, DOCUMENT_TYPE_LABELS, DOCUMENT_TYPE_CATEGORIES, DOCUMENT_CATEGORY_OPTIONS, DOCUMENT_CATEGORY_LABELS, groupTaxDocuments } from "@/lib/constants";
 import { formatMoney, formatDate } from "@/lib/utils/format";
-import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure } from "@/lib/types/enums";
+import type { TrustRoleType, Jurisdiction, CustomFieldType, DocumentType, LegalStructure, TaxClassification } from "@/lib/types/enums";
 import type {
   EntityDetail,
   EntityRegistration,
@@ -34,6 +35,14 @@ import type {
   ComplianceObligation,
 } from "@/lib/types/entities";
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
+import { EntityInvestmentsTab } from "@/components/entities/EntityInvestmentsTab";
+import { EntityServiceProvidersTab } from "@/components/entities/EntityServiceProvidersTab";
+import { Tabs } from "@/components/ui/tabs";
+import { EntityStateBanner, NeedsAttentionCard } from "@/components/entities/NeedsAttentionCard";
+import { humanizeActivity } from "@/lib/activity-humanizer";
+import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
+import { useCan } from "@/components/authz/role-provider";
+import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -103,6 +112,46 @@ const LEGAL_STRUCTURE_LABELS: Record<string, string> = {
   series_llc: "Series LLC",
   other: "Other",
 };
+
+// Tax classification options surfaced per legal structure. An LLC can be
+// taxed several ways (partnership/s_corp/c_corp/disregarded); a corporation
+// is always a c_corp or s_corp; trusts are grantor vs non-grantor for tax.
+// The dropdown filters options using this map so users see only plausible
+// elections for the legal structure they already picked.
+const TAX_CLASSIFICATION_LABELS: Record<string, string> = {
+  partnership: "Partnership (Form 1065)",
+  s_corp: "S Corporation (Form 1120-S)",
+  c_corp: "C Corporation (Form 1120)",
+  disregarded: "Disregarded Entity (Single-Member LLC)",
+  sole_prop: "Sole Proprietorship (Schedule C)",
+  trust_grantor: "Grantor Trust",
+  trust_non_grantor: "Non-Grantor Trust (Form 1041)",
+  tax_exempt: "Tax-Exempt (Form 990)",
+};
+
+const TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE: Record<string, TaxClassification[]> = {
+  llc: ["partnership", "s_corp", "c_corp", "disregarded"],
+  corporation: ["c_corp", "s_corp"],
+  lp: ["partnership"],
+  gp: ["partnership"],
+  grantor_trust: ["trust_grantor", "trust_non_grantor"],
+  non_grantor_trust: ["trust_non_grantor", "trust_grantor"],
+  trust: ["trust_grantor", "trust_non_grantor"],
+  sole_prop: ["sole_prop"],
+  series_llc: ["partnership", "s_corp", "c_corp", "disregarded"],
+  other: ["partnership", "s_corp", "c_corp", "disregarded", "sole_prop", "trust_grantor", "trust_non_grantor", "tax_exempt"],
+};
+
+const ALL_TAX_CLASSIFICATIONS: TaxClassification[] = [
+  "partnership",
+  "s_corp",
+  "c_corp",
+  "disregarded",
+  "sole_prop",
+  "trust_grantor",
+  "trust_non_grantor",
+  "tax_exempt",
+];
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -339,6 +388,178 @@ function LegalStructureRow({
         </div>
       )}
     </>
+  );
+}
+
+/* ---- Tax Classification Row (inline editable) ---- */
+function TaxClassificationRow({
+  entityId,
+  currentValue,
+  legalStructure,
+  onUpdate,
+}: {
+  entityId: string;
+  currentValue: TaxClassification | null;
+  legalStructure: LegalStructure | null;
+  onUpdate: (val: TaxClassification | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState<TaxClassification | "">(currentValue || "");
+  const [saving, setSaving] = useState(false);
+
+  // Filter options by the entity's legal structure, but always include
+  // whatever's currently set (in case it was chosen under a different
+  // structure) so the user can still see and unset it.
+  const options: TaxClassification[] = (() => {
+    const filtered =
+      legalStructure && TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE[legalStructure]
+        ? [...TAX_CLASSIFICATIONS_BY_LEGAL_STRUCTURE[legalStructure]]
+        : [...ALL_TAX_CLASSIFICATIONS];
+    if (currentValue && !filtered.includes(currentValue)) filtered.push(currentValue);
+    return filtered;
+  })();
+
+  async function doSave() {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tax_classification: value || null }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      onUpdate((value || null) as TaxClassification | null);
+      setEditing(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayLabel = currentValue
+    ? (TAX_CLASSIFICATION_LABELS[currentValue] || currentValue)
+    : "—";
+
+  // Inline nudge when the user has a legal_structure but no tax_classification.
+  // Drives federal compliance rule matching, so absence = missing deadlines.
+  const showNudge = !currentValue && !!legalStructure && !editing;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "10px 0",
+        borderBottom: "1px solid #f0eee8",
+        fontSize: 13,
+      }}
+    >
+      <span style={{ color: "#6b6b76", fontWeight: 500, minWidth: 140, flexShrink: 0 }}>Tax Classification</span>
+      {editing ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <select
+            value={value}
+            onChange={(e) => setValue(e.target.value as TaxClassification | "")}
+            style={{
+              fontSize: 13,
+              padding: "4px 8px",
+              border: "1px solid #ddd9d0",
+              borderRadius: 6,
+              background: "#fff",
+              color: "#1a1a1f",
+              fontFamily: "inherit",
+            }}
+          >
+            <option value="">Not set</option>
+            {options.map((opt) => (
+              <option key={opt} value={opt}>{TAX_CLASSIFICATION_LABELS[opt] || opt}</option>
+            ))}
+          </select>
+          <button
+            onClick={doSave}
+            disabled={saving}
+            style={{
+              background: "#2d5a3d",
+              color: "#fff",
+              border: "none",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {saving ? "..." : "Save"}
+          </button>
+          <button
+            onClick={() => { setEditing(false); setValue(currentValue || ""); }}
+            style={{
+              background: "none",
+              border: "1px solid #e8e6df",
+              borderRadius: 4,
+              padding: "4px 10px",
+              fontSize: 11,
+              fontWeight: 500,
+              color: "#6b6b76",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      ) : showNudge ? (
+        <button
+          onClick={() => { setValue(""); setEditing(true); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "rgba(196,117,32,0.08)",
+            border: "1px solid rgba(196,117,32,0.3)",
+            borderRadius: 6,
+            padding: "4px 10px",
+            cursor: "pointer",
+            fontSize: 12,
+            fontFamily: "inherit",
+            color: "#8b4f15",
+          }}
+          title="Set tax classification so federal deadlines appear on the compliance tab"
+        >
+          Set tax classification
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ flexShrink: 0 }}>
+            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      ) : (
+        <button
+          onClick={() => { setValue(currentValue || ""); setEditing(true); }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            background: "none",
+            border: currentValue ? "none" : "1px dashed #ddd9d0",
+            borderRadius: currentValue ? 0 : 6,
+            padding: currentValue ? 0 : "3px 10px",
+            cursor: "pointer",
+            fontSize: 13,
+            fontFamily: "inherit",
+            color: currentValue ? "#1a1a1f" : "#9494a0",
+            textAlign: "right",
+          }}
+          title="Click to edit"
+        >
+          {currentValue ? displayLabel : "Not set"}
+          <svg width="12" height="12" viewBox="0 0 12 12" style={{ color: "#9494a0", flexShrink: 0 }}>
+            <path d="M8.5 1.5l2 2-6.5 6.5H2V8L8.5 1.5z" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -1833,6 +2054,7 @@ function TrustDetailsCard({
   picklist: PicklistItem[];
   picklistLoading: boolean;
 }) {
+  const isMobile = useIsMobile();
   const [addingRole, setAddingRole] = useState(false);
   const [newRoleType, setNewRoleType] = useState<TrustRoleType>("trustee");
   const [showRolePicker, setShowRolePicker] = useState(false);
@@ -1966,7 +2188,7 @@ function TrustDetailsCard({
           </button>
         )}
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 32 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 2fr", gap: isMobile ? 16 : 32 }}>
         {/* Left column: Trust info */}
         <div>
           {editingDetails ? (
@@ -2167,6 +2389,229 @@ function TrustDetailsCard({
   );
 }
 
+/* ---- Joint-Title Overview (joint_title entities only) ----
+
+   The minimal "thin shell" detail page from spec §3: legal title, ownership
+   form, member list, and a Dissolve action. Replaces the generic Overview
+   which would show empty EIN/Legal Structure/Formation State rows. */
+interface JointTitleMember {
+  joint_title_id: string;
+  person_entity_id: string;
+  person_name: string;
+  ownership_form: string;
+  note: string | null;
+}
+
+const OWNERSHIP_FORM_LABELS: Record<string, string> = {
+  jtwros: "JTWROS",
+  tbe: "Tenants by the Entirety",
+  tic: "Tenants in Common",
+  community_property: "Community Property",
+  other: "Other",
+};
+
+function JointTitleOverview({
+  jointTitleId,
+  jointTitleName,
+  status,
+  onStatusChange,
+}: {
+  jointTitleId: string;
+  jointTitleName: string;
+  status: string;
+  onStatusChange: () => void;
+}) {
+  const [members, setMembers] = useState<JointTitleMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dissolving, setDissolving] = useState(false);
+
+  const fetchMembers = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/entities/${jointTitleId}/joint-title-members`);
+      if (res.ok) setMembers(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [jointTitleId]);
+
+  useEffect(() => { fetchMembers(); }, [fetchMembers]);
+
+  const ownershipForm = members[0]?.ownership_form || null;
+  const isInactive = status === "inactive" || status === "dissolved";
+
+  async function handleDissolve() {
+    if (!confirm(`Mark "${jointTitleName}" as dissolved? Use this for title changes, death of a member, or reconstitution of ownership.`)) return;
+    setDissolving(true);
+    try {
+      const res = await fetch(`/api/entities/${jointTitleId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "inactive" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to dissolve");
+        return;
+      }
+      onStatusChange();
+    } finally {
+      setDissolving(false);
+    }
+  }
+
+  return (
+    <div>
+      <Card>
+        <SectionHeader>Joint Title</SectionHeader>
+
+        <InfoRow label="Legal Title">{jointTitleName}</InfoRow>
+        <InfoRow label="Ownership Form">
+          {ownershipForm ? (OWNERSHIP_FORM_LABELS[ownershipForm] || ownershipForm.toUpperCase()) : "\u2014"}
+        </InfoRow>
+        <InfoRow label="Status">
+          <span style={{ color: isInactive ? "#9494a0" : "#2d8a4e", fontWeight: 500 }}>
+            {isInactive ? "Dissolved" : "Active"}
+          </span>
+        </InfoRow>
+
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>
+            Members
+          </div>
+          {loading ? (
+            <div style={{ fontSize: 13, color: "#9494a0" }}>Loading...</div>
+          ) : members.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#9494a0" }}>No members recorded. Joint-title entities are typically populated by document extraction.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {members.map(m => (
+                <div key={m.person_entity_id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f8f7f4", borderRadius: 6 }}>
+                  <a href={`/entities/${m.person_entity_id}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                    {m.person_name}
+                  </a>
+                  {m.note && <span style={{ fontSize: 12, color: "#9494a0" }}>{m.note}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {!isInactive && (
+          <div style={{ marginTop: 24, paddingTop: 16, borderTop: "1px solid #e8e6df" }}>
+            <Button variant="secondary" onClick={handleDissolve} disabled={dissolving}>
+              {dissolving ? "Dissolving..." : "Dissolve Joint Title"}
+            </Button>
+            <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6 }}>
+              Use for title changes, death of a member, or reconstitution of ownership.
+            </div>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+/* ---- Family Tab (persons only) ---- */
+interface PersonRel {
+  id: string;
+  from_person_id: string;
+  to_person_id: string;
+  relationship: "spouse_of" | "parent_of" | "child_of";
+  notes: string | null;
+}
+
+interface JointTitleMembership {
+  joint_title_id: string;
+  joint_title_name: string;
+  ownership_form: string;
+  members: Array<{ person_entity_id: string; person_name: string }>;
+}
+
+function FamilyTab({ personId, personName }: { personId: string; personName: string }) {
+  const [rels, setRels] = useState<PersonRel[]>([]);
+  const [nameMap, setNameMap] = useState<Record<string, string>>({});
+  const [jointTitles, setJointTitles] = useState<JointTitleMembership[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [relRes, jtRes] = await Promise.all([
+          fetch(`/api/person-relationships?person_id=${personId}`),
+          fetch(`/api/entities/${personId}/joint-titles`),
+        ]);
+        const relData: PersonRel[] = relRes.ok ? await relRes.json() : [];
+        setRels(relData);
+
+        // Resolve names for all counterpart persons.
+        const counterpartIds = Array.from(new Set(relData.map(r => r.from_person_id === personId ? r.to_person_id : r.from_person_id)));
+        if (counterpartIds.length > 0) {
+          const map: Record<string, string> = {};
+          await Promise.all(counterpartIds.map(async cid => {
+            const r = await fetch(`/api/entities/${cid}`);
+            if (r.ok) { const e = await r.json(); map[cid] = e.name; }
+          }));
+          setNameMap(map);
+        }
+
+        if (jtRes.ok) setJointTitles(await jtRes.json());
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [personId]);
+
+  if (loading) return <div style={{ color: "#9494a0", fontSize: 13, padding: 20 }}>Loading family...</div>;
+
+  const spouseRels = rels.filter(r => r.relationship === "spouse_of" && r.from_person_id === personId);
+  const parents = rels.filter(r => r.relationship === "child_of" && r.from_person_id === personId);
+  const children = rels.filter(r => r.relationship === "parent_of" && r.from_person_id === personId);
+
+  const renderGroup = (label: string, edges: PersonRel[]) => {
+    if (edges.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 20 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 8px" }}>{label}</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {edges.map(e => {
+            const otherId = e.from_person_id === personId ? e.to_person_id : e.from_person_id;
+            return (
+              <a key={e.id} href={`/entities/${otherId}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                {nameMap[otherId] || "(Unknown)"}
+              </a>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const empty = spouseRels.length === 0 && parents.length === 0 && children.length === 0 && jointTitles.length === 0;
+  if (empty) {
+    return <div style={{ color: "#9494a0", fontSize: 13, padding: 20 }}>No family relationships recorded for {personName}.</div>;
+  }
+
+  return (
+    <div>
+      {renderGroup("Spouse", spouseRels)}
+      {renderGroup("Parents", parents)}
+      {renderGroup("Children", children)}
+      {jointTitles.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 8px" }}>Joint Titles</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {jointTitles.map(jt => (
+              <a key={jt.joint_title_id} href={`/entities/${jt.joint_title_id}`} style={{ fontSize: 14, color: "#3366a8", textDecoration: "none" }}>
+                {jt.joint_title_name} <span style={{ color: "#9494a0", fontSize: 12 }}>({jt.ownership_form.toUpperCase()})</span>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---- Relationships Tab (full) ---- */
 function RelationshipsTab({
   relationships,
@@ -2275,6 +2720,7 @@ function RelationshipsTab({
 /* ---- Cap Table Tab (full) ---- */
 function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading }: { entityId: string; capTable: CapTableEntry[]; onRefresh: () => Promise<void> | void; picklist: PicklistItem[]; picklistLoading: boolean }) {
   const router = useRouter();
+  const isMobile = useIsMobile();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ investor_name: "", investor_type: "individual", units: "", ownership_pct: "", capital_contributed: "", investment_date: "" });
   const [saving, setSaving] = useState(false);
@@ -2433,7 +2879,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
   return (
     <div>
       {/* Stat cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr 1fr", gap: isMobile ? 10 : 16, marginBottom: 24 }}>
         <div style={{ background: "#fff", border: "1px solid #e8e6df", borderRadius: 12, padding: "16px 20px" }}>
           <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>
             Total Raised
@@ -2513,13 +2959,13 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
 
       {/* Full investor table */}
       <Card style={{ marginTop: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <SectionHeader>Investors</SectionHeader>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", width: isMobile ? "100%" : "auto" }}>
+            <Button size="sm" variant="secondary" onClick={handleSync} disabled={syncing} style={isMobile ? { flex: 1 } : undefined}>
               {syncing ? "Syncing..." : "Sync Members & Directory"}
             </Button>
-            <Button size="sm" onClick={() => setShowAdd(true)}>
+            <Button size="sm" onClick={() => setShowAdd(true)} style={isMobile ? { flex: 1 } : undefined}>
               <PlusIcon size={10} />
               Add Investor
             </Button>
@@ -2538,7 +2984,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
         {/* Add form */}
         {showAdd && (
           <div style={{ background: "#fafaf7", border: "1px solid #e8e6df", borderRadius: 8, padding: 12, marginBottom: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr 1fr 1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
               <div style={{ position: "relative" }}>
                 <div style={{ fontSize: 10, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase", marginBottom: 3 }}>Investor Name *</div>
                 <div style={{ display: "flex", gap: 4 }}>
@@ -2608,7 +3054,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
         {/* Table header */}
         <div
           style={{
-            display: "grid",
+            display: isMobile ? "none" : "grid",
             gridTemplateColumns: "2fr 1fr 1fr 1.5fr 1fr 1fr auto",
             gap: 12,
             padding: "8px 0",
@@ -2637,6 +3083,50 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
           const isEditing = editingId === entry.id;
 
           if (isEditing) {
+            if (isMobile) {
+              const mLabel = { fontSize: 10, fontWeight: 600, color: "#6b6b76", textTransform: "uppercase" as const, marginBottom: 3 };
+              return (
+                <div
+                  key={entry.id}
+                  style={{ border: "1px solid #ddd9d0", borderRadius: 10, padding: 12, marginBottom: 10, background: "#fafaf7", display: "flex", flexDirection: "column", gap: 10 }}
+                >
+                  <div>
+                    <div style={mLabel}>Investor Name</div>
+                    <input style={inputStyle} value={editForm.investor_name} onChange={(e) => setEditForm((f) => ({ ...f, investor_name: e.target.value }))} />
+                  </div>
+                  <div>
+                    <div style={mLabel}>Type</div>
+                    <select style={{ ...inputStyle, cursor: "pointer" }} value={editForm.investor_type} onChange={(e) => setEditForm((f) => ({ ...f, investor_type: e.target.value }))}>
+                      {Object.entries(INVESTOR_TYPE_BADGE).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={mLabel}>Units</div>
+                      <input style={inputStyle} type="number" value={editForm.units} onChange={(e) => setEditForm((f) => ({ ...f, units: e.target.value }))} />
+                    </div>
+                    <div>
+                      <div style={mLabel}>Ownership %</div>
+                      <input style={inputStyle} type="number" step="0.01" value={editForm.ownership_pct} onChange={(e) => setEditForm((f) => ({ ...f, ownership_pct: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <div style={mLabel}>Capital ($)</div>
+                      <input style={inputStyle} type="number" step="0.01" value={editForm.capital_contributed} onChange={(e) => setEditForm((f) => ({ ...f, capital_contributed: e.target.value }))} />
+                    </div>
+                    <div>
+                      <div style={mLabel}>Date</div>
+                      <input style={inputStyle} type="date" value={editForm.investment_date} onChange={(e) => setEditForm((f) => ({ ...f, investment_date: e.target.value }))} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <Button size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
+                    <Button size="sm" variant="primary" onClick={handleSaveEdit} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
+                  </div>
+                </div>
+              );
+            }
             return (
               <div
                 key={entry.id}
@@ -2667,6 +3157,63 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
                   <Button size="sm" onClick={() => setEditingId(null)}>
                     <XIcon size={10} />
                   </Button>
+                </div>
+              </div>
+            );
+          }
+
+          if (isMobile) {
+            const fieldRow = (label: string, value: React.ReactNode, mono?: boolean) => (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontSize: 12, color: "#6b6b76" }}>{label}</span>
+                <span style={{ fontSize: 13, color: "#1a1a1f", fontFamily: mono ? "'DM Mono', monospace" : "inherit", fontWeight: mono ? 500 : 400 }}>{value}</span>
+              </div>
+            );
+            return (
+              <div
+                key={entry.id}
+                style={{ border: "1px solid #f0eee8", borderRadius: 10, padding: 12, marginBottom: 10, display: "flex", flexDirection: "column", gap: 10 }}
+              >
+                {/* Name + type */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                  <span
+                    onClick={isEntity ? () => router.push(`/entities/${entry.investor_entity_id}`) : undefined}
+                    style={{ color: isEntity ? "#3366a8" : "#1a1a1f", fontWeight: 600, fontSize: 14, cursor: isEntity ? "pointer" : "default" }}
+                  >
+                    {entry.investor_name || "Unknown Investor"}
+                    {isEntity && <span style={{ marginLeft: 3, fontSize: 11 }}>{"↗"}</span>}
+                  </span>
+                  <Badge label={typeBadge.label} color={typeBadge.color} bg={typeBadge.bg} />
+                </div>
+                {/* Ownership bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ flex: 1, height: 6, borderRadius: 3, background: "#f0eee8", overflow: "hidden" }}>
+                    <div style={{ width: `${entry.ownership_pct}%`, height: "100%", background: barColor, borderRadius: 3 }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1f", minWidth: 48, textAlign: "right" }}>
+                    {entry.ownership_pct.toFixed(1)}%
+                  </span>
+                </div>
+                {/* Fields */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {fieldRow("Units", entry.units?.toLocaleString() ?? "—", true)}
+                  {fieldRow("Capital", formatMoney(entry.capital_contributed), true)}
+                  {fieldRow("Date", formatDate(entry.investment_date))}
+                </div>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => startEdit(entry)}
+                    style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 5, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#6b6b76", fontWeight: 500, fontFamily: "inherit" }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleDelete(entry.id)}
+                    style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 5, padding: "5px 10px", cursor: "pointer", color: "#c73e3e", fontFamily: "inherit" }}
+                  >
+                    <XIcon size={11} />
+                  </button>
                 </div>
               </div>
             );
@@ -2771,6 +3318,7 @@ function CapTableTab({ entityId, capTable, onRefresh, picklist, picklistLoading 
 /* ---- Compliance Tab ---- */
 function ComplianceTab({
   entityId,
+  entityType,
   formationState,
   registrations,
   formedDate,
@@ -2781,6 +3329,7 @@ function ComplianceTab({
   onRefresh,
 }: {
   entityId: string;
+  entityType: string;
   formationState: string;
   registrations: EntityRegistration[];
   formedDate: string | null;
@@ -2831,6 +3380,24 @@ function ComplianceTab({
     }
   }
 
+  // Federal jurisdiction. The engine generates federal obligations
+  // (1120/1120-S/1065/1041/990, 1040/1040-ES, BOI, 8822-B) with
+  // jurisdiction="federal" — no entity registration is involved, so this
+  // entry isn't tied to any row in entity_registrations. Only render when
+  // there are federal obligations to display.
+  const hasFederalObligations = obligations.some((o) => o.jurisdiction === "federal");
+  if (hasFederalObligations) {
+    jurisdictions.push({
+      code: "federal",
+      isFormation: false,
+      registrationId: null,
+      qualificationDate: null,
+      lastFilingDate: null,
+      stateId: null,
+      filingExempt: false,
+    });
+  }
+
   async function handleSync() {
     setSyncing(true);
     setSyncMessage(null);
@@ -2855,7 +3422,11 @@ function ComplianceTab({
     }
   }
 
-  if (!legalStructure) {
+  // Person entities don't use legal_structure — they generate obligations via
+  // the person scope (federal 1040/1040-ES + state personal income tax rules).
+  // Only show the "Set legal structure" banner when the guard is actually
+  // relevant to rule matching.
+  if (!legalStructure && entityType !== "person") {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <Card>
@@ -2952,7 +3523,10 @@ function ComplianceCard({
   const [exempt, setExempt] = useState(jur.filingExempt);
   const [saving, setSaving] = useState(false);
 
-  const stateName = getStateLabel(jur.code as Jurisdiction);
+  // Federal cards aren't tied to a state registration — render "Federal" as
+  // the heading and skip the formation/qualification badge + edit fields.
+  const isFederal = jur.code === "federal";
+  const stateName = isFederal ? "Federal" : getStateLabel(jur.code as Jurisdiction);
 
   // Calculate worst status across all obligations for the card badge
   const displayStatuses = obligations.map((o) =>
@@ -3049,12 +3623,14 @@ function ComplianceCard({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 16, fontWeight: 600, color: "#1a1a1f" }}>{stateName}</span>
-          <Badge
-            label={jur.isFormation ? "Formation" : "Qualification"}
-            color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
-            bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
-          />
-          {!editing && (
+          {!isFederal && (
+            <Badge
+              label={jur.isFormation ? "Formation" : "Qualification"}
+              color={jur.isFormation ? "#2d5a3d" : "#3366a8"}
+              bg={jur.isFormation ? "rgba(45,90,61,0.10)" : "rgba(51,102,168,0.10)"}
+            />
+          )}
+          {!editing && !isFederal && (
             <button
               onClick={handleStartEdit}
               style={{
@@ -3094,13 +3670,16 @@ function ComplianceCard({
         </div>
       </div>
 
-          {/* Sub-header: State ID + Formed/Qualified date */}
-          <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
-            {jur.stateId && (
-              <>STATE ID #: <span style={{ fontFamily: "'DM Mono', monospace", color: "#1a1a1f" }}>{jur.stateId}</span> &middot; </>
-            )}
-            {jur.isFormation ? "FORMED" : "QUALIFIED"}: <span style={{ color: "#1a1a1f" }}>{formatDate(jur.isFormation ? jur.qualificationDate : jur.qualificationDate)}</span>
-          </div>
+          {/* Sub-header: State ID + Formed/Qualified date — state cards only.
+              Federal cards have no registration metadata to show here. */}
+          {!isFederal && (
+            <div style={{ fontSize: 11, color: "#6b6b76", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+              {jur.stateId && (
+                <>STATE ID #: <span style={{ fontFamily: "'DM Mono', monospace", color: "#1a1a1f" }}>{jur.stateId}</span> &middot; </>
+              )}
+              {jur.isFormation ? "FORMED" : "QUALIFIED"}: <span style={{ color: "#1a1a1f" }}>{formatDate(jur.isFormation ? jur.qualificationDate : jur.qualificationDate)}</span>
+            </div>
+          )}
 
           {/* Edit mode for registration fields */}
           {editing && (
@@ -3218,7 +3797,7 @@ function ObligationRow({
     : null;
 
   // Has any detail worth expanding?
-  const hasDetail = obligation.completed_at || obligation.confirmation || obligation.payment_amount || obligation.document_id || obligation.penalty_description || obligation.description;
+  const hasDetail = obligation.completed_at || obligation.confirmation || obligation.payment_amount || obligation.document_id || obligation.penalty_description || obligation.description || (obligation.cycles && obligation.cycles.length > 0);
 
   const linkedDoc = obligation.document_id ? documents.find(d => d.id === obligation.document_id) : null;
 
@@ -3501,6 +4080,33 @@ function ObligationRow({
               </a>
             </div>
           )}
+          {obligation.cycles && obligation.cycles.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid #f0ede6" }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+                Completion history ({obligation.cycles.length})
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {obligation.cycles.map((cyc) => {
+                  const dueLbl = new Date(cyc.cycle_due_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                  const completedLbl = new Date(cyc.completed_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                  return (
+                    <div key={cyc.id} style={{ display: "flex", alignItems: "baseline", gap: 12, fontSize: 12, color: "#1a1a1f" }}>
+                      <span style={{ color: "#2d6a45", fontSize: 12, flexShrink: 0 }}>✓</span>
+                      <span style={{ flex: 1 }}>
+                        Cycle due <strong>{dueLbl}</strong> — completed <strong>{completedLbl}</strong>
+                        {cyc.payment_amount != null && cyc.payment_amount > 0 && (
+                          <span style={{ color: "#6b6b76" }}> · ${(cyc.payment_amount / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>
+                        )}
+                        {cyc.confirmation && (
+                          <span style={{ color: "#6b6b76" }}> · #{cyc.confirmation}</span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -3590,6 +4196,8 @@ const ACTION_LABELS: Record<string, { label: string; color: string }> = {
   add_role: { label: "Add Role", color: "#7b4db5" },
   complete_obligation: { label: "Complete Obligation", color: "#2d5a3d" },
   update_obligation: { label: "Update Obligation", color: "#c47520" },
+  set_investment_allocations: { label: "Set Allocations", color: "#3366a8" },
+  record_investment_transaction: { label: "Record Transaction", color: "#2d5a3d" },
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -3695,24 +4303,14 @@ function DocumentsTab({
   entityName: string;
   entityData: Record<string, unknown> | null;
 }) {
+  const isMobile = useIsMobile();
+  const canSend = useCan("providers:send");
+  const canDelete = useCan("records:delete");
   const [showUpload, setShowUpload] = useState(false);
 
-  // Document completeness expectations — loaded from entity data
-  const initialExpectations = (entityData?.expectations || []) as Array<{
-    id: string;
-    document_type: string;
-    document_category: string;
-    is_required: boolean;
-    is_satisfied: boolean;
-    is_not_applicable: boolean;
-    is_suggestion: boolean;
-    source: string;
-    notes: string | null;
-    satisfied_doc: { id: string; name: string; document_type: string; year: number | null; created_at: string } | null;
-    confidence: number | null;
-    inference_reason: string | null;
-  }>;
-  const [expectations, setExpectations] = useState(initialExpectations);
+  // Document completeness expectations — loaded from entity data.
+  const initialExpectations = (entityData?.expectations || []) as ChecklistExpectation[];
+  const [expectations, setExpectations] = useState<ChecklistExpectation[]>(initialExpectations);
   const expectationsLoaded = true;
 
   // Sync with entity data when it changes (e.g. after entity refresh)
@@ -3787,7 +4385,7 @@ function DocumentsTab({
   const [pipelinePhase, setPipelinePhase] = useState<"upload" | "processing" | "results">("upload");
 
   // AI processing state
-  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processingId] = useState<string | null>(null);
   const [processError, setProcessError] = useState<string | null>(null);
   const [aiActions, setAiActions] = useState<Record<string, ProposedAction[]>>({});
   const [aiReviewDocId, setAiReviewDocId] = useState<string | null>(null);
@@ -3950,15 +4548,8 @@ function DocumentsTab({
   };
 
   /* ---- Download ---- */
-  const handleDownload = async (docId: string) => {
-    try {
-      const res = await fetch(`/api/documents/${docId}/download`);
-      if (!res.ok) throw new Error("Download failed");
-      const data = await res.json();
-      window.open(data.url, "_blank");
-    } catch (err) {
-      console.error("Download error:", err);
-    }
+  const handleDownload = (docId: string) => {
+    window.open(`/api/documents/${docId}/download`, "_blank");
   };
 
   /* ---- Delete ---- */
@@ -3970,48 +4561,6 @@ function DocumentsTab({
       onRefresh();
     } catch (err) {
       console.error("Delete error:", err);
-    }
-  };
-
-  /* ---- AI Process ---- */
-  const handleProcess = async (docId: string) => {
-    setProcessingId(docId);
-    setProcessError(null);
-    setApplyResult(null);
-    try {
-      const res = await fetch(`/api/documents/${docId}/process`, { method: "POST" });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const msg = errData.error || "Processing failed";
-        // Friendly message for known limits
-        if (msg.includes("100 PDF pages")) {
-          throw new Error("This PDF exceeds the 100-page limit for AI processing. Try uploading a shorter version of the document.");
-        }
-        throw new Error(msg);
-      }
-      const data = await res.json();
-      if (data.actions && data.actions.length > 0) {
-        setAiActions((prev) => ({ ...prev, [docId]: data.actions }));
-        setAiReviewDocId(docId);
-        // Default: select high confidence, deselect low
-        const defaults: Record<number, boolean> = {};
-        const edits: Record<number, ProposedAction> = {};
-        const indices: number[] = [];
-        data.actions.forEach((action: ProposedAction, idx: number) => {
-          defaults[idx] = action.confidence === "high" || action.confidence === "medium";
-          edits[idx] = { ...action };
-          indices.push(idx);
-        });
-        setSelectedActions(defaults);
-        setEditedActions(edits);
-        setOriginalIndicesMap((prev) => ({ ...prev, [docId]: indices }));
-      }
-      onRefresh();
-    } catch (err) {
-      console.error("Process error:", err);
-      setProcessError(err instanceof Error ? err.message : "Processing failed");
-    } finally {
-      setProcessingId(null);
     }
   };
 
@@ -4103,9 +4652,21 @@ function DocumentsTab({
     }
   };
 
+  /* ---- Referenced-in filter (spec §5 surfacing rules) ----
+     Documents linked via a referenced-in role (investment_issuer,
+     service_provider, counterparty, witness, co_beneficiary_secondary) are
+     hidden by default. First-class roles (co_filer, joint_filer, co_owner,
+     co_beneficiary_primary, member), direct documents, and joint-title-held
+     documents always show. */
+  const [showReferencedIn, setShowReferencedIn] = useState(false);
+  const referencedInCount = documents.filter(d => isReferencedInRole(d.link_role)).length;
+  const visibleDocuments = showReferencedIn
+    ? documents
+    : documents.filter(d => !isReferencedInRole(d.link_role));
+
   /* ---- Group documents by category ---- */
   const grouped: Record<string, DocRecord[]> = {};
-  documents.forEach((doc) => {
+  visibleDocuments.forEach((doc) => {
     const cat = doc.document_category || getDocCategory(doc.document_type);
     if (!grouped[cat]) grouped[cat] = [];
     grouped[cat].push(doc);
@@ -4113,6 +4674,11 @@ function DocumentsTab({
 
   /* ---- Expandable row state ---- */
   const [expandedDocId, setExpandedDocId] = useState<string | null>(null);
+
+  /* ---- Send-to-provider card state ---- */
+  const [sendDocId, setSendDocId] = useState<string | null>(null);
+  // Multi-select bundle send (from the Documents-tab select mode).
+  const [sendBundle, setSendBundle] = useState<{ id: string; name: string }[] | null>(null);
 
   /* ---- Inline rename state ---- */
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
@@ -4200,28 +4766,30 @@ function DocumentsTab({
             {selectMode ? "Cancel" : "Select"}
           </button>
         )}
-        {!showUpload && !selectMode && (
-          <Button variant="primary" onClick={async () => {
-            setShowUpload(true);
-            // Create a pipeline batch for this entity
-            if (!pipelineBatchId) {
-              try {
-                const res = await fetch("/api/pipeline/batches", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ context: "entity", entity_id: entityId }),
-                });
-                if (res.ok) {
-                  const batch = await res.json();
-                  setPipelineBatchId(batch.id);
-                }
-              } catch { /* ignore */ }
-            }
-          }}>
-            <UploadIcon size={14} /> Upload Documents
-          </Button>
+        {!selectMode && (
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("rhodes:open-chat"));
+            }}
+            style={{
+              display: "flex", alignItems: "center", gap: 6, padding: "6px 14px",
+              borderRadius: 7, border: "1px solid #ddd9d0", background: "none",
+              cursor: "pointer", color: "#6b6b76", fontSize: 13, fontWeight: 500,
+            }}
+          >
+            <ChatIcon size={14} /> Drop files in chat to upload
+          </button>
         )}
       </div>
+
+      {/* Multi-select bundle send */}
+      {sendBundle && (
+        <SendToProviderCard
+          documents={sendBundle}
+          onSubmitted={() => onRefreshQuiet()}
+          onClose={() => setSendBundle(null)}
+        />
+      )}
 
       {/* Pipeline Upload */}
       {showUpload && pipelineBatchId && pipelinePhase === "upload" && (
@@ -4721,6 +5289,34 @@ function DocumentsTab({
         );
       })()}
 
+      {/* Referenced-in filter toggle (spec §5). Hidden when there are no
+          referenced-in documents to toggle. */}
+      {referencedInCount > 0 && (
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+          <button
+            onClick={() => setShowReferencedIn(v => !v)}
+            style={{
+              background: showReferencedIn ? "rgba(123,77,181,0.10)" : "none",
+              border: "1px solid #ddd9d0", borderRadius: 6,
+              padding: "4px 10px", fontSize: 12, color: "#6b6b76",
+              cursor: "pointer", fontFamily: "inherit",
+            }}
+          >
+            {showReferencedIn ? "Hide" : "Show"} {referencedInCount} referenced-in {referencedInCount === 1 ? "doc" : "docs"}
+          </button>
+        </div>
+      )}
+
+      {/* Consolidated checklist: required / missing / suggestions / N/A. */}
+      <DocumentChecklist
+        entityName={entityName}
+        expectations={expectations}
+        onConfirmSuggestion={handleConfirmSuggestion}
+        onDismissSuggestion={handleDismissSuggestion}
+        onMarkNA={handleMarkNA}
+        onMarkNeeded={handleMarkNeeded}
+      />
+
       {/* Document list grouped by category */}
       {documents.length === 0 && expectations.filter((e) => !e.is_not_applicable && !e.is_suggestion && !e.is_satisfied).length === 0 ? (
         <div style={{ textAlign: "center", padding: "40px 0" }}>
@@ -4736,15 +5332,9 @@ function DocumentsTab({
         <div style={{ display: "flex", flexDirection: "column", gap: 12, position: "relative" }}>
           {Object.entries(DOCUMENT_TYPE_CATEGORIES).map(([catKey, cat]) => {
             const catDocs = grouped[catKey] || [];
-            const catExpectations = expectations.filter(
-              (e) => e.document_category === catKey && !e.is_not_applicable && !e.is_suggestion
-            );
-            const catMissing = catExpectations.filter((e) => !e.is_satisfied);
-            const catSatisfied = catExpectations.filter((e) => e.is_satisfied).length;
-            const catTotal = catExpectations.length;
 
-            // Show category if it has docs OR missing expectations
-            if (catDocs.length === 0 && catMissing.length === 0) return null;
+            // Expectations are shown in the top-level checklist, not per-category.
+            if (catDocs.length === 0) return null;
             const collapsed = collapsedCats.has(catKey);
             const allCatDocIds = catDocs.map((d) => d.id);
             const allCatSelected = allCatDocIds.length > 0 && allCatDocIds.every((id) => selectedDocIds.has(id));
@@ -4782,7 +5372,8 @@ function DocumentsTab({
                     style={{
                       display: isExpanded ? "none" : "flex",
                       alignItems: "center",
-                      gap: 12,
+                      flexWrap: isMobile ? "wrap" : "nowrap",
+                      gap: isMobile ? 8 : 12,
                       padding: `10px 18px 10px ${paddingLeft}px`,
                       borderBottom: "1px solid #f8f7f4",
                       fontSize: 13,
@@ -4808,9 +5399,19 @@ function DocumentsTab({
                       </div>
                     </div>
 
-                    {doc.link_role && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                        Linked
+                    {doc.joint_title_name && (
+                      <span title={`Held under joint title: ${doc.joint_title_name}`} style={{ fontSize: 10, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.10)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        Joint &mdash; {doc.joint_title_name}
+                      </span>
+                    )}
+                    {doc.link_role && isFirstClassRelatedRole(doc.link_role) && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.10)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        {ROLE_CHIP_LABELS[doc.link_role] || doc.link_role}
+                      </span>
+                    )}
+                    {doc.link_role && isReferencedInRole(doc.link_role) && (
+                      <span title="Document mentions this entity but isn't owned by it" style={{ fontSize: 10, fontWeight: 600, color: "#9494a0", background: "rgba(148,148,160,0.12)", padding: "2px 8px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                        Referenced ({ROLE_CHIP_LABELS[doc.link_role] || doc.link_role})
                       </span>
                     )}
 
@@ -4889,7 +5490,9 @@ function DocumentsTab({
                         )}
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                        {doc.link_role && <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.08)", padding: "3px 10px", borderRadius: 4 }}>Linked ({doc.link_role})</span>}
+                        {doc.joint_title_name && <span style={{ fontSize: 11, fontWeight: 600, color: "#2d5a3d", background: "rgba(45,90,61,0.10)", padding: "3px 10px", borderRadius: 4 }}>Joint &mdash; {doc.joint_title_name}</span>}
+                        {doc.link_role && isFirstClassRelatedRole(doc.link_role) && <span style={{ fontSize: 11, fontWeight: 600, color: "#7b4db5", background: "rgba(123,77,181,0.10)", padding: "3px 10px", borderRadius: 4 }}>{ROLE_CHIP_LABELS[doc.link_role] || doc.link_role}</span>}
+                        {doc.link_role && isReferencedInRole(doc.link_role) && <span style={{ fontSize: 11, fontWeight: 600, color: "#9494a0", background: "rgba(148,148,160,0.12)", padding: "3px 10px", borderRadius: 4 }}>Referenced ({ROLE_CHIP_LABELS[doc.link_role] || doc.link_role})</span>}
                         {doc.document_type !== "other" && <span style={{ fontSize: 11, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "3px 10px", borderRadius: 4 }}>{DOCUMENT_TYPE_LABELS[doc.document_type] || doc.document_type}</span>}
                         {doc.year && <span style={{ fontSize: 11, fontWeight: 600, color: "#6b6b76", background: "rgba(0,0,0,0.05)", padding: "3px 10px", borderRadius: 4 }}>{doc.year}</span>}
                       </div>
@@ -4904,13 +5507,19 @@ function DocumentsTab({
                         <span>Uploaded: {new Date(doc.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}</span>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => handleProcess(doc.id)} disabled={processingId === doc.id} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: processingId === doc.id ? "wait" : "pointer", display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#c47520", fontWeight: 500, fontFamily: "inherit" }}>
-                          <SparkleIcon size={12} />
-                          {processingId === doc.id ? "Processing..." : doc.ai_extracted ? "Re-process with AI" : "Process with AI"}
-                        </button>
                         <button onClick={() => handleDownload(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#3366a8", fontWeight: 500, fontFamily: "inherit" }}>Download</button>
-                        <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>
+                        {canSend && (
+                          <button onClick={() => setSendDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#2d5a3d", fontWeight: 500, fontFamily: "inherit" }}>Send to provider</button>
+                        )}
+                        {canDelete && <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>}
                       </div>
+                      {sendDocId === doc.id && (
+                        <SendToProviderCard
+                          documents={[{ id: doc.id, name: doc.name }]}
+                          onSubmitted={() => onRefreshQuiet()}
+                          onClose={() => setSendDocId(null)}
+                        />
+                      )}
                     </div>
                   )}
                 </div>
@@ -4944,33 +5553,18 @@ function DocumentsTab({
                     )}
                     <FolderIcon size={14} />
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>{cat.label}</span>
-                    {catTotal > 0 ? (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: catSatisfied === catTotal ? "#2d5a3d" : "#c47520",
-                          background: catSatisfied === catTotal ? "rgba(45,90,61,0.08)" : "rgba(196,117,32,0.08)",
-                          padding: "1px 7px",
-                          borderRadius: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {catSatisfied}/{catTotal}
-                      </span>
-                    ) : (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          color: "#9494a0",
-                          background: "#f0eee8",
-                          padding: "1px 7px",
-                          borderRadius: 10,
-                          fontWeight: 600,
-                        }}
-                      >
-                        {catDocs.length}
-                      </span>
-                    )}
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: "#9494a0",
+                        background: "#f0eee8",
+                        padding: "1px 7px",
+                        borderRadius: 10,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {catDocs.length}
+                    </span>
                   </div>
                   <DownIcon size={14} className="" />
                 </div>
@@ -4978,58 +5572,6 @@ function DocumentsTab({
                 {/* Documents in this category */}
                 {!collapsed && (
                   <div>
-                    {/* Missing expectations at the top */}
-                    {catMissing.map((exp) => (
-                      <div
-                        key={exp.id}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 12,
-                          padding: "10px 18px",
-                          borderBottom: "1px solid #f8f7f4",
-                          fontSize: 13,
-                        }}
-                      >
-                        <span style={{ color: "#c47520", fontSize: 14, flexShrink: 0 }}>&#9675;</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <span style={{ fontWeight: 500, color: "#6b6b76" }}>
-                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                          </span>
-                        </div>
-                        <span style={{
-                          fontSize: 10,
-                          fontWeight: 600,
-                          color: exp.is_required ? "#c47520" : "#9494a0",
-                          background: exp.is_required ? "rgba(196,117,32,0.08)" : "rgba(0,0,0,0.04)",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                        }}>
-                          {exp.is_required ? "Required" : "Recommended"}
-                        </span>
-                        {exp.source === "template" && (
-                          <span style={{ fontSize: 10, fontWeight: 600, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4 }}>
-                            Template
-                          </span>
-                        )}
-                        <button
-                          onClick={() => handleMarkNA(exp.id)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            fontSize: 11,
-                            color: "#9494a0",
-                            cursor: "pointer",
-                            padding: "2px 6px",
-                            fontFamily: "inherit",
-                          }}
-                          title="Mark as not applicable"
-                        >
-                          N/A
-                        </button>
-                      </div>
-                    ))}
-
                     {/* Tax: year → bucket sub-grouping */}
                     {isTax && taxGrouped ? (
                       sortedYears.map((year) => {
@@ -5128,131 +5670,6 @@ function DocumentsTab({
                       catDocs.map((doc) => renderDocRow(doc))
                     )}
 
-                    {/* AI Suggestions */}
-                    {(() => {
-                      const suggestions = expectations.filter(
-                        (e) => e.document_category === catKey && e.is_suggestion && !e.is_not_applicable
-                      );
-                      if (suggestions.length === 0) return null;
-                      return (
-                        <>
-                          <div
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 6,
-                              padding: "8px 18px 4px",
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: "#8b6914",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.5px",
-                            }}
-                          >
-                            <SparkleIcon size={11} />
-                            Suggestions
-                          </div>
-                          {suggestions.map((exp) => (
-                            <div
-                              key={exp.id}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 12,
-                                padding: "8px 18px",
-                                borderBottom: "1px solid #f8f7f4",
-                                fontSize: 13,
-                                background: "rgba(139,105,20,0.03)",
-                              }}
-                            >
-                              <span style={{ color: "#8b6914", fontSize: 14, flexShrink: 0 }}>&#9671;</span>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <span style={{ color: "#1a1a1f" }}>
-                                  {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                                </span>
-                                {exp.inference_reason && (
-                                  <div style={{ fontSize: 11, color: "#8b6914", marginTop: 2 }}>
-                                    {exp.inference_reason}
-                                  </div>
-                                )}
-                              </div>
-                              <button
-                                onClick={() => handleConfirmSuggestion(exp.id)}
-                                style={{
-                                  background: "rgba(45,90,61,0.08)",
-                                  border: "none",
-                                  fontSize: 11,
-                                  fontWeight: 600,
-                                  color: "#2d5a3d",
-                                  cursor: "pointer",
-                                  padding: "3px 10px",
-                                  borderRadius: 4,
-                                  fontFamily: "inherit",
-                                }}
-                              >
-                                Confirm
-                              </button>
-                              <button
-                                onClick={() => handleDismissSuggestion(exp.id)}
-                                style={{
-                                  background: "none",
-                                  border: "none",
-                                  fontSize: 11,
-                                  color: "#9494a0",
-                                  cursor: "pointer",
-                                  padding: "2px 6px",
-                                  fontFamily: "inherit",
-                                }}
-                              >
-                                Dismiss
-                              </button>
-                            </div>
-                          ))}
-                        </>
-                      );
-                    })()}
-
-                    {/* N/A items (collapsed by default) */}
-                    {(() => {
-                      const naItems = expectations.filter(
-                        (e) => e.document_category === catKey && e.is_not_applicable && !e.is_suggestion
-                      );
-                      if (naItems.length === 0) return null;
-                      return naItems.map((exp) => (
-                        <div
-                          key={exp.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 12,
-                            padding: "8px 18px",
-                            borderBottom: "1px solid #f8f7f4",
-                            fontSize: 13,
-                            opacity: 0.5,
-                          }}
-                        >
-                          <span style={{ color: "#9494a0", fontSize: 14, flexShrink: 0 }}>&#8212;</span>
-                          <span style={{ flex: 1, color: "#9494a0", textDecoration: "line-through" }}>
-                            {DOCUMENT_TYPE_LABELS[exp.document_type] || exp.document_type.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
-                          </span>
-                          <button
-                            onClick={() => handleMarkNeeded(exp.id)}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              fontSize: 11,
-                              color: "#9494a0",
-                              cursor: "pointer",
-                              textDecoration: "underline",
-                              padding: "2px 6px",
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            Mark as needed
-                          </button>
-                        </div>
-                      ));
-                    })()}
                   </div>
                 )}
               </Card>
@@ -5277,22 +5694,53 @@ function DocumentsTab({
               <span style={{ fontSize: 13, fontWeight: 600, color: "#1a1a1f" }}>
                 {selectedDocIds.size} selected
               </span>
-              <button
-                onClick={handleBulkDelete}
-                style={{
-                  background: "#c73e3e",
-                  color: "white",
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                Delete Selected
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                {canSend && (
+                  <button
+                    onClick={() => {
+                      const ids = Array.from(selectedDocIds);
+                      const bundle = ids
+                        .map((id) => documents.find((d) => d.id === id))
+                        .filter((d): d is DocRecord => !!d)
+                        .map((d) => ({ id: d.id, name: d.name }));
+                      if (bundle.length === 0) return;
+                      setSendBundle(bundle);
+                      exitSelectMode();
+                    }}
+                    style={{
+                      background: "#2d5a3d",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 6,
+                      padding: "8px 16px",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Send to provider
+                  </button>
+                )}
+                {canDelete && (
+                <button
+                  onClick={handleBulkDelete}
+                  style={{
+                    background: "#c73e3e",
+                    color: "white",
+                    border: "none",
+                    borderRadius: 6,
+                    padding: "8px 16px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Delete Selected
+                </button>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -5302,14 +5750,33 @@ function DocumentsTab({
 }
 
 /* ---- Entity Action Menu (three-dot dropdown with Edit / Delete) ---- */
-function EntityActionMenu({ entityId, entityName, router, isMobile }: { entityId: string; entityName: string; router: ReturnType<typeof useRouter>; isMobile: boolean }) {
+const ENTITY_STATUSES = [
+  { value: "active", label: "Active" },
+  { value: "inactive", label: "Inactive" },
+  { value: "dissolved", label: "Dissolved" },
+  { value: "suspended", label: "Suspended" },
+  { value: "pending_formation", label: "Pending Formation" },
+  { value: "converting", label: "Converting" },
+];
+const TERMINAL_STATUSES = ["dissolved", "inactive"];
+
+function EntityActionMenu({ entityId, entityName, entityStatus, router, isMobile, onStatusChange }: {
+  entityId: string; entityName: string; entityStatus: string;
+  router: ReturnType<typeof useRouter>; isMobile: boolean;
+  onStatusChange: (s: string) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [showStatusSub, setShowStatusSub] = useState(false);
+  const [confirmStatus, setConfirmStatus] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(false);
+  const canDelete = useCan("records:delete");
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setShowStatusSub(false); }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -5317,68 +5784,174 @@ function EntityActionMenu({ entityId, entityName, router, isMobile }: { entityId
 
   const handleDelete = async () => {
     setOpen(false);
-    if (!confirm(`Delete "${entityName}" and all its related data (registrations, members, managers, relationships, documents, cap table)? This cannot be undone.`)) return;
+    if (!confirm(`Delete "${entityName}" and all its related data? This cannot be undone.`)) return;
     try {
       const res = await fetch(`/api/entities/${entityId}`, { method: "DELETE" });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert(data.error || "Failed to delete entity");
-        return;
-      }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || "Failed"); return; }
       router.push("/entities");
-    } catch {
-      alert("Failed to delete entity");
+    } catch { alert("Failed to delete entity"); }
+  };
+
+  const applyStatus = async (newStatus: string, statusReason?: string) => {
+    setChanging(true);
+    try {
+      const res = await fetch(`/api/entities/${entityId}/status`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus, reason: statusReason }),
+      });
+      if (res.ok) onStatusChange(newStatus);
+      else alert("Failed to change status");
+    } catch { alert("Failed to change status"); }
+    finally { setChanging(false); setConfirmStatus(null); setOpen(false); setShowStatusSub(false); setReason(""); }
+  };
+
+  const handleStatusClick = (s: string) => {
+    if (s === entityStatus) return;
+    if (TERMINAL_STATUSES.includes(s) || (s === "active" && TERMINAL_STATUSES.includes(entityStatus))) {
+      setConfirmStatus(s);
+    } else {
+      applyStatus(s);
     }
   };
 
+  const menuBtnStyle = (color?: string): React.CSSProperties => ({
+    display: "flex", alignItems: "center", gap: 8, width: "100%",
+    padding: "10px 14px", background: "none", border: "none",
+    fontSize: 13, color: color || "#1a1a1f", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+  });
+
   return (
-    <div ref={ref} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((p) => !p)}
-        style={{
+    <>
+      <div ref={ref} style={{ position: "relative" }}>
+        <button onClick={() => setOpen((p) => !p)} style={{
           background: "none", border: "1px solid #ddd9d0", borderRadius: 6,
           padding: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-        }}
-      >
-        <EllipsisVerticalIcon size={16} color="#6b6b76" />
-      </button>
-      {open && (
-        <div style={{
-          position: "absolute", top: "100%", right: 0, marginTop: 4,
-          background: "#ffffff", border: "1px solid #ddd9d0", borderRadius: 8,
-          boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 160, zIndex: 20,
-          overflow: "hidden",
         }}>
-          {!isMobile && (
-            <button
-              onClick={() => { setOpen(false); router.push(`/entities/${entityId}/edit`); }}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%",
-                padding: "10px 14px", background: "none", border: "none",
-                fontSize: 13, color: "#1a1a1f", cursor: "pointer", fontFamily: "inherit",
-                textAlign: "left",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-            >
-              <PencilIcon size={14} color="#6b6b76" /> Edit Entity
+          <EllipsisVerticalIcon size={16} color="#6b6b76" />
+        </button>
+        {open && (
+          <div style={{
+            position: "absolute", top: "100%", right: 0, marginTop: 4,
+            background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8,
+            boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 180, zIndex: 20, overflow: "visible",
+          }}>
+            {!isMobile && (
+              <button onClick={() => { setOpen(false); router.push(`/entities/${entityId}/edit`); }}
+                style={menuBtnStyle()}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                <PencilIcon size={14} color="#6b6b76" /> Edit Entity
+              </button>
+            )}
+            <div style={{ position: "relative" }}
+              onMouseEnter={() => setShowStatusSub(true)} onMouseLeave={() => setShowStatusSub(false)}>
+              <button style={{ ...menuBtnStyle(), justifyContent: "space-between" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#f0efe9")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                Change Status <span style={{ fontSize: 10, color: "#9494a0" }}>▸</span>
+              </button>
+              {showStatusSub && (
+                <div style={{
+                  position: "absolute", left: "100%", top: 0, marginLeft: 2,
+                  background: "#fff", border: "1px solid #ddd9d0", borderRadius: 8,
+                  boxShadow: "0 4px 12px rgba(0,0,0,0.1)", minWidth: 170, zIndex: 21, overflow: "hidden",
+                }}>
+                  {ENTITY_STATUSES.map((s) => (
+                    <button key={s.value} onClick={() => handleStatusClick(s.value)} style={{
+                      ...menuBtnStyle(s.value === entityStatus ? "#2d5a3d" : undefined),
+                      fontWeight: s.value === entityStatus ? 600 : 400,
+                      cursor: s.value === entityStatus ? "default" : "pointer",
+                    }}
+                    onMouseEnter={(e) => { if (s.value !== entityStatus) e.currentTarget.style.background = "#f0efe9"; }}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+                      {s.value === entityStatus ? "● " : "  "}{s.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {canDelete && (
+            <button onClick={handleDelete} style={{ ...menuBtnStyle("#c73e3e"), borderTop: "1px solid #f0eee8" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "none")}>
+              <XIcon size={14} /> Delete Entity
             </button>
-          )}
-          <button
-            onClick={handleDelete}
-            style={{
-              display: "flex", alignItems: "center", gap: 8, width: "100%",
-              padding: "10px 14px", background: "none", border: "none",
-              borderTop: !isMobile ? "1px solid #f0eee8" : "none",
-              fontSize: 13, color: "#c73e3e", cursor: "pointer", fontFamily: "inherit",
-              textAlign: "left",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#fdf2f2")}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "none")}
-          >
-            <XIcon size={14} /> Delete Entity
-          </button>
+            )}
+          </div>
+        )}
+      </div>
+      {confirmStatus && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 440, width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 16, fontWeight: 600 }}>
+              {confirmStatus === "active" ? `Reactivate ${entityName}?` : `Mark ${entityName} as ${ENTITY_STATUSES.find((s) => s.value === confirmStatus)?.label}?`}
+            </h3>
+            {confirmStatus === "active" ? (
+              <p style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 16px", lineHeight: 1.5 }}>
+                This will restore compliance tracking and document requirements.
+              </p>
+            ) : (
+              <div style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 16px", lineHeight: 1.5 }}>
+                <p style={{ margin: "0 0 8px" }}>This will:</p>
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  <li>Exempt all pending compliance obligations</li>
+                  <li>Suppress new document requirements</li>
+                  <li>Hide from active entity lists by default</li>
+                </ul>
+                <p style={{ margin: "8px 0 0" }}>The entity and all its records will be preserved. This can be reversed.</p>
+              </div>
+            )}
+            {confirmStatus !== "active" && (
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: "#6b6b76", display: "block", marginBottom: 4 }}>Reason / notes (optional)</label>
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2}
+                  style={{ width: "100%", fontSize: 13, padding: "8px 10px", border: "1px solid #ddd9d0", borderRadius: 6, fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }} />
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setConfirmStatus(null); setReason(""); }} disabled={changing}
+                style={{ padding: "8px 16px", fontSize: 13, border: "1px solid #ddd9d0", background: "#fff", borderRadius: 6, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => applyStatus(confirmStatus, reason || undefined)} disabled={changing}
+                style={{ padding: "8px 16px", fontSize: 13, border: "none", borderRadius: 6, cursor: changing ? "wait" : "pointer", color: "#fff", background: confirmStatus === "active" ? "#2d5a3d" : "#c73e3e" }}>
+                {changing ? "Updating..." : confirmStatus === "active" ? "Reactivate" : `Mark as ${ENTITY_STATUSES.find((s) => s.value === confirmStatus)?.label}`}
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+    </>
+  );
+}
+
+function EntityStatusBanner({ status, entityName: _entityName, entityId: _entityId, onReactivate }: {
+  status: string; entityName: string; entityId: string; onReactivate: () => void;
+}) {
+  if (status === "active") return null;
+  const colors: Record<string, { bg: string; border: string; text: string }> = {
+    dissolved: { bg: "#fdf2f2", border: "#f5c6c6", text: "#c73e3e" },
+    inactive: { bg: "#f5f5f5", border: "#ddd9d0", text: "#6b6b76" },
+    suspended: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+    pending_formation: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+    converting: { bg: "#fef6e4", border: "#f4d99a", text: "#7a5a18" },
+  };
+  const c = colors[status] ?? colors.inactive;
+  const label = ENTITY_STATUSES.find((s) => s.value === status)?.label ?? status;
+  const isTerminal = TERMINAL_STATUSES.includes(status);
+  return (
+    <div style={{
+      padding: "10px 16px", background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between",
+      fontSize: 13, color: c.text, marginBottom: 12,
+    }}>
+      <span>
+        {status === "dissolved" ? "⚠ " : ""}
+        This entity is {label.toLowerCase()}. {isTerminal ? "Compliance tracking is paused." : ""}
+      </span>
+      {isTerminal && (
+        <button onClick={onReactivate} style={{
+          background: "none", border: `1px solid ${c.border}`, borderRadius: 6,
+          padding: "4px 12px", fontSize: 12, color: c.text, cursor: "pointer",
+        }}>Reactivate</button>
       )}
     </div>
   );
@@ -5519,16 +6092,18 @@ export default function EntityDetailPage() {
 
   // Register page context for chat drawer
   const setPageContext = useSetPageContext();
+  const entityIdForContext = entity?.id;
+  const entityNameForContext = entity?.name;
   useEffect(() => {
-    if (entity) {
+    if (entityIdForContext && entityNameForContext) {
       setPageContext({
         page: "entity_detail",
-        entityId: entity.id,
-        entityName: entity.name,
+        entityId: entityIdForContext,
+        entityName: entityNameForContext,
       });
     }
     return () => setPageContext(null);
-  }, [entity?.id, entity?.name, setPageContext]);
+  }, [entityIdForContext, entityNameForContext, setPageContext]);
 
   /* ---- Loading state ---- */
   if (loading) {
@@ -5564,7 +6139,7 @@ export default function EntityDetailPage() {
 
   /* ---- Derived data ---- */
   const typeLabel = ENTITY_TYPE_LABELS[entity.type] || entity.type;
-  const formationStateName = getStateLabel(entity.formation_state);
+  const formationStateName = entity.formation_state ? getStateLabel(entity.formation_state) : "";
   const additionalRegs = entity.registrations.filter(
     (r) => r.jurisdiction !== entity.formation_state
   );
@@ -5575,15 +6150,54 @@ export default function EntityDetailPage() {
   const relCount = entity.relationships.length;
   const hasCapTable = entity.cap_table.length > 0;
 
+  // Detect parent investor entity from cap table (entity-type investors with investor_entity_id)
+  const parentInvestor = entity.cap_table.find((c) => c.investor_entity_id);
+  const parentEntityId = parentInvestor?.investor_entity_id || null;
+
   /* ---- Build tabs ---- */
+  const isPerson = entity.type === "person";
+  const isJointTitle = entity.type === "joint_title";
   const tabs: { id: string; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "compliance", label: "Compliance & Filings" },
   ];
-  tabs.push({ id: "cap_table", label: `Cap Table${hasCapTable ? ` (${entity.cap_table.length})` : ""}` });
-  tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
+  // Joint-title entities have a minimal tab set: Overview, Documents, Investments.
+  if (!isJointTitle) {
+    tabs.push({ id: "compliance", label: "Compliance" });
+  }
+  // Cap Table: only meaningful for business entities that have a cap table.
+  if (!isPerson && !isJointTitle) {
+    tabs.push({ id: "cap_table", label: `Cap Table${hasCapTable ? ` (${entity.cap_table.length})` : ""}` });
+  }
+  // Family tab: persons only. Shows spouse, parents, children, joint_title memberships.
+  if (isPerson) {
+    tabs.push({ id: "family", label: "Family" });
+  }
+  // Parent investor detection (used for "See Investments" link on Overview)
+  const isParentInvestor = entity.members.length > 0 && !parentEntityId;
+  if (!isJointTitle) {
+    tabs.push({ id: "relationships", label: `Relationships (${relCount})` });
+  }
+  tabs.push({ id: "investments", label: "Investments" });
+  tabs.push({ id: "providers", label: "People" });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
-  tabs.push({ id: "activity", label: "Activity" });
+  if (!isJointTitle) {
+    tabs.push({ id: "activity", label: "Activity" });
+  }
+
+  /* ---- Overview "needs attention" derivations (lead with state) ---- */
+  const overviewObligations = entity.compliance_obligations ?? [];
+  const needsFilings = overviewObligations
+    .filter((o) => o.status === "pending" || o.status === "overdue")
+    .map((o) => ({ id: o.id, name: o.name, next_due_date: o.next_due_date, status: o.status }));
+  const overdueFilingCount = needsFilings.filter(
+    (o) => o.status === "overdue" || (o.next_due_date != null && new Date(o.next_due_date + "T00:00:00Z").getTime() < Date.now()),
+  ).length;
+  const overviewExpectations = (entity.expectations ?? []) as Expectation[];
+  const overviewMissingDocs = overviewExpectations
+    .filter((e) => !e.is_suggestion && !e.is_not_applicable && !e.is_satisfied)
+    .map((e) => ({ document_type: e.document_type, document_category: e.document_category }));
+  const entityTypeLabel = (entity.type || "entity").replace(/_/g, " ");
+  const entityFormedYear = entity.formed_date ? new Date(entity.formed_date).getFullYear() : null;
 
   /* ---- Handlers for sub-components ---- */
   function handleRegistrationsChange(regs: EntityRegistration[]) {
@@ -5596,10 +6210,6 @@ export default function EntityDetailPage() {
 
   function handleManagersChange(managers: (EntityManager | EntityMember)[]) {
     setEntity((prev) => (prev ? { ...prev, managers: managers as EntityManager[] } : prev));
-  }
-
-  function handleMembersChange(members: (EntityManager | EntityMember)[]) {
-    setEntity((prev) => (prev ? { ...prev, members: members as EntityMember[] } : prev));
   }
 
   function handlePartnershipRepsChange(reps: (EntityManager | EntityMember)[]) {
@@ -5655,7 +6265,7 @@ export default function EntityDetailPage() {
             flexShrink: 0,
           }}
         >
-          <BuildingIcon size={24} />
+          <BuildingIcon size={24} color="var(--green)" />
         </div>
 
         <div style={{ flex: 1 }}>
@@ -5672,7 +6282,24 @@ export default function EntityDetailPage() {
                 </button>
               )}
             </h1>
-            <EntityActionMenu entityId={entityId} entityName={entity.name} router={router} isMobile={isMobile} />
+            <EntityActionMenu entityId={entityId} entityName={entity.name} entityStatus={entity.status} router={router} isMobile={isMobile}
+              onStatusChange={(s) => setEntity((prev) => prev ? { ...prev, status: s as EntityDetail["status"] } : prev)} />
+            {!isMobile && (
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("rhodes:open-chat", { detail: { query: `Tell me about ${entity.name}` } }));
+                }}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "4px 10px", borderRadius: 6,
+                  border: "1px solid rgba(45,90,61,0.2)", background: "rgba(45,90,61,0.04)",
+                  cursor: "pointer", color: "#2d5a3d", fontSize: 12, fontWeight: 500,
+                  flexShrink: 0,
+                }}
+              >
+                <SparkleIcon size={12} /> Ask about this
+              </button>
+            )}
           </div>
 
           {/* Subtitle row */}
@@ -5694,8 +6321,12 @@ export default function EntityDetailPage() {
               </>
             )}
             <span>{typeLabel}</span>
-            <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
-            <span>{formationStateName}</span>
+            {formationStateName && (
+              <>
+                <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
+                <span>{isPerson ? `Residence: ${formationStateName}` : formationStateName}</span>
+              </>
+            )}
             {regString && (
               <>
                 <span style={{ color: "#ddd9d0" }}>{"\u2022"}</span>
@@ -5711,151 +6342,183 @@ export default function EntityDetailPage() {
         </div>
       </div>
 
-      {/* ---- Mobile Section Nav (pill bar) ---- */}
-      {isMobile && (
-        <div
-          style={{
-            position: "sticky",
-            top: 0,
-            zIndex: 10,
-            background: "#f5f4f0",
-            overflowX: "auto",
-            display: "flex",
-            gap: 6,
-            borderBottom: "1px solid #e8e6df",
-            margin: "0 -16px",
-            paddingLeft: 16,
-            paddingRight: 16,
-            paddingTop: 8,
-            paddingBottom: 8,
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 20,
-                border: activeTab === tab.id ? "1px solid #2d5a3d" : "1px solid #ddd9d0",
-                background: activeTab === tab.id ? "#2d5a3d" : "#fff",
-                color: activeTab === tab.id ? "#fff" : "#1a1a1f",
-                fontSize: 12,
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ---- Status Banner ---- */}
+      <EntityStatusBanner
+        status={entity.status}
+        entityName={entity.name}
+        entityId={entityId}
+        onReactivate={async () => {
+          try {
+            const res = await fetch(`/api/entities/${entityId}/status`, {
+              method: "PUT", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ status: "active" }),
+            });
+            if (res.ok) setEntity((prev) => prev ? { ...prev, status: "active" as EntityDetail["status"] } : prev);
+          } catch { /* ignore */ }
+        }}
+      />
 
-      {/* ---- Tab Bar (desktop only) ---- */}
-      {!isMobile && (
-        <div
-          style={{
-            borderBottom: "1px solid #e8e6df",
-            marginBottom: 24,
-            display: "flex",
-            gap: 0,
-            overflow: "visible",
-          }}
-        >
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                padding: "10px 20px",
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: "pointer",
-                border: "none",
-                borderBottom: activeTab === tab.id ? "2px solid #2d5a3d" : "2px solid transparent",
-                background: "transparent",
-                color: activeTab === tab.id ? "#2d5a3d" : "#6b6b76",
-                marginBottom: -1,
-                whiteSpace: "nowrap",
-                fontFamily: "inherit",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ---- Tab Bar (responsive priority + overflow → More) ---- */}
+      <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
       {/* ---- Tab Content ---- */}
       {isMobile && <div style={{ height: 16 }} />}
 
       {/* Overview Tab */}
-      {activeTab === "overview" && (
-        <>
-          {/* First row: Entity Information + Document Completeness */}
-          <div id="overview" style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
-            {/* Left: Entity Information */}
-            <Card>
-              <SectionHeader>Entity Information</SectionHeader>
+      {activeTab === "overview" && isJointTitle && (
+        <JointTitleOverview
+          jointTitleId={entityId}
+          jointTitleName={entity.name}
+          status={entity.status}
+          onStatusChange={() => fetchEntity()}
+        />
+      )}
 
-              <InfoRow label="EIN">
-                <span style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {entity.ein || "\u2014"}
-                </span>
+      {activeTab === "overview" && !isJointTitle && (
+        <>
+          {/* Lead with state, not schema: a plain-language line about what this
+              entity is and whether anything needs attention. */}
+          <EntityStateBanner
+            name={entity.name}
+            typeLabel={entityTypeLabel}
+            status={entity.status}
+            formationState={entity.formation_state ?? null}
+            formedYear={isPerson ? null : entityFormedYear}
+            overdueFilings={overdueFilingCount}
+            openFilings={needsFilings.length}
+            missingDocs={overviewMissingDocs.length}
+            showAttention={!isPerson}
+          />
+          {/* See Investments link for parent investor entities */}
+          {isParentInvestor && (
+            <div style={{
+              marginBottom: 20, padding: "12px 16px", background: "rgba(45,90,61,0.04)",
+              border: "1px solid rgba(45,90,61,0.12)", borderRadius: 10,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <span style={{ fontSize: 13, color: "#2d5a3d" }}>
+                <ChartIcon size={16} /> This entity has investments tracked separately.
+              </span>
+              <button
+                onClick={() => router.push(`/investments?parent_entity_id=${entityId}`)}
+                style={{
+                  background: "none", border: "none", cursor: "pointer",
+                  color: "#2d5a3d", fontSize: 13, fontWeight: 600, padding: 0,
+                }}
+              >
+                See Investments &rarr;
+              </button>
+            </div>
+          )}
+          {/* First row: Entity Information + Document Completeness.
+              Persons get a single full-width Personal Information card —
+              there's no Document Completeness for persons (none of the
+              business-entity-driven expectations apply, and personal-doc
+              expectations are not yet modelled). */}
+          {/* Two independent columns so the cap table isn't pinned to the
+              bottom of the (taller) entity-info card. Left = entity info +
+              relationships; right = needs attention + cap table. */}
+          <div id="overview" style={{ display: "grid", gridTemplateColumns: isPerson || isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20, alignItems: "start" }}>
+            {/* Left column */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
+            <Card>
+              <SectionHeader>{isPerson ? "Personal Information" : "Entity Information"}</SectionHeader>
+
+              {/* EIN — businesses only. (Persons technically can have EINs
+                  for sole proprietorships, but this field is meant for the
+                  entity-side EIN, not the person's individual EIN.) */}
+              {!isPerson && (
+                <InfoRow label="EIN">
+                  <span style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {entity.ein || "\u2014"}
+                  </span>
+                </InfoRow>
+              )}
+
+              {/* Formed — businesses only. People are born, not formed. */}
+              {!isPerson && (
+                <InfoRow label="Formed">{formatDate(entity.formed_date)}</InfoRow>
+              )}
+
+              <InfoRow label={isPerson ? "Residence State" : "Formation State"}>{formationStateName}</InfoRow>
+
+              {/* SSN Last 4 — persons only, used to disambiguate identically-
+                  named people. We never store more than the last 4. */}
+              {isPerson && (
+                <InfoRow label="SSN Last 4">
+                  <span style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {entity.ssn_last_4 ? `••• •• ${entity.ssn_last_4}` : "\u2014"}
+                  </span>
+                </InfoRow>
+              )}
+
+              {/* Aliases — feeds document analysis name-matching. Shown for
+                  any entity type that has them set, but featured for persons. */}
+              <InfoRow label="Also Known As">
+                {entity.aliases && entity.aliases.length > 0 ? (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {entity.aliases.map((a, i) => (
+                      <span key={i} style={{ fontSize: 12, fontWeight: 500, color: "#3366a8", background: "rgba(51,102,168,0.08)", padding: "2px 8px", borderRadius: 4 }}>{a}</span>
+                    ))}
+                  </div>
+                ) : "\u2014"}
               </InfoRow>
 
-              <InfoRow label="Formed">{formatDate(entity.formed_date)}</InfoRow>
+              {!isPerson && (
+                <LegalStructureRow
+                  entityId={entityId}
+                  currentValue={entity.legal_structure}
+                  onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, legal_structure: val } : prev))}
+                />
+              )}
 
-              <InfoRow label="Formation State">{formationStateName}</InfoRow>
+              {!isPerson && (
+                <TaxClassificationRow
+                  entityId={entityId}
+                  currentValue={entity.tax_classification ?? null}
+                  legalStructure={entity.legal_structure}
+                  onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, tax_classification: val } : prev))}
+                />
+              )}
 
-              <LegalStructureRow
-                entityId={entityId}
-                currentValue={entity.legal_structure}
-                onUpdate={(val) => setEntity((prev) => (prev ? { ...prev, legal_structure: val } : prev))}
-              />
-
-              <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
+              {!isPerson && (
+                <InfoRow label="Registered Agent">{entity.registered_agent || "\u2014"}</InfoRow>
+              )}
 
               <InfoRow label="Address">{entity.address || "\u2014"}</InfoRow>
 
-              {/* Registration States */}
-              <RegistrationStatesRow
-                entityId={entityId}
-                formationState={entity.formation_state}
-                registrations={entity.registrations}
-                onRegistrationsChange={handleRegistrationsChange}
-              />
+              {/* Registration States — businesses only (persons don't have
+                  state filing registrations). */}
+              {!isPerson && (
+                <RegistrationStatesRow
+                  entityId={entityId}
+                  formationState={entity.formation_state || ""}
+                  registrations={entity.registrations}
+                  onRegistrationsChange={handleRegistrationsChange}
+                />
+              )}
 
-              {/* Managers */}
-              <PersonRow
-                entityId={entityId}
-                label="Managers"
-                persons={entity.managers}
-                apiPath="managers"
-                deleteIdKey="manager_id"
-                picklist={picklist}
-                picklistLoading={picklistLoading}
-                onPersonsChange={handleManagersChange}
-              />
+              {/* Managers / Members / Partnership Rep / Business Purpose /
+                  Other Roles — all governance concepts that only apply to
+                  legal entities (LLCs, partnerships, etc.). Persons don't
+                  have managers or members. */}
+              {!isPerson && (
+                <PersonRow
+                  entityId={entityId}
+                  label="Managers"
+                  persons={entity.managers}
+                  apiPath="managers"
+                  deleteIdKey="manager_id"
+                  picklist={picklist}
+                  picklistLoading={picklistLoading}
+                  onPersonsChange={handleManagersChange}
+                />
+              )}
 
-              {/* Members */}
-              <PersonRow
-                entityId={entityId}
-                label="Members"
-                persons={entity.members}
-                apiPath="members"
-                deleteIdKey="member_id"
-                picklist={picklist}
-                picklistLoading={picklistLoading}
-                onPersonsChange={handleMembersChange}
-              />
+              {/* Members live on the Cap Table (they're the same set of
+                  investors) — not duplicated here. */}
 
-              {/* Partnership Representative (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <PersonRow
                   entityId={entityId}
                   label="Partnership Rep"
@@ -5868,15 +6531,13 @@ export default function EntityDetailPage() {
                 />
               )}
 
-              {/* Business Purpose (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <InfoRow label="Business Purpose">
                   {entity.business_purpose || "\u2014"}
                 </InfoRow>
               )}
 
-              {/* Other Roles (non-trust only) */}
-              {entity.type !== "trust" && (
+              {!isPerson && entity.type !== "trust" && (
                 <OtherRolesSection
                   entityId={entityId}
                   roles={entity.roles}
@@ -5887,25 +6548,29 @@ export default function EntityDetailPage() {
               )}
             </Card>
 
-            {/* Right: Document Completeness */}
-            <DocumentCompletenessCard
-              entityId={entityId}
-              onNavigateDocs={() => setActiveTab("documents")}
-              initialExpectations={entity?.expectations as Expectation[] | undefined}
-            />
-          </div>
-
-          {/* Second row: Relationships Summary + Cap Table Summary */}
-          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 20, marginBottom: 20 }}>
+            {/* Relationships sits under entity info in the left column. */}
             <RelationshipsSummaryCard
               relationships={entity.relationships}
               entityId={entityId}
               onViewAll={() => setActiveTab("relationships")}
             />
-            <CapTableSummaryCard
-              capTable={entity.cap_table}
-              onViewAll={() => setActiveTab("cap_table")}
-            />
+            </div>{/* end left column */}
+
+            {/* Right column: needs attention + cap table (businesses only). */}
+            {!isPerson && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 20, minWidth: 0 }}>
+                <NeedsAttentionCard
+                  filings={needsFilings}
+                  missingDocs={overviewMissingDocs}
+                  onNavigateFilings={() => setActiveTab("compliance")}
+                  onNavigateDocs={() => setActiveTab("documents")}
+                />
+                <CapTableSummaryCard
+                  capTable={entity.cap_table}
+                  onViewAll={() => setActiveTab("cap_table")}
+                />
+              </div>
+            )}
           </div>
 
           {/* Trust Details (conditional) */}
@@ -5940,7 +6605,8 @@ export default function EntityDetailPage() {
       {activeTab === "compliance" && (
         <ComplianceTab
           entityId={entityId}
-          formationState={entity.formation_state}
+          entityType={entity.type}
+          formationState={entity.formation_state || ""}
           registrations={entity.registrations}
           formedDate={entity.formed_date}
           legalStructure={entity.legal_structure}
@@ -5964,18 +6630,42 @@ export default function EntityDetailPage() {
         />
       )}
 
+      {/* Family Tab (persons only) */}
+      {activeTab === "family" && (
+        <FamilyTab personId={entityId} personName={entity.name} />
+      )}
+
+      {/* Investments Tab */}
+      {activeTab === "investments" && (
+        <EntityInvestmentsTab entityId={entityId} entityName={entity.name} />
+      )}
+      {activeTab === "providers" && (
+        <EntityServiceProvidersTab entityId={entityId} entityName={entity.name} />
+      )}
+
       {/* Documents Tab */}
       {activeTab === "documents" && (
-        <DocumentsTab
-          entityId={entityId}
-          documents={documents}
-          docsLoading={docsLoading}
-          onRefresh={fetchDocuments}
-          onRefreshQuiet={() => fetchDocuments(true)}
-          onEntityRefresh={fetchEntity}
-          entityName={entity?.name || ""}
-          entityData={entity as unknown as Record<string, unknown>}
-        />
+        <>
+          {!isPerson && (
+            <div style={{ marginBottom: 20 }}>
+              <DocumentCompletenessCard
+                entityId={entityId}
+                onNavigateDocs={() => { /* already on documents */ }}
+                initialExpectations={entity?.expectations as Expectation[] | undefined}
+              />
+            </div>
+          )}
+          <DocumentsTab
+            entityId={entityId}
+            documents={documents}
+            docsLoading={docsLoading}
+            onRefresh={fetchDocuments}
+            onRefreshQuiet={() => fetchDocuments(true)}
+            onEntityRefresh={fetchEntity}
+            entityName={entity?.name || ""}
+            entityData={entity as unknown as Record<string, unknown>}
+          />
+        </>
       )}
 
       {/* Activity Tab */}
@@ -5993,121 +6683,14 @@ export default function EntityDetailPage() {
                 const timeStr = time.toLocaleDateString("en-US", { month: "short", day: "numeric" }) +
                   " at " + time.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-                // Build a human-readable description of what happened
-                let title = "";
-                let detail = "";
-
-                const a = entry.action;
-                const rt = entry.resource_type;
-
-                if (a === "create" && rt === "entity") {
-                  title = "Entity created";
-                  if (meta.name) detail = `${meta.name} (${meta.type || "entity"})`;
-                } else if (a === "edit" && rt === "entity") {
-                  title = "Entity updated";
-                  if (meta.fields) detail = `Changed: ${(meta.fields as string[]).join(", ")}`;
-                } else if (a === "delete" && rt === "entity") {
-                  title = "Entity deleted";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_role") {
-                  title = `Added role: ${meta.role_title || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_role") {
-                  title = `Removed role: ${meta.role_title || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_member") {
-                  title = "Added member";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_member") {
-                  title = "Removed member";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_manager") {
-                  title = "Added manager";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "entity_manager") {
-                  title = "Removed manager";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "entity_registration") {
-                  title = "Added registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "edit" && rt === "entity_registration") {
-                  title = "Updated registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "delete" && rt === "entity_registration") {
-                  title = "Removed registration";
-                  if (meta.jurisdiction) detail = String(meta.jurisdiction);
-                } else if (a === "upload" && rt === "document") {
-                  title = "Uploaded document";
-                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
-                } else if (a === "delete" && rt === "document") {
-                  title = "Deleted document";
-                  if (meta.document_name) detail = `${meta.document_name}${meta.document_type ? ` (${meta.document_type})` : ""}`;
-                } else if (a === "download" && rt === "document") {
-                  title = "Downloaded document";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "apply_extraction") {
-                  const applied = meta.applied as number || 0;
-                  const failed = meta.failed as number || 0;
-                  title = `Applied AI extraction (${applied} change${applied !== 1 ? "s" : ""}${failed > 0 ? `, ${failed} failed` : ""})`;
-                  if (Array.isArray(meta.changes) && meta.changes.length > 0) {
-                    // detail handled as expandable list below
-                  }
-                } else if (a === "dismiss_extraction") {
-                  title = "Dismissed AI suggestions";
-                } else if (a === "process") {
-                  title = "Processed document with AI";
-                  if (meta.action_count) detail = `${meta.action_count} changes proposed`;
-                } else if (a === "approve" && rt === "pipeline_item") {
-                  const dName = meta.document_name ? String(meta.document_name) : null;
-                  title = dName ? `Ingested document: ${dName}` : "Approved pipeline item";
-                  const parts: string[] = [];
-                  if (meta.actions_applied) parts.push(`${meta.actions_applied} change${meta.actions_applied !== 1 ? "s" : ""} applied`);
-                  if (meta.document_type) parts.push(String(meta.document_type).replace(/_/g, " "));
-                  detail = parts.join(" · ");
-                } else if (a === "ingest" && rt === "pipeline_item") {
-                  const dName = meta.document_name ? String(meta.document_name) : null;
-                  title = dName ? `Ingested document: ${dName}` : "Ingested document (no changes applied)";
-                  if (meta.document_type) detail = String(meta.document_type).replace(/_/g, " ");
-                } else if (a === "edit" && rt === "trust_details") {
-                  title = "Updated trust details";
-                  if (meta.fields_updated) detail = `Changed: ${(meta.fields_updated as string[]).join(", ")}`;
-                } else if (a === "create" && rt === "trust_role") {
-                  title = `Added trust role: ${meta.role || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "trust_role") {
-                  title = `Removed trust role: ${meta.role || "role"}`;
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "cap_table_entry") {
-                  title = "Added cap table entry";
-                  if (meta.investor_name) detail = String(meta.investor_name);
-                } else if (a === "delete" && rt === "cap_table_entry") {
-                  title = "Removed cap table entry";
-                  if (meta.investor_name) detail = String(meta.investor_name);
-                } else if (a === "create" && rt === "partnership_rep") {
-                  title = "Added partnership representative";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "delete" && rt === "partnership_rep") {
-                  title = "Removed partnership representative";
-                  if (meta.name) detail = String(meta.name);
-                } else if (a === "create" && rt === "custom_field") {
-                  title = "Added custom field";
-                  if (meta.field_name) detail = String(meta.field_name);
-                } else if (a === "edit" && rt === "custom_field") {
-                  title = "Updated custom field";
-                } else if (a === "delete" && rt === "custom_field") {
-                  title = "Removed custom field";
-                } else if (a === "update_obligation" || (a === "edit" && rt === "compliance_obligation")) {
-                  title = "Updated compliance obligation";
-                  if (meta.status) detail = `Status: ${meta.status}`;
-                } else if (a === "create" && rt === "relationship") {
-                  title = "Created relationship";
-                } else if (a === "upload" && rt === "pipeline") {
-                  title = "Uploaded documents via pipeline";
-                  if (meta.file_count) detail = `${meta.file_count} file${meta.file_count !== 1 ? "s" : ""}`;
-                } else {
-                  // Fallback
-                  title = `${a} ${rt}`.replace(/_/g, " ");
-                }
+                // Single source of truth — same humanized copy as Home → Done
+                // and Settings → Activity (see lib/activity-humanizer.ts).
+                const human = humanizeActivity({ ...entry, entity_id: entityId });
+                // Internal pipeline chatter (batch processing, in-review staging
+                // edits) is jargon — skip it here just as the other feeds do.
+                if (human.suppressed) return null;
+                const title = human.lead;
+                const detail = human.detail ?? "";
 
                 const changes = Array.isArray(meta.changes) ? (meta.changes as string[]) : [];
                 const isExpandable = changes.length > 0;

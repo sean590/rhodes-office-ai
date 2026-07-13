@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 /**
@@ -13,12 +13,11 @@ export async function GET() {
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data, error } = await admin
+    const { data, error } = await db
       .from("entity_document_expectations")
       .select("id, entity_id, document_type, document_category, is_required, is_satisfied, is_not_applicable, is_suggestion, source, notes")
-      .eq("organization_id", orgId)
       .eq("is_satisfied", false)
       .eq("is_not_applicable", false)
       .eq("is_suggestion", false)
@@ -26,7 +25,8 @@ export async function GET() {
       .order("document_type");
 
     if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error("GET /api/expectations query:", error);
+      return NextResponse.json({ error: "Failed to load expectations" }, { status: 500 });
     }
 
     // Fetch entity names for grouping
@@ -34,7 +34,7 @@ export async function GET() {
     const entityNames: Record<string, string> = {};
 
     if (entityIds.length > 0) {
-      const { data: entities } = await admin
+      const { data: entities } = await db
         .from("entities")
         .select("id, name")
         .in("id", entityIds);

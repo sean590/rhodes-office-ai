@@ -14,6 +14,8 @@ export const ENTITY_TYPE_COLORS: Record<EntityType, EntityColorScheme> = {
   special_purpose: { bg: 'rgba(51,102,168,0.10)', border: '#3366a8', text: '#3366a8' },
   management_company: { bg: 'rgba(45,90,61,0.10)', border: '#2d5a3d', text: '#2d5a3d' },
   trust: { bg: 'rgba(196,117,32,0.10)', border: '#c47520', text: '#c47520' },
+  person: { bg: 'rgba(51,102,168,0.10)', border: '#3366a8', text: '#3366a8' },
+  joint_title: { bg: 'rgba(45,90,61,0.10)', border: '#2d5a3d', text: '#2d5a3d' },
   other: { bg: 'rgba(148,148,160,0.10)', border: '#9494a0', text: '#9494a0' },
 };
 
@@ -25,6 +27,8 @@ export const ENTITY_TYPE_LABELS: Record<EntityType, string> = {
   special_purpose: 'Special Purpose',
   management_company: 'Management Company',
   trust: 'Trust',
+  person: 'Person',
+  joint_title: 'Joint Title',
   other: 'Other',
 };
 

@@ -1,6 +1,8 @@
-// Compliance Rules — All 50 States + DC
+// Compliance Rules — All 50 States + DC + Federal
 // Static reference data for generating per-entity compliance obligations.
 // Rules change infrequently (legislative sessions). When they do, it's a code update.
+
+import type { TaxClassification } from "@/lib/types/enums";
 
 export type ObligationType =
   | "annual_report"
@@ -13,11 +15,19 @@ export type ObligationType =
   | "estimated_fee"
   | "commerce_tax"
   | "business_entity_tax"
+  // Federal + cross-cutting
+  | "federal_income_tax"
+  | "state_income_tax"
+  | "estimated_tax"
+  | "ptet"            // Pass-through entity tax election
+  | "boi_report"      // FinCEN beneficial ownership information
   | "other";
 
-export type FilingFrequency = "annual" | "biennial" | "one_time" | "continuous" | "decennial";
+export type FilingFrequency = "annual" | "biennial" | "one_time" | "continuous" | "decennial" | "quarterly";
 
-export type EntityTypeScope = "llc" | "corporation" | "lp" | "trust" | "all";
+// "person" added so personal income tax + estimated-payment rules can target
+// individual entities. "all" matches every scope.
+export type EntityTypeScope = "llc" | "corporation" | "lp" | "trust" | "person" | "all";
 
 export type DueDateFormula =
   | { type: "fixed_date"; month: number; day: number }
@@ -31,6 +41,10 @@ export interface ComplianceRule {
   id: string;
   jurisdiction: string;
   entity_types: EntityTypeScope[];
+  // Federal rules also key on the entity's IRS tax election. When present and
+  // non-empty, the engine requires the entity's tax_classification to match.
+  // State rules omit this field; they match on entity_types alone.
+  tax_classifications?: TaxClassification[];
   obligation_type: ObligationType;
   name: string;
   description: string;
@@ -1314,5 +1328,409 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
     fee: { amount: 6000, description: "$60 minimum (based on WY assets)" },
     filed_with: "WY Secretary of State",
     notes: "$60 for assets up to $250K, then $0.0002 per dollar of assets. No state income tax.",
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // FEDERAL — IRS / FinCEN
+  // Match on jurisdiction "federal" + tax_classifications. The engine adds
+  // "federal" to every entity's jurisdiction list, so federal rules are
+  // checked for every entity regardless of formation_state.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // --- C Corporation ---
+  {
+    id: "FED_CCORP_1120",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["c_corp"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1120 — U.S. Corporate Income Tax Return",
+    description: "Annual income tax return for C corporations. Due 4th month after fiscal year end (April 15 for calendar year).",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 4, day: 15 },
+    fee: { amount: null, description: "Tax liability varies" },
+    filed_with: "IRS",
+    form_number: "1120",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1120",
+    penalty_description: "5% of unpaid tax per month, up to 25%. Plus interest.",
+  },
+  {
+    id: "FED_CCORP_EST_TAX",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["c_corp"],
+    obligation_type: "estimated_tax",
+    name: "Estimated Tax Payments (Form 1120-W)",
+    description: "Quarterly estimated tax payments for C corps expecting $500+ in tax liability.",
+    frequency: "quarterly",
+    due_date: { type: "fixed_date", month: 4, day: 15 },
+    fee: { amount: null, description: "25% of estimated annual tax per quarter" },
+    filed_with: "IRS",
+    form_number: "1120-W",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1120-w",
+    penalty_description: "Underpayment penalty if payments fall short",
+    notes: "Due dates: April 15, June 15, September 15, December 15. Engine generates the April 15 deadline; quarterly recurrence advances the rest as each is completed.",
+  },
+
+  // --- S Corporation ---
+  {
+    id: "FED_SCORP_1120S",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["s_corp"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1120-S — U.S. Income Tax Return for S Corporation",
+    description: "Annual information return for S corporations. Due 3rd month after fiscal year end (March 15 for calendar year). K-1s due to shareholders by same date.",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 3, day: 15 },
+    fee: { amount: null, description: "Pass-through — no entity-level tax (generally)" },
+    filed_with: "IRS",
+    form_number: "1120-S",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1120-s",
+    penalty_description: "$220/month per shareholder (2024 rate), up to 12 months. Late K-1 penalties apply.",
+  },
+
+  // --- Partnership (LLCs taxed as partnership, LPs, GPs) ---
+  {
+    id: "FED_PARTNERSHIP_1065",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["partnership"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1065 — U.S. Return of Partnership Income",
+    description: "Annual information return for partnerships. Due 3rd month after fiscal year end (March 15 for calendar year). Schedule K-1s due to partners by same date.",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 3, day: 15 },
+    fee: { amount: null, description: "Pass-through — no entity-level tax" },
+    filed_with: "IRS",
+    form_number: "1065",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1065",
+    penalty_description: "$220/month per partner (2024 rate), up to 12 months.",
+  },
+
+  // --- Trust (non-grantor) ---
+  {
+    id: "FED_TRUST_1041",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["trust_non_grantor"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1041 — U.S. Income Tax Return for Estates and Trusts",
+    description: "Annual fiduciary income tax return. Due April 15 for calendar-year trusts. K-1s due to beneficiaries by same date.",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 4, day: 15 },
+    fee: { amount: null, description: "Tax on undistributed income" },
+    filed_with: "IRS",
+    form_number: "1041",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1041",
+    penalty_description: "5% of unpaid tax per month, up to 25%.",
+  },
+
+  // --- Trust (grantor — optional 1041 if the trust has its own EIN) ---
+  {
+    id: "FED_GRANTOR_TRUST_1041",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["trust_grantor"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1041 — Grantor Trust Information Return (optional)",
+    description: "Optional information return for grantor trusts. Many grantor trusts skip this and report directly on the grantor's 1040. File if the trust has its own EIN and receives income statements.",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 4, day: 15 },
+    fee: { amount: null, description: "No separate tax — income reported on grantor's return" },
+    filed_with: "IRS",
+    form_number: "1041",
+    notes: "Optional for grantor trusts. Required if trust has its own EIN and receives 1099s.",
+  },
+
+  // --- Tax-Exempt Organizations ---
+  {
+    id: "FED_EXEMPT_990",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    tax_classifications: ["tax_exempt"],
+    obligation_type: "federal_income_tax",
+    name: "Form 990 — Return of Organization Exempt from Income Tax",
+    description: "Annual information return for tax-exempt organizations. Due 5th month after fiscal year end (May 15 for calendar year).",
+    frequency: "annual",
+    due_date: { type: "relative_to_fiscal_year_end", month_offset: 5, day: 15 },
+    fee: { amount: null, description: "No tax — information return" },
+    filed_with: "IRS",
+    form_number: "990",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-990",
+    penalty_description: "$20/day (small orgs) or $100/day (large orgs), up to the lesser of $10,000 or 5% of gross receipts. Auto-revocation after 3 consecutive years of non-filing.",
+  },
+
+  // --- Person (individual) ---
+  // Person entities default to sole_prop in the engine when tax_classification
+  // is null, so they pick these rules up automatically.
+  {
+    id: "FED_PERSON_1040",
+    jurisdiction: "federal",
+    entity_types: ["person"],
+    tax_classifications: ["sole_prop"],
+    obligation_type: "federal_income_tax",
+    name: "Form 1040 — U.S. Individual Income Tax Return",
+    description: "Annual personal income tax return. Includes Schedule C (sole prop), Schedule E (rental/partnership/S corp income), Schedule D (capital gains). Due April 15.",
+    frequency: "annual",
+    due_date: { type: "fixed_date", month: 4, day: 15 },
+    fee: { amount: null, description: "Tax liability varies" },
+    filed_with: "IRS",
+    form_number: "1040",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1040",
+    penalty_description: "5% of unpaid tax per month, up to 25%. Plus 0.5%/month for late payment.",
+  },
+  {
+    id: "FED_PERSON_EST_TAX",
+    jurisdiction: "federal",
+    entity_types: ["person"],
+    tax_classifications: ["sole_prop"],
+    obligation_type: "estimated_tax",
+    name: "Estimated Tax Payments (Form 1040-ES)",
+    description: "Quarterly estimated tax payments for individuals with significant non-wage income (partnership distributions, rental income, capital gains). Due April 15, June 15, September 15, January 15.",
+    frequency: "quarterly",
+    due_date: { type: "fixed_date", month: 4, day: 15 },
+    fee: { amount: null, description: "25% of estimated annual tax per quarter" },
+    filed_with: "IRS",
+    form_number: "1040-ES",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-1040-es",
+    penalty_description: "Underpayment penalty if payments fall short of safe harbor (110% of prior year tax or 90% of current year tax).",
+    notes: "Due dates: April 15, June 15, September 15, January 15 (of following year). Critical for family office principals receiving K-1 income from multiple pass-through entities.",
+  },
+
+  // --- All entities (cross-classification) ---
+  {
+    id: "FED_ALL_BOI",
+    jurisdiction: "federal",
+    entity_types: ["llc", "corporation", "lp"],
+    obligation_type: "boi_report",
+    name: "Beneficial Ownership Information (BOI) Report",
+    description: "FinCEN BOI report required for most entities. Entities formed before 2024 had until Jan 1, 2025 (currently under litigation — check current status). New entities must file within 90 days of formation.",
+    frequency: "one_time",
+    due_date: { type: "formation_relative", month_offset: 3, day: 0 },
+    fee: { amount: 0, description: "No filing fee" },
+    filed_with: "FinCEN",
+    form_number: "BOIR",
+    portal_url: "https://boiefiling.fincen.gov",
+    penalty_description: "$500/day civil penalty, criminal penalties up to $10,000 and/or 2 years imprisonment.",
+    notes: "Subject to ongoing litigation. CTA enforcement has been paused and resumed multiple times. Check current status.",
+  },
+
+  {
+    id: "FED_ALL_EIN_CHANGE",
+    jurisdiction: "federal",
+    entity_types: ["all"],
+    obligation_type: "other",
+    name: "Responsible Party Change Notification (Form 8822-B)",
+    description: "Must notify IRS within 60 days if the entity's responsible party (the person who controls/manages/directs the entity) changes.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No filing fee" },
+    filed_with: "IRS",
+    form_number: "8822-B",
+    portal_url: "https://www.irs.gov/forms-pubs/about-form-8822-b",
+    notes: "Triggered by management changes, not calendar-based. Engine generates as a continuous obligation — no specific due date.",
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STATE PERSONAL INCOME TAX
+  // Keyed on entity_types: ["person"] — these match individuals filing
+  // resident income tax returns in their state of residence (stored as
+  // formation_state on the person entity).
+  //
+  // Informational no-income-tax states are included so the dashboard can
+  // show an explicit "no state income tax" entry rather than leaving a blank
+  // column. They use type: "continuous" + fee.amount: 0 so they generate an
+  // obligation with no due date that completion tracking leaves in place.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // --- No-income-tax states (informational) ---
+  {
+    id: "FL_PERSON_NO_INCOME_TAX",
+    jurisdiction: "FL",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Florida Personal Income Tax — None",
+    description: "Florida does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "TX_PERSON_NO_INCOME_TAX",
+    jurisdiction: "TX",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Texas Personal Income Tax — None",
+    description: "Texas does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "NV_PERSON_NO_INCOME_TAX",
+    jurisdiction: "NV",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Nevada Personal Income Tax — None",
+    description: "Nevada does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "WY_PERSON_NO_INCOME_TAX",
+    jurisdiction: "WY",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Wyoming Personal Income Tax — None",
+    description: "Wyoming does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "WA_PERSON_NO_INCOME_TAX",
+    jurisdiction: "WA",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Washington Personal Income Tax — None",
+    description: "Washington does not impose a state personal income tax on wages. (A separate 7% capital gains tax applies to gains above $250K — not tracked here.) Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax on wages" },
+    filed_with: "N/A",
+    notes: "Informational — WA capital gains tax not tracked by this rule.",
+  },
+  {
+    id: "SD_PERSON_NO_INCOME_TAX",
+    jurisdiction: "SD",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "South Dakota Personal Income Tax — None",
+    description: "South Dakota does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "AK_PERSON_NO_INCOME_TAX",
+    jurisdiction: "AK",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Alaska Personal Income Tax — None",
+    description: "Alaska does not impose a state personal income tax. Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — no filing required.",
+  },
+  {
+    id: "NH_PERSON_NO_INCOME_TAX",
+    jurisdiction: "NH",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "New Hampshire Personal Income Tax — None",
+    description: "New Hampshire does not impose a broad-based state personal income tax. (A 5% interest-and-dividends tax was phased out after tax year 2024.) Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — the former I&D tax is no longer in effect.",
+  },
+  {
+    id: "TN_PERSON_NO_INCOME_TAX",
+    jurisdiction: "TN",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Tennessee Personal Income Tax — None",
+    description: "Tennessee does not impose a state personal income tax. (The Hall income tax on investment income was repealed effective 2021.) Informational entry only.",
+    frequency: "continuous",
+    due_date: { type: "continuous" },
+    fee: { amount: 0, description: "No state income tax" },
+    filed_with: "N/A",
+    notes: "Informational — the former Hall tax is no longer in effect.",
+  },
+
+  // --- CA personal income tax ---
+  {
+    id: "CA_PERSON_540",
+    jurisdiction: "CA",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Form 540 — California Resident Income Tax Return",
+    description: "Annual California personal income tax return. Due April 15 (aligned with federal).",
+    frequency: "annual",
+    due_date: { type: "fixed_date", month: 4, day: 15 },
+    fee: { amount: null, description: "Tax rates 1%–13.3% (progressive)" },
+    filed_with: "CA Franchise Tax Board",
+    form_number: "540",
+    portal_url: "https://www.ftb.ca.gov",
+    penalty_description: "5% of unpaid tax per month (failure to file) plus 0.5%/month (failure to pay). Plus interest.",
+  },
+
+  // --- NY personal income tax ---
+  {
+    id: "NY_PERSON_IT201",
+    jurisdiction: "NY",
+    entity_types: ["person"],
+    obligation_type: "state_income_tax",
+    name: "Form IT-201 — New York Resident Income Tax Return",
+    description: "Annual New York personal income tax return. Due April 15 (aligned with federal).",
+    frequency: "annual",
+    due_date: { type: "fixed_date", month: 4, day: 15 },
+    fee: { amount: null, description: "Tax rates 4%–10.9% (progressive)" },
+    filed_with: "NY Department of Taxation and Finance",
+    form_number: "IT-201",
+    portal_url: "https://www.tax.ny.gov",
+    penalty_description: "5% of unpaid tax per month (failure to file) plus 0.5%/month (failure to pay). Plus interest.",
+  },
+
+  // ═══════════════════════════════════════════════════════════════════
+  // STATE PASS-THROUGH ENTITY TAX (PTET)
+  // Optional elections where a pass-through entity pays state tax on
+  // behalf of its owners — a SALT-cap workaround. These generate as
+  // pending obligations; users disable them via the three-tier overrides
+  // on entities that don't elect in.
+  // ═══════════════════════════════════════════════════════════════════
+
+  {
+    id: "CA_PTET",
+    jurisdiction: "CA",
+    entity_types: ["llc", "lp", "corporation"],
+    tax_classifications: ["partnership", "s_corp"],
+    obligation_type: "ptet",
+    name: "California Pass-Through Entity Tax (PTET) Election",
+    description: "Optional annual election for pass-through entities to pay 9.3% CA tax at the entity level. Election is made on the original return. Lets owners deduct state taxes beyond the $10K SALT cap.",
+    frequency: "annual",
+    due_date: { type: "fixed_date", month: 3, day: 15 },
+    fee: { amount: null, description: "9.3% of qualified net income" },
+    filed_with: "CA Franchise Tax Board",
+    notes: "Optional — disable on the entity or org-wide if this election is not being made.",
+  },
+  {
+    id: "NY_PTET",
+    jurisdiction: "NY",
+    entity_types: ["llc", "lp", "corporation"],
+    tax_classifications: ["partnership", "s_corp"],
+    obligation_type: "ptet",
+    name: "New York Pass-Through Entity Tax (PTET) Election",
+    description: "Optional annual election for partnerships and S corps to pay NY tax at the entity level. Must elect by March 15 of the tax year.",
+    frequency: "annual",
+    due_date: { type: "fixed_date", month: 3, day: 15 },
+    fee: { amount: null, description: "Tax rates 6.85%–10.9% on NY-source income" },
+    filed_with: "NY Department of Taxation and Finance",
+    notes: "Optional — must opt in annually. Disable on the entity or org-wide if not electing.",
   },
 ];

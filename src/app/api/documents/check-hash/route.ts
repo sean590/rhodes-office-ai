@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createOrgClient } from "@/lib/supabase/org-client";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 
 export async function GET(request: Request) {
@@ -15,13 +15,12 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "hash query parameter is required" }, { status: 400 });
     }
 
-    const admin = createAdminClient();
+    const db = createOrgClient(orgId);
 
-    const { data: existing, error } = await admin
+    const { data: existing, error } = await db
       .from("documents")
       .select("id, name, entity_id, created_at")
       .eq("content_hash", hash)
-      .eq("organization_id", orgId)
       .is("deleted_at", null)
       .limit(1)
       .maybeSingle();
@@ -34,7 +33,7 @@ export async function GET(request: Request) {
       // Look up entity name
       let entityName: string | null = null;
       if (existing.entity_id) {
-        const { data: ent } = await admin
+        const { data: ent } = await db
           .from("entities")
           .select("name")
           .eq("id", existing.entity_id)

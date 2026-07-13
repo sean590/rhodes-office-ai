@@ -9,7 +9,7 @@ export async function GET(
   try {
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
-    const { orgId } = ctx;
+    const { orgId, user } = ctx;
 
     const { id } = await params;
     const admin = createAdminClient();
@@ -27,7 +27,7 @@ export async function GET(
 
     const { data: messages, error: messagesError } = await admin
       .from("chat_messages")
-      .select("id, session_id, role, content, created_at")
+      .select("id, session_id, role, content, metadata, created_at")
       .eq("session_id", id)
       .order("created_at", { ascending: true })
       .limit(500);
@@ -36,9 +36,38 @@ export async function GET(
       return NextResponse.json({ error: "Internal server error" }, { status: 500 });
     }
 
+    // Preload this user's feedback for every assistant message in the session.
+    // One bounded query — saves one request per assistant bubble on the client.
+    const assistantIds = (messages ?? [])
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.id);
+    const feedbackByMessageId: Record<
+      string,
+      { rating: "up" | "down"; comment: string | null }
+    > = {};
+    if (assistantIds.length > 0) {
+      const { data: feedback } = await admin
+        .from("chat_feedback")
+        .select("message_id, rating, comment")
+        .eq("user_id", user.id)
+        .in("message_id", assistantIds);
+      for (const f of (feedback ?? []) as Array<{
+        message_id: string;
+        rating: "up" | "down";
+        comment: string | null;
+      }>) {
+        feedbackByMessageId[f.message_id] = { rating: f.rating, comment: f.comment };
+      }
+    }
+
+    const messagesWithFeedback = (messages ?? []).map((m) => ({
+      ...m,
+      feedback: feedbackByMessageId[m.id] ?? null,
+    }));
+
     return NextResponse.json({
       ...session,
-      messages: messages || [],
+      messages: messagesWithFeedback,
     });
   } catch (err) {
     console.error("GET /api/chat/sessions/[id] error:", err);

@@ -1,4 +1,4 @@
-import { EntityType, EntityStatus, Jurisdiction, TrustType, TrustRoleType, RelationshipType, PaymentFrequency, RelationshipStatus, InvestorType, CustomFieldType, FilingStatus, DocumentType, LegalStructure, QueueStatus, BatchStatus, BatchContext } from './enums';
+import { EntityType, EntityStatus, Jurisdiction, TrustType, TrustRoleType, RelationshipType, PaymentFrequency, RelationshipStatus, InvestorType, CustomFieldType, FilingStatus, DocumentType, LegalStructure, TaxClassification, QueueStatus, BatchStatus, BatchContext } from './enums';
 
 export interface Entity {
   id: string;
@@ -7,14 +7,20 @@ export interface Entity {
   type: EntityType;
   status: EntityStatus;
   ein: string | null;
-  formation_state: Jurisdiction;
+  formation_state: Jurisdiction | null;
   formed_date: string | null;
   address: string | null;
   registered_agent: string | null;
   parent_entity_id: string | null;
   legal_structure: LegalStructure | null;
+  // IRS tax election. Separate from legal_structure because an LLC can be
+  // taxed as any of partnership/s_corp/c_corp/disregarded. Drives federal
+  // compliance rule matching. NULL = not yet determined.
+  tax_classification: TaxClassification | null;
   notes: string | null;
   business_purpose: string | null;
+  ssn_last_4: string | null;
+  aliases: string[];
   created_at: string;
   updated_at: string;
 }
@@ -171,7 +177,7 @@ export interface CustomFieldWithValue extends CustomFieldDefinition {
   value: CustomFieldValue | null;
 }
 
-export type DocumentCategory = 'formation' | 'tax' | 'investor' | 'contracts' | 'compliance' | 'insurance' | 'governance' | 'other';
+export type DocumentCategory = 'formation' | 'tax' | 'investor' | 'financial' | 'contracts' | 'compliance' | 'insurance' | 'governance' | 'other';
 
 export interface Document {
   id: string;
@@ -192,11 +198,16 @@ export interface Document {
   content_hash: string | null;
   jurisdiction: string | null;
   direction: string | null;
+  source_provider_id?: string | null;  // Provenance: which provider this came from (routing veto)
   source_page_range: number[] | null;
   source_document_id: string | null;
   k1_recipient: string | null;
   created_at: string;
   link_role?: string | null;  // Set when doc is linked via document_entity_links (not direct entity_id)
+  joint_title_id?: string | null;  // Set when doc surfaces via joint_title membership (person Documents tab)
+  joint_title_name?: string | null;
+  investment_id?: string | null;  // Set when doc is linked to an investment (investment_id FK on documents)
+  investment_name?: string | null;
 }
 
 // --- Pipeline types ---
@@ -282,6 +293,12 @@ export interface QueueItem {
   // Result
   document_id: string | null;
 
+  // Review/chat unification (migration 057): link to the chat session the
+  // worker created when the agent deferred. /review's ReviewCard reads from
+  // this; "Open in chat" reuses the same session. Null on legacy items
+  // and on items that auto-ingested (the agent didn't defer).
+  chat_session_id: string | null;
+
   source_type: string;
   source_ref: string | null;
   created_at: string;
@@ -314,6 +331,18 @@ export interface DocumentBatch {
 
 export type ComplianceStatus = 'pending' | 'completed' | 'overdue' | 'exempt' | 'not_applicable';
 
+export interface ComplianceObligationCycle {
+  id: string;
+  obligation_id: string;
+  cycle_due_date: string;
+  completed_at: string;
+  completed_by: string | null;
+  document_id: string | null;
+  payment_amount: number | null;
+  confirmation: string | null;
+  notes: string | null;
+}
+
 export interface ComplianceObligation {
   id: string;
   entity_id: string;
@@ -338,11 +367,137 @@ export interface ComplianceObligation {
   penalty_description: string | null;
   created_at: string;
   updated_at: string;
+  // Recent completion history (most recent first, capped at 10).
+  // Populated by GET /api/entities/[id]/compliance.
+  cycles?: ComplianceObligationCycle[];
 }
 
 export interface ProposedAction {
-  action: 'create_entity' | 'update_entity' | 'create_relationship' | 'add_member' | 'add_manager' | 'add_registration' | 'add_trust_role' | 'update_cap_table' | 'create_directory_entry' | 'add_custom_field' | 'add_partnership_rep' | 'add_role' | 'complete_obligation' | 'update_obligation';
+  action: 'create_entity' | 'update_entity' | 'create_relationship' | 'add_member' | 'add_manager' | 'add_registration' | 'add_trust_role' | 'update_cap_table' | 'create_directory_entry' | 'add_custom_field' | 'add_partnership_rep' | 'add_role' | 'complete_obligation' | 'update_obligation' | 'create_investment' | 'link_document_to_investment' | 'set_investment_allocations' | 'record_investment_transaction';
   data: Record<string, unknown>;
   reason: string;
   confidence: 'high' | 'medium' | 'low';
+}
+
+// --- Investment tracking types ---
+
+export type InvestmentTransactionType = 'contribution' | 'distribution' | 'return_of_capital';
+
+export interface InvestmentAllocation {
+  id: string;
+  organization_id: string;
+  parent_entity_id: string;
+  deal_entity_id: string;
+  member_directory_id: string;
+  allocation_pct: number;
+  committed_amount: number | null;
+  effective_date: string | null;
+  notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  // Joined fields
+  member_name?: string;
+}
+
+export interface InvestmentTransaction {
+  id: string;
+  organization_id: string;
+  parent_entity_id: string;
+  deal_entity_id: string;
+  member_directory_id: string | null;
+  transaction_type: InvestmentTransactionType;
+  amount: number;
+  transaction_date: string;
+  document_id: string | null;
+  description: string | null;
+  parent_transaction_id: string | null;
+  created_at: string;
+  updated_at: string;
+  created_by: string | null;
+  // Joined fields
+  member_name?: string;
+  document_name?: string;
+}
+
+// --- Service Providers (Phase 1 routing hub) ---
+
+// Shape of each object in service_providers.contacts (JSONB).
+export interface ProviderContact {
+  name: string;
+  email: string;
+  role?: string;
+  is_default?: boolean;
+}
+
+export interface ServiceProvider {
+  id: string;
+  organization_id: string;
+  name: string;
+  disciplines: string[];
+  domains: string[];
+  contacts: ProviderContact[];
+  default_contact_email: string | null;
+  serves_all_entities: boolean;
+  directory_entry_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  // Joined / enriched fields
+  entity_ids?: string[];
+  entity_count?: number;
+}
+
+export interface ServiceProviderEntity {
+  id: string;
+  organization_id: string;
+  provider_id: string;
+  entity_id: string;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface OrgProviderRoutingRule {
+  id: string;
+  organization_id: string;
+  document_type: string;
+  provider_id: string;
+  times_confirmed: number;
+  times_dismissed: number;
+  confidence: number;
+  last_sent_at: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderDocumentSendDocument {
+  id: string;
+  organization_id: string;
+  send_id: string;
+  document_id: string;
+  created_at: string;
+}
+
+export type ProviderDocumentSendStatus = 'queued' | 'sent' | 'failed';
+
+export interface ProviderDocumentSend {
+  id: string;
+  organization_id: string;
+  provider_id: string;
+  document_id: string;
+  entity_id: string | null;
+  recipient_email: string;
+  subject: string | null;
+  message: string | null;
+  status: ProviderDocumentSendStatus;
+  delivery_provider: string | null;
+  delivery_ref: string | null;
+  error: string | null;
+  sent_by: string | null;
+  sent_at: string | null;
+  created_at: string;
 }
