@@ -19,6 +19,12 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
+              // script-src keeps 'unsafe-inline': Next.js bakes inline hydration
+              // scripts (self.__next_f.push) into STATICALLY-prerendered pages at
+              // build time, so they can't carry a per-request nonce. Dropping
+              // 'unsafe-inline' would need the whole app forced to dynamic
+              // rendering (a real perf/arch tradeoff) — tracked as a follow-up.
+              // The other directives below give defense-in-depth in the meantime.
               "script-src 'self' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob: https://*.supabase.co https://*.rhodesoffice.ai",
@@ -32,7 +38,11 @@ const nextConfig: NextConfig = {
               // *.supabase.co for any direct/fallback use; add wss for the
               // realtime socket on the custom domain.
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.rhodesoffice.ai wss://*.rhodesoffice.ai https://api.anthropic.com https://*.ingest.sentry.io https://*.ingest.us.sentry.io",
-              "frame-ancestors 'none'",
+              // Hardening the audit called out explicitly (#13):
+              "object-src 'none'", // block <object>/<embed> plugin vectors
+              "base-uri 'self'", // stop <base> tag hijacking of relative URLs
+              "frame-ancestors 'none'", // no embedding (clickjacking)
+              "form-action 'self'", // forms can only submit same-origin
             ].join("; "),
           },
         ],
