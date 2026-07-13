@@ -70,10 +70,21 @@ SQL
 
 # Replay every migration in filename order. (Rollback scripts live in
 # supabase/rollbacks/, NOT here, so they don't run.)
+#
+# CRITICAL: mirror Supabase's runner, which only accepts a PURELY-NUMERIC
+# version prefix (^[0-9]+_). A lettered file like "002a_foo.sql" is silently
+# SKIPPED by Supabase — so we must skip it here too, or this gate would pass on
+# a migration set that fails the real branch build (exactly how the 002a fix
+# looked green locally but Staging still failed at 013).
 count=0
 for f in $(ls supabase/migrations/*.sql | sort); do
+  base=$(basename "$f")
+  if [[ ! "$base" =~ ^[0-9]+_ ]]; then
+    echo "  ⚠ SKIPPING $base — non-numeric prefix; Supabase ignores it (put the SQL in a NNN_ file)" >&2
+    continue
+  fi
   if ! out=$("${PSQL_DB[@]}" -f "$f" 2>&1); then
-    echo "✗ FAILED at $(basename "$f"):" >&2
+    echo "✗ FAILED at $base:" >&2
     echo "$out" | grep -iE "error" | head -5 >&2
     exit 1
   fi
