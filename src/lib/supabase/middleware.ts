@@ -1,5 +1,27 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { MFA_STATE_COOKIE } from "@/lib/utils/mfa-state";
+
+/**
+ * Decode the `aal` claim from a session access token. No network, no signature
+ * verify — getUser() has already validated this token upstream, so its claims
+ * are trustworthy; this is only a UX redirect signal (the real boundary is the
+ * server-side requireAal2). Returns null if the claim can't be read.
+ */
+function readAalClaim(accessToken: string): "aal1" | "aal2" | null {
+  try {
+    const part = accessToken.split(".")[1];
+    if (!part) return null;
+    // base64url → base64, then decode as UTF-8. atob + TextDecoder are available
+    // in both the Edge and Node middleware runtimes (Buffer is not, on Edge).
+    const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const json = JSON.parse(new TextDecoder().decode(bytes)) as { aal?: string };
+    return json.aal === "aal2" ? "aal2" : json.aal === "aal1" ? "aal1" : null;
+  } catch {
+    return null;
+  }
+}
 
 // Inactivity timeout: 30 minutes.
 // Keep in sync with INACTIVITY_TIMEOUT_MS in src/components/session-timeout-manager.tsx.
@@ -103,6 +125,7 @@ export async function updateSession(request: NextRequest) {
         );
         res.cookies.delete(ACTIVITY_COOKIE);
         res.cookies.delete(SESSION_START_COOKIE);
+        res.cookies.delete(MFA_STATE_COOKIE);
         return res;
       }
       const url = request.nextUrl.clone();
@@ -111,6 +134,7 @@ export async function updateSession(request: NextRequest) {
       const redirect = NextResponse.redirect(url);
       redirect.cookies.delete(ACTIVITY_COOKIE);
       redirect.cookies.delete(SESSION_START_COOKIE);
+      redirect.cookies.delete(MFA_STATE_COOKIE);
       return redirect;
     };
 
@@ -130,6 +154,43 @@ export async function updateSession(request: NextRequest) {
       const elapsed = now - parseInt(lastActivity, 10);
       if (elapsed > INACTIVITY_TIMEOUT_MS) {
         return expireSession("inactive", "Session expired due to inactivity");
+      }
+    }
+
+    // MFA / AAL2 enforcement (server-side, before the app renders). The client
+    // MfaGate is a backstop; doing it here means the authenticated app never
+    // flashes before the challenge/enrollment redirect. Page navigations only —
+    // API routes enforce via requireAal2 (a 403 the client handles; a redirect
+    // would corrupt a fetch). Reads the login-set rhodes_mfa_state cookie so
+    // there's no listFactors round-trip; an ABSENT cookie (session predating
+    // this rollout) is skipped so nobody gets locked out of an active session.
+    if (!isApiRequest) {
+      const path = request.nextUrl.pathname;
+      // /auth/* (incl. the challenge) and the security settings page must stay
+      // reachable so enrollment/step-up can't be redirect-looped.
+      const mfaExempt = path.startsWith("/auth") || path.startsWith("/settings/security");
+      const mfaState = request.cookies.get(MFA_STATE_COOKIE)?.value;
+      if (!mfaExempt && mfaState) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const aal = session?.access_token ? readAalClaim(session.access_token) : null;
+
+        // Enrolled, but this session hasn't completed the challenge → step up.
+        if (mfaState === "enrolled" && aal === "aal1") {
+          const url = request.nextUrl.clone();
+          url.pathname = "/auth/mfa";
+          url.searchParams.set("next", path + request.nextUrl.search);
+          return NextResponse.redirect(url);
+        }
+        // Not enrolled and past the grace deadline → force enrollment.
+        if (mfaState.startsWith("grace:")) {
+          const deadline = parseInt(mfaState.slice(6), 10);
+          if (Number.isFinite(deadline) && now >= deadline) {
+            const url = request.nextUrl.clone();
+            url.pathname = "/settings/security";
+            url.searchParams.set("reason", "mfa_required");
+            return NextResponse.redirect(url);
+          }
+        }
       }
     }
 

@@ -16,7 +16,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Highest allowed number of files importing createAdminClient (excl. wrapper/defn).
-BASELINE=70
+# 71 (was 70): + api/auth/mfa-state — reads user_profiles.mfa_grace_until by user
+# id for the MFA-enforcement cookie (an auth/users lookup, the exempt category).
+BASELINE=71
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MFA_STATE_COOKIE, buildMfaStateValue, mfaStateCookieOptions } from "@/lib/utils/mfa-state";
 
 const ACTIVITY_COOKIE = "rhodes_last_activity";
 const SESSION_START_COOKIE = "rhodes_session_start";
@@ -55,12 +56,11 @@ export async function GET(request: Request) {
             .eq("id", data.user.id);
         }
 
-        // OAuth just established an aal1 session. If the user has MFA enrolled,
-        // route through the challenge BEFORE the app renders — otherwise the
-        // client-side MfaGate redirects after paint and the user sees /home
-        // flash for a beat before the OTP prompt appears.
-        const dest = await mfaAwareDestination(supabase, next || "/home");
-        return setFreshSessionCookies(NextResponse.redirect(`${origin}${dest}`));
+        // OAuth just established an aal1 session. Compute the MFA state cookie
+        // (so middleware can enforce on every later navigation) and, if the user
+        // is already enrolled, route straight to the challenge — so the app
+        // never renders behind the OTP prompt.
+        return resolvePostLogin(supabase, admin, data.user.id, origin, next || "/home");
       }
 
       // 2. Check for pending invite by email
@@ -101,27 +101,58 @@ export async function GET(request: Request) {
 }
 
 /**
- * Post-OAuth the session is aal1. If the user has a verified MFA factor, send
- * them to /auth/mfa (the challenge) before the app renders, so /home never
- * paints behind the OTP prompt. Falls back to the intended path on any error —
- * the client MfaGate remains the backstop.
+ * Post-OAuth the session is aal1. Build the redirect response that (a) sets the
+ * rhodes_mfa_state cookie so middleware can enforce MFA on every later request,
+ * and (b) if the user has a verified factor, sends them to /auth/mfa (the
+ * challenge) before the app renders — so /home never paints behind the OTP
+ * prompt. Both the enrollment check and grace read are best-effort; on any error
+ * we fall back to the intended path with no cookie, and the client MfaGate
+ * remains the backstop.
  */
-async function mfaAwareDestination(
+async function resolvePostLogin(
   supabase: Awaited<ReturnType<typeof createClient>>,
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  origin: string,
   intended: string,
-): Promise<string> {
+): Promise<NextResponse> {
+  let hasVerified = false;
+  let currentAal: string | null = null;
   try {
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
-    if (aal?.currentLevel === "aal2") return intended; // already stepped up
+    currentAal = aal?.currentLevel ?? null;
     const { data: factors } = await supabase.auth.mfa.listFactors();
-    const hasVerified =
+    hasVerified =
       (factors?.totp ?? []).some((f) => f.status === "verified") ||
       (factors?.phone ?? []).some((f) => f.status === "verified");
-    if (hasVerified) return `/auth/mfa?next=${encodeURIComponent(intended)}`;
   } catch {
-    /* non-fatal — MfaGate backstops on the client */
+    /* non-fatal */
   }
-  return intended;
+
+  let graceIso: string | null = null;
+  try {
+    const { data: prof } = await admin
+      .from("user_profiles")
+      .select("mfa_grace_until")
+      .eq("id", userId)
+      .maybeSingle();
+    graceIso = prof?.mfa_grace_until ?? null;
+  } catch {
+    /* non-fatal — mfa_grace_until column may be absent pre-migration-070 */
+  }
+
+  const needsChallenge = hasVerified && currentAal !== "aal2";
+  const destPath = needsChallenge
+    ? `/auth/mfa?next=${encodeURIComponent(intended)}`
+    : intended;
+
+  const response = setFreshSessionCookies(NextResponse.redirect(`${origin}${destPath}`));
+  response.cookies.set(
+    MFA_STATE_COOKIE,
+    buildMfaStateValue(hasVerified, graceIso),
+    mfaStateCookieOptions(),
+  );
+  return response;
 }
 
 /** Create users + user_profiles records if they don't exist yet */

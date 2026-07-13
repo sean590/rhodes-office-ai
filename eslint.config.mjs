@@ -61,7 +61,7 @@ const eslintConfig = defineConfig([
     files: [
       "src/lib/**",
       "src/app/api/cron/**",
-      "src/app/api/auth/**",
+      "src/app/api/auth/**", // auth/session flows over users/user_profiles (incl. mfa-state)
       "src/app/auth/**",
       "src/app/api/organizations/**",
       "src/app/api/users/**",
