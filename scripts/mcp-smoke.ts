@@ -432,7 +432,7 @@ async function runOne(
 // --- Findings doc -----------------------------------------------------------
 
 function escapeMd(s: string): string {
-  return s.replace(/\|/g, "\\|");
+  return s.replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 }
 
 function fmtResult(r: ScenarioResult): string {
