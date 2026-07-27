@@ -262,12 +262,21 @@ describe("cross-org ownership gate — all write tools", () => {
         const result = await tool.dryRun!(parsed, ctx);
         expect(result.summary).toBeTruthy();
       });
-    } else {
+    } else if (tool.dryRun) {
       it(`${tool.name}: dryRun throws not_found when resource belongs to another org`, async () => {
         const ctx = makeCtx("org-A");
         const input = buildInput(tool);
         const parsed = tool.inputSchema.parse(input);
         await expect(tool.dryRun!(parsed, ctx)).rejects.toThrow(/not found/);
+      });
+    } else {
+      // Tools without a dryRun (e.g. split_document, which executes
+      // immediately) must enforce ownership in the handler itself.
+      it(`${tool.name}: handler throws not_found when resource belongs to another org`, async () => {
+        const ctx = makeCtx("org-A");
+        const input = buildInput(tool);
+        const parsed = tool.inputSchema.parse(input);
+        await expect(tool.handler(parsed, ctx)).rejects.toThrow(/not found/);
       });
     }
   }

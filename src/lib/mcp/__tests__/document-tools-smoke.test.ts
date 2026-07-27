@@ -186,7 +186,7 @@ describe("update_document — smart dryRun summaries", () => {
     expect(result.summary).toBe(`Reclassify "some-cert.pdf" as Certificate of Formation`);
   });
 
-  it("reclassify plus other fields calls out the extras", async () => {
+  it("reclassify plus other fields lists the extra values inline", async () => {
     resolveNameMock.mockResolvedValueOnce("doc.pdf");
     const result = await updateDocumentTool.dryRun!(
       {
@@ -197,9 +197,12 @@ describe("update_document — smart dryRun summaries", () => {
       },
       makeCtx(),
     );
+    // The summary shows the actual values ("… · Formation · 2024"), not an
+    // opaque "(also updating category, year)" field list.
     expect(result.summary).toContain("Reclassify");
     expect(result.summary).toContain("Operating Agreement");
-    expect(result.summary).toContain("also updating");
+    expect(result.summary).toContain("Formation");
+    expect(result.summary).toContain("2024");
   });
 
   it("handler dispatches update_document with input fields", async () => {

@@ -1,0 +1,25 @@
+# Dependabot version updates. Security updates are enabled separately in repo
+# settings (Dependabot alerts + security updates) and don't need config here.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Only propose updates that fix a security advisory, plus keep the
+    # framework current; a solo-maintained repo doesn't need weekly noise
+    # for every minor bump.
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Keeps the SHA-pinned actions in .github/workflows fresh (the repo
+    # requires SHA pinning, so these PRs bump the pinned commits).
+    open-pull-requests-limit: 5
