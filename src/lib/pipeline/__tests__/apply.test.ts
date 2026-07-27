@@ -248,13 +248,16 @@ describe("apply.ts — documents", () => {
     expect("investment_id" in payload).toBe(false);
   });
 
-  it("split_document: returns staged/not-implemented error", async () => {
+  // split_document moved to the MCP tool layer (splitDocumentTool in
+  // tools/documents-write.ts); apply.ts treats any stale staged action with
+  // this name as unknown.
+  it("split_document: rejected as an unknown pipeline action", async () => {
     const { results } = await applyActions(
       [{ action: "split_document", data: { document_id: "doc-1" } }],
       { orgId: "org-1" },
     );
     expect(results[0].success).toBe(false);
-    expect(results[0].error).toMatch(/not yet implemented/);
+    expect(results[0].error).toMatch(/Unknown action: split_document/);
   });
 });
 
