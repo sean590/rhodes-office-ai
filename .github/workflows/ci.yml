@@ -6,6 +6,11 @@ on:
   push:
     branches: [main]
 
+# CI only reads the repo; never grant the default write token to jobs that
+# run third-party code (install scripts, etc.).
+permissions:
+  contents: read
+
 # Actions are pinned to commit SHAs — the repo requires SHA pinning
 # (settings > actions > sha_pinning_required), so tag refs like @v5 fail.
 # Dependabot (.github/dependabot.yml, github-actions ecosystem) keeps the
