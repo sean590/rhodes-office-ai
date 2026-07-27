@@ -918,7 +918,7 @@ export async function applyActions(
             if (cycleErr) {
               // Log loudly but don't block the completion — the row update
               // below is the user-visible part. The cycles row is auxiliary.
-              console.error(`[apply] failed to insert cycle history for obligation ${obligationId}:`, cycleErr.message);
+              console.error("[apply] failed to insert cycle history for obligation %s:", obligationId, cycleErr.message);
             }
           }
 
@@ -1272,7 +1272,7 @@ export async function applyActions(
             if (dirMatch) {
               // Validate this person is a member of the investor entity
               if (validMemberDirIds.size > 0 && !validMemberDirIds.has(dirMatch.id)) {
-                console.warn(`[APPLY] Skipping allocation for "${alloc.member_name}" — not a member of investor entity`);
+                console.warn('[APPLY] Skipping allocation for "%s" — not a member of investor entity', alloc.member_name);
                 continue;
               }
               resolvedAllocations.push({
@@ -1294,7 +1294,7 @@ export async function applyActions(
             if (entityMatch) {
               // Validate this entity is a member of the investor entity
               if (validMemberEntityIds.size > 0 && !validMemberEntityIds.has(entityMatch.id)) {
-                console.warn(`[APPLY] Skipping allocation for "${alloc.member_name}" — not a member of investor entity`);
+                console.warn('[APPLY] Skipping allocation for "%s" — not a member of investor entity', alloc.member_name);
                 continue;
               }
               resolvedAllocations.push({
@@ -1307,7 +1307,7 @@ export async function applyActions(
             }
 
             // Skip unresolvable members
-            console.warn(`[APPLY] Could not resolve allocation member: "${alloc.member_name}"`);
+            console.warn('[APPLY] Could not resolve allocation member: "%s"', alloc.member_name);
           }
 
           if (resolvedAllocations.length === 0) {
@@ -2017,10 +2017,10 @@ export async function applyActions(
               "@/lib/utils/document-expectations"
             );
             await unsatisfyByDocument(documentId).catch((err) =>
-              console.error(`update_document unsatisfy failed for ${documentId}:`, err),
+              console.error("update_document unsatisfy failed for %s:", documentId, err),
             );
             await checkAndSatisfyExpectations(documentId).catch((err) =>
-              console.error(`update_document check-and-satisfy failed for ${documentId}:`, err),
+              console.error("update_document check-and-satisfy failed for %s:", documentId, err),
             );
           }
 
