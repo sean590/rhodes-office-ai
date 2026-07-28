@@ -16,7 +16,20 @@ manual `workflow_dispatch`:
 2. **Documents**: `scripts/backup/storage-sync.mjs` diffs the Supabase
    `documents` bucket against `s3://rhodes-backups/storage/documents/` by
    key + size and uploads new/changed files. Append-only: deletions in
-   Supabase are never propagated; overwrites are preserved by S3 versioning.
+   Supabase are never propagated by the sync; overwrites are preserved by
+   S3 versioning.
+
+`.github/workflows/backup-retention.yml` — weekly (Sundays 10:00 UTC):
+closes the deletion loop the append-only sync leaves open. An archive file
+missing from the source bucket is tagged with a detection date on first
+sighting; once the tag is 90 days old (`RETENTION_DAYS`), every version of
+the object is deleted. Files that reappear get their tag cleared. Net
+policy: **a file deleted in the app is recoverable from the archive for
+~90 days, then fully purged** — this is the deletion/offboarding promise
+the backups uphold. Runs under IAM user `rhodes-backup-retention`, which
+can tag/delete only under `storage/documents/` (never the `db/` dumps);
+the nightly writer conversely cannot delete anything. Database rows of
+deleted data age out automatically as old dumps expire at 90 days.
 
 ## Where it lives
 
