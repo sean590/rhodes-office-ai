@@ -1,0 +1,40 @@
+name: Backup Retention
+
+# Weekly purge of archived copies of files deleted in the app — 90 days
+# after deletion is first detected. Closes the retention loop the append-only
+# nightly sync deliberately leaves open. See docs/backup-restore.md.
+#
+# Runs under a dedicated IAM user that can tag/delete ONLY under
+# storage/documents/ — it cannot touch db/ dumps; the nightly writer
+# conversely has no delete permission at all.
+#
+# PUBLIC-REPO LOG RULE: logs are public — counts only, never object paths.
+
+on:
+  schedule:
+    - cron: "0 10 * * 0" # Sundays 10:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-retention
+  cancel-in-progress: false
+
+jobs:
+  retention:
+    name: Purge deleted files past retention
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.RETENTION_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.RETENTION_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-west-2
+      BACKUP_BUCKET: rhodes-backups
+      BACKUP_SUPABASE_URL: ${{ secrets.BACKUP_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      RETENTION_DAYS: 90
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: node scripts/backup/retention.mjs
