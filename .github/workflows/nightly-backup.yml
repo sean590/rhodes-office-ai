@@ -45,7 +45,9 @@ jobs:
           set -euo pipefail
           # Custom-format archive of the schemas that hold application state:
           # public (app data), storage (file metadata), auth (users).
-          pg_dump "$SUPABASE_DB_URL" -Fc \
+          # Versioned binary path: the runner preinstalls postgresql-client-16
+          # and /usr/bin/pg_dump keeps resolving to it after 17 is installed.
+          /usr/lib/postgresql/17/bin/pg_dump "$SUPABASE_DB_URL" -Fc \
             --schema=public --schema=storage --schema=auth \
             -f rhodes.dump
           SIZE=$(stat -c%s rhodes.dump)
