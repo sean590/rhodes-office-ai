@@ -85,19 +85,24 @@ function inviteHtml(): string {
 // ── Waitlist note (not qualified) ────────────────────────────────────
 const WAITLIST_SUBJECT = "You're on the Rhodes waitlist";
 
-// hasAnswers: apply-form signups get "based on your answers"; bare signups
-// (e.g. /family-office) answered nothing, so that phrasing would ring false.
+// hasAnswers: apply-form signups get "based on your answers" and the
+// situation-changed reply hook; bare signups (e.g. /family-office) answered
+// nothing — for them the closing is an explicit reply-to-qualify ask, the
+// mechanism that converts a bare email into a qualified lead.
 function waitlistText(hasAnswers: boolean): string {
   const placement = hasAnswers
     ? "Based on your answers I've put you on the waitlist rather than in the first wave."
     : "For now I've put you on the waitlist.";
+  const closing = hasAnswers
+    ? "You'll hear from me as the group expands. If your situation gets more complicated before then (it usually does), reply here and tell me — that moves you up."
+    : "You'll hear from me as the group expands. Want to move up? Reply and tell me a bit about your setup (how many entities, what's in the mix) — the most tangled structures go first.";
   return `Hi,
 
 Thanks for ${hasAnswers ? "applying for" : "joining"} the Rhodes ${hasAnswers ? "beta" : "waitlist"}.
 
 The first group is small, and I'm starting with the most tangled setups — people juggling many entities and trusts — because that's where the product gets tested hardest. ${placement}
 
-You'll hear from me as the group expands. If your situation gets more complicated before then (it usually does), reply here and tell me — that moves you up.
+${closing}
 
 Sean
 Founder, Rhodes
@@ -108,10 +113,13 @@ function waitlistHtml(hasAnswers: boolean): string {
   const placement = hasAnswers
     ? "Based on your answers I've put you on the waitlist rather than in the first wave."
     : "For now I've put you on the waitlist.";
+  const closing = hasAnswers
+    ? "You'll hear from me as the group expands. If your situation gets more complicated before then (it usually does), reply here and tell me &mdash; that moves you up."
+    : "You'll hear from me as the group expands. <strong>Want to move up?</strong> Reply and tell me a bit about your setup (how many entities, what's in the mix) &mdash; the most tangled structures go first.";
   return wrap(`<p>Hi,</p>
     <p>Thanks for ${hasAnswers ? "applying for" : "joining"} the <strong>Rhodes</strong> ${hasAnswers ? "beta" : "waitlist"}.</p>
     <p>The first group is small, and I'm starting with the most tangled setups &mdash; people juggling many entities and trusts &mdash; because that's where the product gets tested hardest. ${placement}</p>
-    <p>You'll hear from me as the group expands. If your situation gets more complicated before then (it usually does), reply here and tell me &mdash; that moves you up.</p>`);
+    <p>${closing}</p>`);
 }
 
 // ── Handler ──────────────────────────────────────────────────────────
