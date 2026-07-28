@@ -1,0 +1,78 @@
+name: Nightly Backup
+
+# Independent off-site backup (security audit P0-4): Postgres dump + document
+# storage archive to S3 in a dedicated AWS account. See docs/backup-restore.md
+# for restore procedures, RPO/RTO, and the drill schedule.
+#
+# PUBLIC-REPO LOG RULE: logs of this workflow are publicly visible. Never
+# print object paths, file names, or connection details — counts and byte
+# totals only. Secrets are masked by Actions, but derived values are not.
+
+on:
+  schedule:
+    - cron: "0 9 * * *" # 09:00 UTC nightly (~1am PT)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Backup DB + Storage to S3
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-west-2
+      BACKUP_BUCKET: rhodes-backups
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install PostgreSQL 17 client
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null 2>&1
+          sudo apt-get install -y -qq postgresql-client-17 >/dev/null
+
+      - name: Dump database
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+          # Custom-format archive of the schemas that hold application state:
+          # public (app data), storage (file metadata), auth (users).
+          pg_dump "$SUPABASE_DB_URL" -Fc \
+            --schema=public --schema=storage --schema=auth \
+            -f rhodes.dump
+          SIZE=$(stat -c%s rhodes.dump)
+          echo "dump size: $((SIZE / 1024)) KB"
+          # Sanity floor: current dumps are ~1.4 MB; an empty/truncated dump
+          # must fail the run rather than silently archive garbage.
+          if [ "$SIZE" -lt 500000 ]; then
+            echo "dump suspiciously small — failing"
+            exit 1
+          fi
+
+      - name: Upload dump to S3 and verify
+        run: |
+          set -euo pipefail
+          KEY="db/rhodes-$(date -u +%F).dump"
+          aws s3 cp rhodes.dump "s3://$BACKUP_BUCKET/$KEY" --quiet
+          # Writer credential has ListBucket but not GetObject, so verify the
+          # upload via listing: the key must exist with the exact local size.
+          LOCAL=$(stat -c%s rhodes.dump)
+          REMOTE=$(aws s3api list-objects-v2 --bucket "$BACKUP_BUCKET" \
+            --prefix "$KEY" --query 'Contents[0].Size' --output text)
+          echo "uploaded $((LOCAL / 1024)) KB, remote reports $REMOTE bytes"
+          [ "$LOCAL" = "$REMOTE" ] || { echo "size mismatch — failing"; exit 1; }
+          rm -f rhodes.dump
+
+      - name: Sync document storage to S3
+        env:
+          BACKUP_SUPABASE_URL: ${{ secrets.BACKUP_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: node scripts/backup/storage-sync.mjs
