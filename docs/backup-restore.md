@@ -61,8 +61,15 @@ and delete it after the restore.
 
 ```bash
 aws s3 cp s3://rhodes-backups/db/rhodes-YYYY-MM-DD.dump .
-pg_restore --clean --if-exists --no-owner --no-privileges \
-  --schema=public -d "$STAGING_DB_URL" rhodes-YYYY-MM-DD.dump
+# Use the POOLER connection string (`supabase branches get Staging`) — the
+# direct db.<ref>.supabase.co host is IPv6-only and won't resolve on most
+# local networks. `--clean` fails on cross-schema dependents; reset the
+# schema instead:
+psql "$STAGING_DB_URL" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public; \
+  GRANT USAGE, CREATE ON SCHEMA public TO postgres, anon, authenticated, service_role; \
+  CREATE SCHEMA IF NOT EXISTS supabase_functions;"
+pg_restore --no-owner --no-privileges --schema=public \
+  -d "$STAGING_DB_URL" rhodes-YYYY-MM-DD.dump
 # query staging, re-insert into prod deliberately (never blind-restore prod)
 ```
 
@@ -73,11 +80,23 @@ pg_restore --clean --if-exists --no-owner --no-privileges \
    the schemas the new project ships (restore data only, not definitions):
 
 ```bash
-pg_restore --no-owner --no-privileges --schema=public \
-  -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
-pg_restore --no-owner --no-privileges --data-only \
-  --schema=auth --schema=storage -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
+# auth data FIRST (public tables have FKs to auth.users), and users before
+# the rest of auth (data-only restore runs alphabetically, so identities/
+# mfa_* would otherwise hit FK errors — seen in the 2026-07-27 drill):
+pg_restore -l rhodes-YYYY-MM-DD.dump | grep 'TABLE DATA auth' | grep ' users ' > toc-users
+pg_restore -l rhodes-YYYY-MM-DD.dump | grep 'TABLE DATA auth' | grep -v ' users ' > toc-auth-rest
+pg_restore --no-owner --no-privileges --data-only -L toc-users -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
+pg_restore --no-owner --no-privileges --data-only -L toc-auth-rest -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
+# then public (schema + data), then storage metadata:
+pg_restore --no-owner --no-privileges --schema=public -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
+pg_restore --no-owner --no-privileges --data-only --schema=storage -d "$NEW_DB_URL" rhodes-YYYY-MM-DD.dump
 ```
+
+Expected residual errors, safe to ignore: transient login-session tables
+(`flow_state`, `sessions`, `mfa_challenges`, `mfa_amr_claims` — users simply
+re-authenticate) and the `waitlist-welcome` trigger if the target lacks the
+`supabase_functions.http_request()` webhook function (re-enable Database
+Webhooks on the new project, then re-create the trigger).
 
 3. Re-upload files from `s3://rhodes-backups/storage/documents/` into the new
    project's `documents` bucket (same paths — `storage.objects` metadata from
@@ -100,4 +119,4 @@ against Supabase originals → record below.
 
 | Date | Dump restored | Result | Notes |
 |------|---------------|--------|-------|
-| 2026-07-27 | rhodes-2026-07-27.dump | _pending_ | first drill — see PR |
+| 2026-07-27 | rhodes-2026-07-28.dump | PASS | Restored to the Staging branch. Row counts exact across organizations (1), entities (30), documents (517), directory_entries (35), document_queue (289), audit_log (1563), auth.users (13); identities + mfa_factors restored after the ordered auth pass. 3/3 sampled archive files sha256-match Supabase originals. Residuals: transient session tables + waitlist webhook trigger (documented above). |
