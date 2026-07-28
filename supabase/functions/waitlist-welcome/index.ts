@@ -122,6 +122,64 @@ function waitlistHtml(hasAnswers: boolean): string {
     <p>${closing}</p>`);
 }
 
+// ── Founder notification (internal) ──────────────────────────────────
+const NOTIFY_TO = "sean@rhodesoffice.ai";
+
+async function notifyFounder(
+  resendKey: string,
+  record: WaitlistRecord,
+  branch: string,
+): Promise<void> {
+  const email = record.email!.trim().toLowerCase();
+  const verdict = branch === "invite" ? "✅ INVITED" : branch === "waitlist" ? "⏳ waitlisted" : "✉️ bare signup";
+  const answers = record.entity_count
+    ? `${record.entity_count} entities · ${record.asset_mix ?? "?"} · tracks via ${record.tracking_method ?? "?"}`
+    : "no application answers (bare email form)";
+  // The webhook payload's record carries all row columns:
+  const r = record as WaitlistRecord & {
+    utm_campaign?: string | null;
+    landing_variant?: string | null;
+    referrer?: string | null;
+  };
+  const src = [r.utm_source, r.utm_campaign, r.landing_variant ? `hero:${r.landing_variant}` : null]
+    .filter(Boolean).join(" / ") || (r.referrer ? `referral: ${r.referrer}` : "direct/unknown");
+
+  const subject = `Waitlist: ${email} — ${verdict}`;
+  const text = `${email}\n${verdict}\n${answers}\nSource: ${src}`;
+
+  // Email (uses the already-configured Resend key)
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        from: "Rhodes Signups <sean@notify.rhodesoffice.ai>",
+        to: [NOTIFY_TO],
+        subject,
+        text,
+      }),
+    });
+  } catch (e) {
+    console.error("founder email notify failed", e); // never block the applicant flow
+  }
+
+  // Slack (optional): create an Incoming Webhook in Slack, then
+  //   supabase secrets set SLACK_WEBHOOK_URL=https://hooks.slack.com/services/…
+  // No secret set = silently skipped.
+  const slack = Deno.env.get("SLACK_WEBHOOK_URL");
+  if (slack) {
+    try {
+      await fetch(slack, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: `*${verdict}* — ${email}\n${answers}\nSource: ${src}` }),
+      });
+    } catch (e) {
+      console.error("slack notify failed", e);
+    }
+  }
+}
+
 // ── Handler ──────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   const secret = Deno.env.get("WAITLIST_WEBHOOK_SECRET");
@@ -173,6 +231,10 @@ Deno.serve(async (req: Request) => {
       text,
     }),
   });
+
+  // Notify regardless of whether the applicant email succeeded — a signup
+  // whose welcome email failed is the one that needs manual follow-up.
+  await notifyFounder(resendKey, record, branch);
 
   if (!resp.ok) {
     console.error(`Resend send failed for ${email} (${branch}): ${resp.status} ${await resp.text()}`);
