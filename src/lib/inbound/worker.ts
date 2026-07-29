@@ -19,7 +19,7 @@ import { triageMessage } from "./triage";
  */
 
 const MAX_PER_RUN = 15;
-const FORWARD_ADDRESS = process.env.INBOUND_FORWARD_ADDRESS || "Rhodes@rdgcp.com";
+const FORWARD_ADDRESS = process.env.INBOUND_FORWARD_ADDRESS || "Rhodes@channels.com";
 
 type Admin = ReturnType<typeof createAdminClient>;
 

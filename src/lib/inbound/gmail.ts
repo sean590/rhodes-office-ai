@@ -2,7 +2,7 @@
  * Gmail transport for inbound v1 — raw REST (no googleapis dep).
  *
  * Reads Rhodes' OWN mailbox (Rhodes@channels.com; providers see the
- * Rhodes@rdgcp.com alias). Auth = OAuth refresh token minted once by Sean
+ * Rhodes@channels.com alias). Auth = OAuth refresh token minted once by Sean
  * (gmail.readonly). Secrets live in env, never the repo:
  *   GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET / GMAIL_REFRESH_TOKEN
  *
