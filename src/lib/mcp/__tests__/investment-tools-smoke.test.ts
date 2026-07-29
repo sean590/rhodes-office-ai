@@ -90,7 +90,7 @@ describe("investment lifecycle — dispatch routing", () => {
     );
   });
 
-  it("update_investment dispatches update_entity (investments share the entities table)", async () => {
+  it("update_investment dispatches update_investment (Investments v3 own table)", async () => {
     await updateInvestmentTool.handler(
       {
         investment_id: INVESTMENT_ID,
@@ -101,20 +101,20 @@ describe("investment lifecycle — dispatch routing", () => {
     );
     expect(dispatchMock).toHaveBeenCalledWith(
       expect.anything(),
-      "update_entity",
+      "update_investment",
       expect.objectContaining({
-        entity_id: INVESTMENT_ID,
+        investment_id: INVESTMENT_ID,
         name: "Renamed Fund",
       }),
     );
   });
 
-  it("archive_investment dispatches update_entity with status=exited", async () => {
+  it("archive_investment dispatches update_investment with status=exited", async () => {
     await archiveInvestmentTool.handler({ investment_id: INVESTMENT_ID }, makeCtx());
     expect(dispatchMock).toHaveBeenCalledWith(
       expect.anything(),
-      "update_entity",
-      expect.objectContaining({ entity_id: INVESTMENT_ID, status: "exited" }),
+      "update_investment",
+      expect.objectContaining({ investment_id: INVESTMENT_ID, status: "exited" }),
     );
   });
 });

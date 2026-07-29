@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { applyActions } from "@/lib/pipeline/apply";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 const dismissSchema = z.object({
   provider_id: z.string().uuid(),
@@ -12,6 +13,9 @@ const dismissSchema = z.object({
 // doesn't resurface, and decay the learned routing rule.
 export async function POST(request: Request) {
   try {
+    if (!PROVIDER_SENDING_ENABLED) {
+      return NextResponse.json({ error: "Provider sending is disabled" }, { status: 404 });
+    }
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
     const { orgId, user } = ctx;

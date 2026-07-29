@@ -158,6 +158,81 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
     }
   }, []);
 
+  const [sending, setSending] = useState(false);
+  const [streamingText, setStreamingText] = useState("");
+  const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [refs, setRefs] = useState<LinkableRef[]>([]);
+  const [sessionLengthDismissed, setSessionLengthDismissed] = useState(false);
+  // MCP is the only chat path post-Phase-3 cutover. The state variable is
+  // kept (always true) so the rest of the component doesn't need a rewrite.
+  const [mcpEnabled] = useState<boolean>(true);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const sessionPickerRef = useRef<HTMLDivElement>(null);
+  const initializedRef = useRef(false);
+
+  // -------------------------------------------------------------------
+  // Fetch sessions + entity refs (once on first open)
+  // -------------------------------------------------------------------
+
+  const fetchSessions = useCallback(async (): Promise<ChatSession[]> => {
+    try {
+      const res = await fetch("/api/chat/sessions");
+      if (!res.ok) return [];
+      const data: ChatSession[] = await res.json();
+      setSessions(data);
+      return data;
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const fetchRefs = useCallback(async () => {
+    try {
+      const res = await fetch("/api/entities");
+      if (!res.ok) return;
+      const data = await res.json();
+      setRefs(
+        (data || []).map((e: { id: string; name: string }) => ({
+          id: e.id,
+          name: e.name,
+          type: "entity" as const,
+          href: `/entities/${e.id}`,
+        }))
+      );
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
+  // -------------------------------------------------------------------
+  // Load session messages
+  // -------------------------------------------------------------------
+
+  const loadSession = useCallback(async (sessionId: string) => {
+    setActiveSessionId(sessionId);
+    setMessages([]);
+    setStreamingText("");
+    setShowSessionPicker(false);
+    setSessionLengthDismissed(false);
+    // User is now actively viewing this session — clear any unread state.
+    markSessionRead(sessionId);
+    try {
+      localStorage.setItem("rhodes_chat_session", sessionId);
+    } catch {
+      // ignore
+    }
+    try {
+      const res = await fetch(`/api/chat/sessions/${sessionId}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      setMessages(data.messages || []);
+    } catch {
+      // Non-critical
+    }
+  }, []);
+
   // --- Realtime subscription for live message delivery ----------------------
   // Listens for INSERT events on chat_messages for the active session. Picks
   // up pipeline completion notifications, messages from other tabs/devices,
@@ -257,9 +332,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("pageshow", onPageShow);
     };
-    // fetchSessions is defined later as a useCallback with stable deps.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, activeSessionId, refetchActiveSessionMessages]);
+  }, [isOpen, activeSessionId, refetchActiveSessionMessages, fetchSessions]);
 
   // --- Session-list Realtime subscription -----------------------------------
   // Listens for UPDATE events on chat_sessions for ANY session (filter is
@@ -290,9 +363,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
     return () => {
       if (channel) supabase.removeChannel(channel);
     };
-    // fetchSessions is stable (useCallback with empty deps below).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, supabase]);
+  }, [isOpen, supabase, fetchSessions]);
 
   // Handle prefill from panel context (dashboard input, command palette,
   // /review's "Open in chat", etc.)
@@ -336,98 +407,12 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
     }
   }, [chatPanel.prefillQuery, chatPanel.prefillFiles, chatPanel.prefillSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Listen for auto-send trigger
-  useEffect(() => {
-    const handler = () => {
-      if (input.trim() || drawerFiles.length > 0) {
-        sendMessage(input);
-      }
-    };
-    window.addEventListener("rhodes:auto-send", handler);
-    return () => window.removeEventListener("rhodes:auto-send", handler);
-  }, [input, drawerFiles]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const handleDrawerFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
     const valid = selected.filter((f: File) => validateUploadedFile(f).valid);
     setDrawerFiles((prev) => [...prev, ...valid]);
     e.target.value = "";
   };
-  const [sending, setSending] = useState(false);
-  const [streamingText, setStreamingText] = useState("");
-  const [showSessionPicker, setShowSessionPicker] = useState(false);
-  const [refs, setRefs] = useState<LinkableRef[]>([]);
-  const [sessionLengthDismissed, setSessionLengthDismissed] = useState(false);
-  // MCP is the only chat path post-Phase-3 cutover. The state variable is
-  // kept (always true) so the rest of the component doesn't need a rewrite.
-  const [mcpEnabled] = useState<boolean>(true);
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
-  const sessionPickerRef = useRef<HTMLDivElement>(null);
-  const initializedRef = useRef(false);
-
-  // -------------------------------------------------------------------
-  // Fetch sessions + entity refs (once on first open)
-  // -------------------------------------------------------------------
-
-  const fetchSessions = useCallback(async (): Promise<ChatSession[]> => {
-    try {
-      const res = await fetch("/api/chat/sessions");
-      if (!res.ok) return [];
-      const data: ChatSession[] = await res.json();
-      setSessions(data);
-      return data;
-    } catch {
-      return [];
-    }
-  }, []);
-
-  const fetchRefs = useCallback(async () => {
-    try {
-      const res = await fetch("/api/entities");
-      if (!res.ok) return;
-      const data = await res.json();
-      setRefs(
-        (data || []).map((e: { id: string; name: string }) => ({
-          id: e.id,
-          name: e.name,
-          type: "entity" as const,
-          href: `/entities/${e.id}`,
-        }))
-      );
-    } catch {
-      // Non-critical
-    }
-  }, []);
-
-  // -------------------------------------------------------------------
-  // Load session messages
-  // -------------------------------------------------------------------
-
-  const loadSession = useCallback(async (sessionId: string) => {
-    setActiveSessionId(sessionId);
-    setMessages([]);
-    setStreamingText("");
-    setShowSessionPicker(false);
-    setSessionLengthDismissed(false);
-    // User is now actively viewing this session — clear any unread state.
-    markSessionRead(sessionId);
-    try {
-      localStorage.setItem("rhodes_chat_session", sessionId);
-    } catch {
-      // ignore
-    }
-    try {
-      const res = await fetch(`/api/chat/sessions/${sessionId}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setMessages(data.messages || []);
-    } catch {
-      // Non-critical
-    }
-  }, []);
-
 
   // -------------------------------------------------------------------
   // Initialize on first open: fetch sessions, refs, then resume the saved
@@ -492,6 +477,11 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   // -------------------------------------------------------------------
   // Send message
   // -------------------------------------------------------------------
+
+  // Self-reference escape hatch: sendMessage schedules a recursive call for
+  // the max_tokens truncation-continuation, but a useCallback can't close
+  // over itself. The ref is kept current by the effect below the declaration.
+  const sendMessageRef = useRef<((text: string) => Promise<void>) | null>(null);
 
   const sendMessage = useCallback(
     async (text: string) => {
@@ -975,7 +965,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
             ) {
               setTimeout(
                 () =>
-                  sendMessage(
+                  sendMessageRef.current?.(
                     "[Continuing after truncation] Your previous turn was cut off mid-output by the max_tokens limit. Continue from where you left off. If you were about to stage actions, stage them now without re-narrating the inputs (you've already explained them; just emit the tool calls).",
                   ),
                 500,
@@ -1072,6 +1062,21 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
     },
     [activeSessionId, sending, drawerFiles, fetchSessions, pageContext, mcpEnabled]
   );
+
+  useEffect(() => {
+    sendMessageRef.current = sendMessage;
+  }, [sendMessage]);
+
+  // Listen for auto-send trigger
+  useEffect(() => {
+    const handler = () => {
+      if (input.trim() || drawerFiles.length > 0) {
+        sendMessage(input);
+      }
+    };
+    window.addEventListener("rhodes:auto-send", handler);
+    return () => window.removeEventListener("rhodes:auto-send", handler);
+  }, [input, drawerFiles, sendMessage]);
 
   // -------------------------------------------------------------------
   // Auto-scroll

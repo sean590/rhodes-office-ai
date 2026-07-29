@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { lookupValidSend, logSendAccess, getSendDocuments } from "@/lib/providers/share-link";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 // POST /api/share/[token] — public (providers are not Rhodes users). Validates
 // the token server-side, logs the download with the claimed email, and returns a
@@ -14,6 +15,11 @@ export async function POST(
 ) {
   const GENERIC = { error: "This link is no longer available." };
   try {
+    // Feature kill-switch: with provider sending disabled, the public download
+    // endpoint answers exactly like an invalid token.
+    if (!PROVIDER_SENDING_ENABLED) {
+      return NextResponse.json(GENERIC, { status: 404 });
+    }
     const { token } = await params;
 
     const h = await headers();
