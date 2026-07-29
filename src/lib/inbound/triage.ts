@@ -33,6 +33,12 @@ const INGESTABLE_MIME = new Set([
 // Attachment names that are noise even in real mail (logos, signatures,
 // calendar invites).
 const NOISE_ATTACHMENT = /\.(ics|vcf|p7s|asc)$/i;
+// Inline signature/logo images: mail clients name them imageNNN.*; also skip
+// any small image outright — a real scanned document photo is never <50KB.
+// (Found live: a forwarded financials email carried 5 signature PNGs that
+// would each have burned an extraction run.)
+const SIGNATURE_IMAGE = /^image\d+\.(png|gif|jpe?g)$/i;
+const SMALL_IMAGE_BYTES = 50_000;
 
 // SafeSend: download links are /SendLinkRedirect/; /DropOff/ is their UPLOAD
 // form — never follow it (spike lesson).
@@ -67,7 +73,12 @@ export function triageMessage(
   opts: { knownProviderSender: boolean },
 ): TriageResult {
   const ingestable = msg.attachments.filter(
-    (a) => INGESTABLE_MIME.has(a.mimeType) && !NOISE_ATTACHMENT.test(a.filename) && a.size > 0,
+    (a) =>
+      INGESTABLE_MIME.has(a.mimeType) &&
+      !NOISE_ATTACHMENT.test(a.filename) &&
+      !SIGNATURE_IMAGE.test(a.filename) &&
+      !(a.mimeType.startsWith("image/") && a.size < SMALL_IMAGE_BYTES) &&
+      a.size > 0,
   );
 
   if (ingestable.length > 0) {
