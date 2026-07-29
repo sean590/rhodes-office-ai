@@ -30,6 +30,7 @@ import { directoryWriteTools } from "../tools/directory-write";
 import { investmentWriteTools } from "../tools/investments-write";
 import { documentWriteTools } from "../tools/documents-write";
 import { serviceProviderWriteTools } from "../tools/service-providers-write";
+import { inboundWriteTools } from "../tools/inbound";
 
 const ALL_WRITE_TOOLS = [
   ...entityWriteTools,
@@ -37,6 +38,7 @@ const ALL_WRITE_TOOLS = [
   ...investmentWriteTools,
   ...documentWriteTools,
   ...serviceProviderWriteTools,
+  ...inboundWriteTools,
 ];
 
 // Mock supabase that returns null for every maybeSingle (ownership fails).
@@ -85,6 +87,7 @@ const CREATE_TOOLS = new Set(["create_entity", "create_directory_entry", "create
 // in Zod 4's internal structure, etc.), use an explicit per-tool override map
 // for any tool whose minimal input isn't trivially "{each uuid key → VALID_UUID}".
 const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
+  resolve_inbound_delivery: { delivery_id: "11111111-1111-4111-8111-111111111111", action: "dismissed" },
   remove_entity_member: {
     entity_id: VALID_UUID,
     investor_name: "test",
