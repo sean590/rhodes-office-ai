@@ -19,6 +19,11 @@ export function needsUserReasonSentence(reason: string | null): string {
     case "SafeSend download link":
       return "A secure link Rhodes can't fetch yet — asked you to forward it.";
     default:
+      // Retrieval failures arrive as full sentences (locked link, expired,
+      // wrong recipient, attempts exhausted) — show them, don't flatten them.
+      if (reason && /\s/.test(reason)) {
+        return reason.charAt(0).toUpperCase() + reason.slice(1);
+      }
       return "Rhodes couldn't fetch this one — asked you to forward it.";
   }
 }

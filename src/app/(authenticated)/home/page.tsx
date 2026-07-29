@@ -45,7 +45,7 @@ interface InboundItem {
   sender: string | null;
   subject: string | null;
   received_at: string;
-  status: "needs_user" | "acknowledged";
+  status: "needs_user" | "acknowledged" | "waiting_code";
   needs_user_reason: string | null;
   provider_id: string | null;
 }
@@ -246,10 +246,11 @@ export default function HomePage() {
       if (qRes.ok) { const d = await qRes.json(); setReviews(Array.isArray(d) ? d : d.items ?? []); }
       if (cRes.ok) setObligations((await cRes.json())?.obligations ?? []);
       if (nRes && nRes.ok) {
-        // The feed returns every disposition; only needs_user (Rhodes is asking
-        // for a hand) and acknowledged (forwarded, waiting to arrive) are cards.
+        // The feed returns every disposition; needs_user (Rhodes is asking for
+        // a hand), waiting_code (mid-retrieval — forward the access code), and
+        // acknowledged (forwarded, waiting to arrive) are cards.
         const rows: Array<Omit<InboundItem, "status"> & { status: string }> = await nRes.json();
-        setInbound(rows.filter((r): r is InboundItem => r.status === "needs_user" || r.status === "acknowledged"));
+        setInbound(rows.filter((r): r is InboundItem => r.status === "needs_user" || r.status === "acknowledged" || r.status === "waiting_code"));
       }
       if (aRes && aRes.ok) setActivity(await aRes.json());
     } catch (err) {

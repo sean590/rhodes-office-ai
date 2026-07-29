@@ -43,6 +43,19 @@ try {
   const emailBox = page.getByPlaceholder(/email/i).or(page.locator('input[type="email"]')).first();
   await emailBox.fill(RECIPIENT, { timeout: 15000 });
   await page.getByRole("button", { name: /verify/i }).first().click({ timeout: 10000 });
+  // Verify is only "sent" if the wizard ADVANCES to the code step. A wrong /
+  // unrecognized recipient shows an error and never sends a code — declaring
+  // VERIFY_SENT optimistically would leave the flow waiting for a code that
+  // isn't coming.
+  let advanced = false;
+  const verifyDeadline = Date.now() + 15000;
+  while (Date.now() < verifyDeadline) {
+    if ((await page.locator('input[maxlength="1"]').count()) >= 4) { advanced = true; break; }
+    const bodyNow = (await page.textContent("body").catch(() => "")) || "";
+    if (/(does not match|not associated|unable to verify|invalid email|no record|not the intended)/i.test(bodyNow)) break;
+    await page.waitForTimeout(1500);
+  }
+  if (!advanced) { status("FAILED wrong-address"); process.exit(0); }
   status("VERIFY_SENT");
 
   // The access code: orchestrator reads the mailbox and writes otp.txt.
