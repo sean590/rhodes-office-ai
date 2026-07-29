@@ -408,6 +408,21 @@ export async function runSafesendAttempt(
         .update({ status: "waiting_code", needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
       await nudgeForCode(admin, delivery, result.recipient, mailboxAddress);
+      // In-app: same channel as every inbound notification.
+      try {
+        const session = await resolveInboundSession(admin, orgId);
+        if (session) {
+          await admin.from("chat_messages").insert({
+            session_id: session,
+            role: "assistant",
+            content: `I'm fetching the documents ${delivery.sender} sent via secure link. SafeSend emailed an access code to ${result.recipient} — forward that email to ${mailboxAddress} and I'll finish up.`,
+            metadata: { type: "inbound_needs_user", inbound_delivery_id: delivery.id, sender: delivery.sender, subject: delivery.subject, reason: "waiting_code" },
+          });
+          await admin.from("chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session);
+        }
+      } catch (err) {
+        console.error("[SAFESEND] waiting_code chat notify failed:", err);
+      }
     } else {
       await admin
         .from("inbound_deliveries")

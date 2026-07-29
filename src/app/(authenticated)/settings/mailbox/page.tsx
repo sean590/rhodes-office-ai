@@ -228,7 +228,7 @@ export default function SettingsMailboxPage() {
         const outcomes = rows.filter((r) => OUTCOME_STATUSES.has(r.status));
         // needs_user pins to top; everything else keeps newest-first order.
         setActivity([
-          ...outcomes.filter((r) => r.status === "needs_user"),
+          ...outcomes.filter((r) => (r.status === "needs_user" || r.status === "waiting_code")),
           ...outcomes.filter((r) => r.status !== "needs_user"),
         ]);
       }

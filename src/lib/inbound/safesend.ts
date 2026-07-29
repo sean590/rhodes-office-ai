@@ -97,6 +97,12 @@ export async function retrieveSafesend(
     const early = await waitStatus(sandbox, ["VERIFY_SENT", "LOCKED", "EXPIRED", "FAILED"], 90_000);
     if (early === "LOCKED") return { outcome: "needs_user", reason: "safesend link locked (too many attempts) — retry in ~30 minutes or download manually" };
     if (early === "EXPIRED") return { outcome: "needs_user", reason: "safesend link expired — ask the sender to re-share, or upload manually" };
+    if (early === "FAILED wrong-address") {
+      return {
+        outcome: "needs_user",
+        reason: `SafeSend didn't accept ${recipient} as the recipient — the delivery was addressed to someone else. Forward the files directly, or have the original recipient forward the delivery email.`,
+      };
+    }
     if (early?.startsWith("FAILED") || early === null) return { outcome: "needs_user", reason: `safesend wizard failed (${early ?? "no status"})` };
 
     // Watch the mailbox for the code UNLESS one was seeded (resume flow).
