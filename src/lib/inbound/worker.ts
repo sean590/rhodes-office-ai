@@ -4,7 +4,7 @@ import { registerBatchFiles } from "@/lib/pipeline/register-files";
 import { inferProviderFromSender } from "@/lib/providers/routing-rules";
 import { sendEmail } from "@/lib/email";
 import { inboundNeedsYouEmail } from "@/lib/email-templates";
-import { gmailConfigured, listNewMessages, getAttachment, type InboundMessage } from "./gmail";
+import { gmailConfigured, listNewMessages, getAttachment, getMailboxAddress, type InboundMessage } from "./gmail";
 import { triageMessage } from "./triage";
 
 /**
@@ -86,6 +86,8 @@ export async function processInboundMail(): Promise<InboundRunResult> {
     last_internal_date: maxSeen,
     last_success_at: new Date().toISOString(),
     last_error: null,
+    // The connection's own identity — what the Settings page displays.
+    mailbox_address: await getMailboxAddress(),
     updated_at: new Date().toISOString(),
   });
 

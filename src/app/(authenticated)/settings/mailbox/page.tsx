@@ -14,10 +14,13 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { SectionCard } from "@/components/settings/section-card";
 import { formatStamp } from "@/lib/format-time";
 import { INBOUND_ADDRESS, needsUserReasonSentence } from "@/lib/inbound/copy";
+// The displayed address is the CONNECTION'S OWN identity (Gmail profile,
+// recorded each poll) — the config const is only the pre-first-poll fallback.
 
 interface Health {
   status: "connected" | "problem" | "not_connected";
   last_success_at: string | null;
+  mailbox_address: string | null;
   last_error: string | null;
   counters: { emails_this_month: number; documents_filed: number; waiting_on_you: number };
 }
@@ -263,7 +266,7 @@ export default function SettingsMailboxPage() {
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(INBOUND_ADDRESS);
+      await navigator.clipboard.writeText(address);
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {
@@ -301,6 +304,7 @@ export default function SettingsMailboxPage() {
   }
 
   const status = health?.status ?? "not_connected";
+  const address = health?.mailbox_address || INBOUND_ADDRESS;
   const isForwarded = (sender: string | null) =>
     !!myEmail && !!sender && sender.toLowerCase() === myEmail;
 
@@ -511,7 +515,7 @@ export default function SettingsMailboxPage() {
                     wordBreak: "break-all",
                   }}
                 >
-                  {INBOUND_ADDRESS}
+                  {address}
                 </code>
                 <button
                   onClick={handleCopy}
@@ -573,7 +577,7 @@ export default function SettingsMailboxPage() {
         >
           {activity.length === 0 ? (
             <div style={{ padding: "16px 0", fontSize: 13, color: "#9494a0" }}>
-              Nothing has arrived yet. Give out {INBOUND_ADDRESS} — or forward a document email
+              Nothing has arrived yet. Give out {address} — or forward a document email
               to it — and it&apos;ll show up here.
             </div>
           ) : isMobile ? (
