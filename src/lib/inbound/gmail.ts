@@ -146,6 +146,16 @@ function toInbound(msg: GmailMessageRaw): InboundMessage {
 
 // ── Public surface ───────────────────────────────────────────────────
 
+/** The connected mailbox's own address (who the token belongs to). */
+export async function getMailboxAddress(): Promise<string | null> {
+  try {
+    const profile = await api<{ emailAddress?: string }>("/profile");
+    return profile.emailAddress ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** New messages strictly after the given internalDate cursor, oldest first. */
 export async function listNewMessages(sinceInternalDate: number, max = 25): Promise<InboundMessage[]> {
   // `after:` is seconds-granular; over-fetch a little and filter exactly by

@@ -16,7 +16,7 @@ export async function GET() {
     monthStart.setHours(0, 0, 0, 0);
 
     const [{ data: state }, { count: monthEmails }, { data: monthDocs }, { count: waiting }] = await Promise.all([
-      db.from("inbound_mail_state").select("last_success_at, last_error, updated_at").maybeSingle(),
+      db.from("inbound_mail_state").select("last_success_at, last_error, mailbox_address, updated_at").maybeSingle(),
       db
         .from("inbound_deliveries")
         .select("id", { count: "exact", head: true })
@@ -47,6 +47,7 @@ export async function GET() {
     return NextResponse.json({
       status,
       last_success_at: state?.last_success_at ?? null,
+      mailbox_address: state?.mailbox_address ?? null,
       last_error: state?.last_error ?? null,
       counters: {
         emails_this_month: monthEmails ?? 0,
