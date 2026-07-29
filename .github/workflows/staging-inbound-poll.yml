@@ -59,6 +59,16 @@ jobs:
           curl -sf --max-time 290 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
             -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
             -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"
+      - name: Drain document queue
+        run: |
+          set -euo pipefail
+          # Staging has no Vercel crons; without this, ingested docs sit
+          # 'Queued' forever (bit us 2026-07-29). Loop until drained.
+          for i in 1 2 3 4; do
+            r=$(curl -sf --max-time 290 "https://staging.rhodesoffice.ai/api/cron/process-queue"               -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}"               -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}")
+            echo "$r"
+            echo "$r" | grep -q '"processed":0' && break
+          done
       - name: Sweep SafeSend retrievals
         run: |
           set -euo pipefail
