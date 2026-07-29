@@ -24,11 +24,17 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 16
     steps:
       - name: Poll staging mailbox
         run: |
           set -euo pipefail
-          curl -sf --max-time 150 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
+          curl -sf --max-time 290 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
+            -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
+            -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"
+      - name: Sweep SafeSend retrievals
+        run: |
+          set -euo pipefail
+          curl -sf --max-time 590 "https://staging.rhodesoffice.ai/api/cron/retrieve-safesend" \
             -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
             -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"
