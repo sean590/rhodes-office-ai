@@ -47,6 +47,7 @@ import { createAdminClient } from "./admin";
  */
 const ORG_TABLES = new Set<string>([
   "chat_feedback",
+  "inbound_deliveries",
   "chat_sessions",
   "chat_tool_calls",
   "compliance_obligations",
@@ -81,6 +82,7 @@ const ORG_TABLES = new Set<string>([
 
 export type OrgTable =
   | "chat_feedback"
+  | "inbound_deliveries"
   | "chat_sessions"
   | "chat_tool_calls"
   | "compliance_obligations"
