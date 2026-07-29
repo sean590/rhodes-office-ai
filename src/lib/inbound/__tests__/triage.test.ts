@@ -47,6 +47,35 @@ describe("triageMessage", () => {
     expect(r.classification).not.toBe("attachment");
   });
 
+  it("signature/inline images are not ingestable (found live: 5 signature PNGs)", () => {
+    const r = triageMessage(
+      msg({
+        attachments: [
+          att("image001.png", "image/png", 8_000),
+          att("image002.png", "image/png", 12_000),
+          att("logo.gif", "image/gif", 4_000), // small image, non-imageNNN name
+        ],
+      }),
+      { knownProviderSender: true },
+    );
+    expect(r.classification).not.toBe("attachment");
+  });
+
+  it("a real scanned-document image (large) still ingests alongside signature junk", () => {
+    const r = triageMessage(
+      msg({
+        attachments: [
+          att("image001.png", "image/png", 8_000),
+          att("scan-k1-page1.jpg", "image/jpeg", 900_000),
+        ],
+      }),
+      { knownProviderSender: true },
+    );
+    expect(r.classification).toBe("attachment");
+    expect(r.ingestableAttachments).toHaveLength(1);
+    expect(r.ingestableAttachments[0].filename).toBe("scan-k1-page1.jpg");
+  });
+
   it("SafeSend SendLinkRedirect → safesend, and the link is captured", () => {
     const link = "https://www.safesendreturns.com/SendLinkRedirect/abc123";
     const r = triageMessage(
