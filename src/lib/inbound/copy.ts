@@ -5,7 +5,7 @@
  */
 
 /** The public forwarding address shown anywhere we ask the user to forward. */
-export const INBOUND_ADDRESS = process.env.NEXT_PUBLIC_INBOUND_ADDRESS || "Rhodes@rdgcp.com";
+export const INBOUND_ADDRESS = process.env.NEXT_PUBLIC_INBOUND_ADDRESS || "Rhodes@channels.com";
 
 /** One human sentence per needs_user_reason value — never the raw value. */
 export function needsUserReasonSentence(reason: string | null): string {

@@ -1,0 +1,34 @@
+name: Staging Inbound Poll
+
+# Vercel crons only run on PRODUCTION deployments, so staging's mailbox poll
+# is driven from here instead: every ~5 minutes, hit the staging endpoint
+# (through Vercel deployment protection via the automation bypass header).
+# This exists ONLY for the staging environment; production uses vercel.json
+# crons. Scheduled workflows run from the default branch.
+#
+# PUBLIC-REPO NOTE: prints only the JSON counters the endpoint returns
+# (counts, never content).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-inbound-poll
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Poll staging mailbox
+        run: |
+          set -euo pipefail
+          curl -sf --max-time 150 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
+            -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
+            -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"
