@@ -37,6 +37,7 @@ import type {
 import { getObligationDisplayStatus, getWorstObligationStatus } from "@/lib/utils/compliance-engine";
 import { EntityInvestmentsTab } from "@/components/entities/EntityInvestmentsTab";
 import { EntityServiceProvidersTab } from "@/components/entities/EntityServiceProvidersTab";
+import { useEmailSources, EmailSourceChip } from "@/components/documents/EmailSourceChip";
 import { Tabs } from "@/components/ui/tabs";
 import { EntityStateBanner, NeedsAttentionCard } from "@/components/entities/NeedsAttentionCard";
 import { humanizeActivity } from "@/lib/activity-humanizer";
@@ -4307,6 +4308,8 @@ function DocumentsTab({
   const canSend = useCan("providers:send");
   const canDelete = useCan("records:delete");
   const [showUpload, setShowUpload] = useState(false);
+  // doc_id → email provenance (spec §2): chips on rows that arrived by email.
+  const emailSources = useEmailSources();
 
   // Document completeness expectations — loaded from entity data.
   const initialExpectations = (entityData?.expectations || []) as ChecklistExpectation[];
@@ -5432,6 +5435,8 @@ function DocumentsTab({
                         <SparkleIcon size={12} />
                       </span>
                     )}
+
+                    {emailSources.has(doc.id) && <EmailSourceChip source={emailSources.get(doc.id)!} />}
 
                     <span style={{ fontSize: 11, color: "#9494a0", whiteSpace: "nowrap" }}>
                       {formatRelativeDate(doc.created_at)}

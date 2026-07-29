@@ -6,9 +6,10 @@ import { logAuditEvent, getRequestContext } from "@/lib/utils/audit";
 import { headers } from "next/headers";
 
 const bodySchema = z.object({
-  // dismissed: "I handled it / not relevant". resolved: "the document made it
-  // into Rhodes another way" (forwarded or uploaded manually).
-  action: z.enum(["dismissed", "resolved"]),
+  // acknowledged: "I forwarded it" — stops reminders, card stays until the
+  // document arrives. dismissed: not relevant. resolved: the document made it
+  // into Rhodes another way (resolution normally happens via auto-resolve).
+  action: z.enum(["acknowledged", "dismissed", "resolved"]),
 });
 
 // POST /api/inbound/[id]/resolve — close out a needs_user (or failed) inbound
@@ -33,7 +34,7 @@ export async function POST(
       .from("inbound_deliveries")
       .update({ status: parsed.data.action, updated_at: new Date().toISOString() })
       .eq("id", id)
-      .in("status", ["needs_user", "failed"])
+      .in("status", ["needs_user", "acknowledged", "failed"])
       .select("id, status")
       .maybeSingle();
     if (error) throw error;

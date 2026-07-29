@@ -49,7 +49,21 @@ export async function processInboundMail(): Promise<InboundRunResult> {
     // First run: only look back 24h — never triage the whole historical inbox.
     Date.now() - 24 * 3600 * 1000;
 
-  const messages = (await listNewMessages(cursor, MAX_PER_RUN + 10)).slice(0, MAX_PER_RUN);
+  let messages: InboundMessage[];
+  try {
+    messages = (await listNewMessages(cursor, MAX_PER_RUN + 10)).slice(0, MAX_PER_RUN);
+  } catch (err) {
+    // Connection-level failure (token revoked, API outage): record it for the
+    // Settings health chip and rethrow — mail isn't lost, the next poll
+    // catches up from the same cursor.
+    await admin.from("inbound_mail_state").upsert({
+      organization_id: orgId,
+      last_internal_date: cursor,
+      last_error: err instanceof Error ? err.message.slice(0, 300) : "unknown",
+      updated_at: new Date().toISOString(),
+    });
+    throw err;
+  }
   let maxSeen = cursor;
 
   for (const msg of messages) {
@@ -70,6 +84,8 @@ export async function processInboundMail(): Promise<InboundRunResult> {
   await admin.from("inbound_mail_state").upsert({
     organization_id: orgId,
     last_internal_date: maxSeen,
+    last_success_at: new Date().toISOString(),
+    last_error: null,
     updated_at: new Date().toISOString(),
   });
 

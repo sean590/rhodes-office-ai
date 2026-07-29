@@ -18,7 +18,7 @@ export const listInboundDeliveriesTool = defineTool({
   kind: "read",
   inputSchema: z.object({
     status: z
-      .enum(["needs_user", "ingested", "retrieved", "failed", "ignored", "resolved", "dismissed"])
+      .enum(["needs_user", "acknowledged", "ingested", "retrieved", "failed", "ignored", "resolved", "dismissed"])
       .optional()
       .describe("Filter to one disposition; omit for all non-ignored."),
     limit: z.number().int().min(1).max(100).optional(),
@@ -40,13 +40,11 @@ export const listInboundDeliveriesTool = defineTool({
 export const resolveInboundDeliveryTool = defineTool({
   name: "resolve_inbound_delivery",
   description:
-    "Close out a needs_user or failed inbound delivery: 'resolved' when the " +
-    "document made it into Rhodes another way (forwarded/uploaded), 'dismissed' " +
-    "when it's not relevant. Only affects rows awaiting the user.",
+    "Update a needs_user/failed inbound delivery: 'acknowledged' = the user says they forwarded it (stops reminders, stays open until the document arrives), 'resolved' = the document made it in another way, 'dismissed' = not relevant.",
   kind: "write",
   inputSchema: z.object({
     delivery_id: z.string().uuid(),
-    action: z.enum(["resolved", "dismissed"]),
+    action: z.enum(["acknowledged", "resolved", "dismissed"]),
   }),
   dryRun: async ({ delivery_id, action }, ctx) => {
     const { data } = await ctx.supabase
@@ -66,7 +64,7 @@ export const resolveInboundDeliveryTool = defineTool({
       .update({ status: action, updated_at: new Date().toISOString() })
       .eq("organization_id", ctx.orgId)
       .eq("id", delivery_id)
-      .in("status", ["needs_user", "failed"])
+      .in("status", ["needs_user", "acknowledged", "failed"])
       .select("id, status")
       .maybeSingle();
     if (error) throw error;

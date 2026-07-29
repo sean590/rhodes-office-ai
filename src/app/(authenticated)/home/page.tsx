@@ -33,8 +33,38 @@ import {
   type StagedItem, type ReviewItem, type OriginGroup,
 } from "@/lib/home-grouping";
 import { humanizeActivity, type RawActivity, type ActorKind, type HumanActivity } from "@/lib/activity-humanizer";
+import { INBOUND_ADDRESS, needsUserReasonSentence } from "@/lib/inbound/copy";
 
 interface Obligation { id: string; name: string; next_due_date: string; status: string; jurisdiction?: string | null; entities?: { id: string; name: string } | null; }
+
+// An inbound email Rhodes couldn't fetch documents from (status=needs_user),
+// or one the user says they've forwarded (status=acknowledged — card stays,
+// subdued, until the document actually arrives).
+interface InboundItem {
+  id: string;
+  sender: string | null;
+  subject: string | null;
+  received_at: string;
+  status: "needs_user" | "acknowledged";
+  needs_user_reason: string | null;
+  provider_id: string | null;
+}
+
+// "Jane Doe <jane@willkie.com>" → "willkie.com". Sender-domain fallback for
+// the card title when the delivery has no matched provider.
+function senderDomain(sender: string | null): string | null {
+  const m = sender?.match(/@([A-Za-z0-9.-]+)/);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// "{Provider} sent something Rhodes couldn't fetch", falling back to
+// "Someone at willkie.com sent…" when no provider name is available.
+function inboundWho(item: InboundItem, providerNames: Record<string, string>): string {
+  const name = item.provider_id ? providerNames[item.provider_id] : undefined;
+  if (name) return name;
+  const domain = senderDomain(item.sender);
+  return domain ? `Someone at ${domain}` : "A sender";
+}
 
 // "DE" → "Delaware", "federal" → "Federal". Same-named obligations (e.g.
 // "Annual Franchise Tax") recur across states for multi-state LLCs, so the
@@ -119,6 +149,25 @@ function ReviewDetail({ r }: { r: ReviewItem }) {
   );
 }
 
+// Expanded detail for the inbound needs_user card (spec §1a): three rows of
+// plain language — what happened, what to do, and that a reminder email went
+// out. Reason copy is shared with Settings → Mailbox (lib/inbound/copy).
+function InboundDetail({ item }: { item: InboundItem }) {
+  const row = (label: string, text: React.ReactNode) => (
+    <div key={label} style={{ display: "flex", gap: 12, alignItems: "baseline" }}>
+      <div style={{ flexShrink: 0, width: 108, fontSize: 11, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--faint)" }}>{label}</div>
+      <div style={{ fontSize: 13, color: "var(--muted)", lineHeight: 1.55 }}>{text}</div>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {row("What happened", needsUserReasonSentence(item.needs_user_reason))}
+      {row("What to do", <>Forward it to <b style={{ fontWeight: 600, color: "var(--ink)" }}>{INBOUND_ADDRESS}</b>, or drop the files into chat — Rhodes will file them and clear this.</>)}
+      {row("Also sent", "Rhodes also emailed you a reminder, so this won’t get lost.")}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const setPageContext = useSetPageContext();
   const chatPanel = useChatPanel();
@@ -129,6 +178,8 @@ export default function HomePage() {
   const [staged, setStaged] = useState<StagedItem[]>([]);
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [obligations, setObligations] = useState<Obligation[]>([]);
+  const [inbound, setInbound] = useState<InboundItem[]>([]);
+  const [providerNames, setProviderNames] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<RawActivity[]>([]);
   const [suggestedCount, setSuggestedCount] = useState(0);
   const [doneActor, setDoneActor] = useState<"all" | "you" | "rhodes">("all");
@@ -146,10 +197,11 @@ export default function HomePage() {
   useEffect(() => {
     (async () => {
       try {
-        const [eRes, iRes, dRes] = await Promise.all([
+        const [eRes, iRes, dRes, pRes] = await Promise.all([
           fetch("/api/entities?limit=500"),
           fetch("/api/investments"),
           fetch("/api/documents?limit=500"),
+          fetch("/api/service-providers"),
         ]);
         if (eRes.ok) {
           const d = await eRes.json();
@@ -163,6 +215,13 @@ export default function HomePage() {
           const d = await dRes.json();
           setDocumentOptions((Array.isArray(d) ? d : d.documents ?? []).map((doc: { id: string; name: string }) => ({ id: doc.id, name: doc.name })));
         }
+        if (pRes.ok) {
+          // provider_id → name for the inbound card title (never a raw UUID).
+          const d = await pRes.json();
+          setProviderNames(Object.fromEntries(
+            (Array.isArray(d) ? d : []).map((p: { id: string; name: string }) => [p.id, p.name]),
+          ));
+        }
       } catch { /* non-fatal — refs fall back to a neutral placeholder, never a UUID */ }
     })();
   }, []);
@@ -174,17 +233,24 @@ export default function HomePage() {
       // no-store: the home queue is live — an action elsewhere (chat agent,
       // another tab) must reflect on the next load, never a cached snapshot.
       const noStore = { cache: "no-store" as const };
-      const [meRes, sRes, qRes, cRes, aRes] = await Promise.all([
+      const [meRes, sRes, qRes, cRes, nRes, aRes] = await Promise.all([
         fetch("/api/auth/me", noStore),
         fetch("/api/home/staged", noStore),
         fetch("/api/pipeline/queue?status=review_ready&limit=100", noStore),
         fetch("/api/compliance/upcoming", noStore),
+        fetch("/api/inbound?limit=100", noStore).catch(() => null),
         fetch("/api/audit?limit=60", noStore).catch(() => null),
       ]);
       if (meRes.ok) setUserId((await meRes.json())?.id ?? null);
       if (sRes.ok) setStaged(await sRes.json());
       if (qRes.ok) { const d = await qRes.json(); setReviews(Array.isArray(d) ? d : d.items ?? []); }
       if (cRes.ok) setObligations((await cRes.json())?.obligations ?? []);
+      if (nRes && nRes.ok) {
+        // The feed returns every disposition; only needs_user (Rhodes is asking
+        // for a hand) and acknowledged (forwarded, waiting to arrive) are cards.
+        const rows: Array<Omit<InboundItem, "status"> & { status: string }> = await nRes.json();
+        setInbound(rows.filter((r): r is InboundItem => r.status === "needs_user" || r.status === "acknowledged"));
+      }
       if (aRes && aRes.ok) setActivity(await aRes.json());
     } catch (err) {
       console.error("Home load error:", err);
@@ -299,6 +365,30 @@ export default function HomePage() {
     } catch { alert("Failed to mark filed"); } finally { setBusyFor(o.id, false); }
   }, [fetchAll]);
 
+  // "I forwarded it" (→ acknowledged: reminders stop, card stays subdued until
+  // the document arrives) or dismiss (→ card goes; disposition stays visible in
+  // Settings → Mailbox).
+  const resolveInbound = useCallback(async (item: InboundItem, action: "acknowledged" | "dismissed") => {
+    setBusyFor(item.id, true);
+    try {
+      const res = await fetch(`/api/inbound/${item.id}/resolve`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      if (res.ok) {
+        setInbound((p) => action === "dismissed"
+          ? p.filter((x) => x.id !== item.id)
+          : p.map((x) => (x.id === item.id ? { ...x, status: "acknowledged" as const } : x)));
+      } else alert("Failed to update");
+    } catch { alert("Failed to update"); } finally { setBusyFor(item.id, false); }
+  }, []);
+
+  // "Upload instead": open the chat drawer so the user can drop the files in.
+  // Opened EMPTY on purpose — a prefill query without a session AUTO-SENDS in
+  // the drawer (chat-drawer prefill: query-without-session → auto-send), which
+  // would fire a message before the user has attached anything.
+  const uploadInstead = useCallback(() => { chatPanel.open(); }, [chatPanel]);
+
   const approveGroup = useCallback(async (g: OriginGroup) => {
     setGroupBusy((b) => ({ ...b, [g.key]: true }));
     try {
@@ -377,9 +467,15 @@ export default function HomePage() {
     return { ids, count: ids.size };
   }, []);
 
+  // Cards asking for a hand first; forwarded-and-waiting ones sink below them.
+  const inboundSorted = useMemo(
+    () => [...inbound.filter((i) => i.status === "needs_user"), ...inbound.filter((i) => i.status === "acknowledged")],
+    [inbound],
+  );
+
   const overdueCount = obligations.filter((o) => formatDue(o.next_due_date).overdue).length;
   const approveCount = dedupedStaged.length;
-  const needsCount = approveCount + reviews.length + obligations.length;
+  const needsCount = approveCount + reviews.length + obligations.length + inbound.length;
 
   // "No batch as a UX concept": batch/pipeline plumbing events are internal —
   // keep them out of the user-facing Done feed (they read as jargon).
@@ -465,6 +561,33 @@ export default function HomePage() {
   }, [reviewGroups, router]);
 
   // ── Renderers ───────────────────────────────────────────────────
+  // The inbound needs_user card (rhodes-inbound-v1-ui-spec §1a): an email
+  // Rhodes couldn't fetch documents from. "I forwarded it" acknowledges (card
+  // stays, subdued, until the document arrives); dismiss clears it.
+  const renderInbound = (n: InboundItem) => {
+    const waiting = n.status === "acknowledged";
+    const meta = [
+      n.subject ? `“${n.subject}”` : null,
+      formatStamp(n.received_at),
+      waiting ? "waiting for it to arrive" : null,
+    ].filter(Boolean).join(" · ");
+    return (
+      <div key={n.id} style={waiting ? { opacity: 0.65 } : undefined}>
+        <InboxCard
+          icon="mail-question" iconColor="var(--amber)"
+          title={`${inboundWho(n, providerNames)} sent something Rhodes couldn't fetch`}
+          channel="email" meta={meta}
+          actions={[
+            ...(waiting ? [] : [{ label: "I forwarded it", variant: "primary" as const, onClick: () => resolveInbound(n, "acknowledged"), busy: busy[n.id] }]),
+            { label: "Upload instead", onClick: uploadInstead },
+            { label: "×", onClick: () => resolveInbound(n, "dismissed"), busy: busy[n.id] },
+          ]}
+          expandedContent={<InboundDetail item={n} />}
+        />
+      </div>
+    );
+  };
+
   const renderApprove = (g: OriginGroup) => {
     if (g.entries.length === 1) {
       const s = g.entries[0].staged!;
@@ -615,6 +738,15 @@ export default function HomePage() {
           )}
 
           {!loading && needsCount === 0 && <Empty icon="circle-check" text="You’re all caught up." />}
+
+          {focus === null && inboundSorted.length > 0 && (
+            <div>
+              <SectionHead label="Forward · Rhodes couldn’t fetch these" count={inbound.length} />
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {inboundSorted.map(renderInbound)}
+              </div>
+            </div>
+          )}
 
           {(focus === null || focus === "approve") && approveGroups.length > 0 && (
             <div>
