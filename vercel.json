@@ -20,6 +20,10 @@
     {
       "path": "/api/cron/inbound-poll",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/retrieve-safesend",
+      "schedule": "*/10 * * * *"
     }
   ],
   "headers": [

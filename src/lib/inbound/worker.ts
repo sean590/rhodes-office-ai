@@ -132,13 +132,48 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
       result.ingested += 1;
       break;
     }
-    case "safesend": // auto-retrieval lands in Increment 2 — nudge for now
+    case "safesend": {
+      // Auto-retrieval: store the link; the retrieve cron picks 'pending'
+      // safesend rows up (too slow to run inline in the poll).
+      await admin
+        .from("inbound_deliveries")
+        .update({ safesend_link: triage.safesendLink, updated_at: new Date().toISOString() })
+        .eq("id", deliveryId);
+      result.needsUser += 0;
+      break;
+    }
     case "needs_user": {
       await notifyNeedsUser(admin, orgId, msg, triage.reason, deliveryId);
       result.needsUser += 1;
       break;
     }
     default: {
+      // Relay resume: an otherwise-ignorable email carrying an 8-digit code
+      // with SafeSend markers, while a delivery waits on its code, is the
+      // user completing the loop — run the retrieval NOW with that code.
+      const codeMatch = /access code|safesend/i.test(msg.subject + " " + msg.bodyText)
+        ? (msg.bodyText + " " + msg.snippet).match(/(?<!\d)(\d{8})(?!\d)/)
+        : null;
+      if (codeMatch) {
+        const { data: waiting } = await admin
+          .from("inbound_deliveries")
+          .select("id, organization_id, sender, subject, safesend_link, attempts")
+          .eq("organization_id", orgId)
+          .eq("status", "waiting_code")
+          .not("safesend_link", "is", null)
+          .order("received_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (waiting) {
+          await admin
+            .from("inbound_deliveries")
+            .update({ status: "ignored", needs_user_reason: "access code relay", updated_at: new Date().toISOString() })
+            .eq("id", deliveryId);
+          result.ignored += 1;
+          await runSafesendAttempt(admin, orgId, waiting as never, codeMatch[1]);
+          return;
+        }
+      }
       await admin
         .from("inbound_deliveries")
         .update({ status: "ignored", updated_at: new Date().toISOString() })
@@ -318,4 +353,97 @@ async function adminEmails(admin: Admin): Promise<string[]> {
   if (ids.length === 0) return [];
   const { data: { users } } = await admin.auth.admin.listUsers();
   return (users || []).filter((u) => ids.includes(u.id) && u.email).map((u) => u.email!);
+}
+
+// ── SafeSend retrieval dispatch ──────────────────────────────────────
+
+/**
+ * Run one SafeSend retrieval attempt for a delivery and record the outcome.
+ * Called by cron/retrieve-safesend (fresh 'pending' rows) and inline by the
+ * poll when the user relays the access code ('waiting_code' resume, seeded).
+ */
+export async function runSafesendAttempt(
+  admin: Admin,
+  orgId: string,
+  delivery: {
+    id: string;
+    organization_id: string;
+    sender: string;
+    subject: string | null;
+    safesend_link: string;
+    attempts: number;
+  },
+  seededCode?: string,
+): Promise<void> {
+  const { retrieveSafesend, nudgeForCode } = await import("./safesend");
+  const { data: state } = await admin
+    .from("inbound_mail_state")
+    .select("mailbox_address")
+    .eq("organization_id", orgId)
+    .maybeSingle();
+  const mailboxAddress = (state?.mailbox_address as string) || FORWARD_ADDRESS;
+
+  if (delivery.attempts >= 2) {
+    await admin
+      .from("inbound_deliveries")
+      .update({ status: "needs_user", needs_user_reason: "safesend retrieval attempts exhausted — download it manually or forward the files", updated_at: new Date().toISOString() })
+      .eq("id", delivery.id);
+    return;
+  }
+  await admin
+    .from("inbound_deliveries")
+    .update({ attempts: delivery.attempts + 1, updated_at: new Date().toISOString() })
+    .eq("id", delivery.id);
+
+  try {
+    const result = await retrieveSafesend(admin, delivery, { mailboxAddress, seededCode });
+    if (result.outcome === "retrieved") {
+      await admin
+        .from("inbound_deliveries")
+        .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, updated_at: new Date().toISOString() })
+        .eq("id", delivery.id);
+    } else if (result.outcome === "waiting_code") {
+      await admin
+        .from("inbound_deliveries")
+        .update({ status: "waiting_code", needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", delivery.id);
+      await nudgeForCode(admin, delivery, result.recipient, mailboxAddress);
+    } else {
+      await admin
+        .from("inbound_deliveries")
+        .update({ status: "needs_user", needs_user_reason: result.reason, updated_at: new Date().toISOString() })
+        .eq("id", delivery.id);
+      await notifyNeedsUser(admin, orgId, {
+        id: "", threadId: "", internalDate: Date.now(),
+        from: delivery.sender, fromEmail: delivery.sender,
+        subject: delivery.subject ?? "", snippet: "", bodyText: "", links: [], attachments: [],
+      } as InboundMessage, result.reason, delivery.id);
+    }
+  } catch (err) {
+    console.error("[SAFESEND] attempt failed:", err);
+    await admin
+      .from("inbound_deliveries")
+      .update({ status: "needs_user", needs_user_reason: "secure-link retrieval hit an error — download it manually", error: err instanceof Error ? err.message.slice(0, 300) : "unknown", updated_at: new Date().toISOString() })
+      .eq("id", delivery.id);
+  }
+}
+
+/** One retrieval per cron tick: oldest pending safesend delivery. */
+export async function processPendingSafesend(): Promise<{ ran: boolean; delivery_id?: string }> {
+  const orgId = process.env.INBOUND_ORG_ID;
+  if (!orgId || !gmailConfigured()) return { ran: false };
+  const admin = createAdminClient();
+  const { data: pending } = await admin
+    .from("inbound_deliveries")
+    .select("id, organization_id, sender, subject, safesend_link, attempts")
+    .eq("organization_id", orgId)
+    .eq("classification", "safesend")
+    .eq("status", "pending")
+    .not("safesend_link", "is", null)
+    .order("received_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!pending) return { ran: false };
+  await runSafesendAttempt(admin, orgId, pending as never);
+  return { ran: true, delivery_id: pending.id as string };
 }
