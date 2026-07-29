@@ -5,7 +5,7 @@ import { processInboundMail } from "@/lib/inbound/worker";
 // every 5 minutes. Attachments are staged+queued for the process-queue
 // sweeper; everything unfetchable becomes a needs_user nudge. Bounded work
 // per run (15 messages); no extraction happens inline here.
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");

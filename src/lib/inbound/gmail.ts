@@ -179,18 +179,24 @@ export async function getAttachment(messageId: string, attachmentId: string): Pr
 }
 
 /**
- * Wait for a NEW OTP email from `senderContains` and extract a code of
- * `digits` length. Snapshot-then-poll: only messages that did not exist at
- * call time count (spike lesson — clock skew broke timestamp anchoring).
+ * Wait for a NEW OTP email and extract a code of `digits` length.
+ * Snapshot-then-poll: only messages that did not exist at call time count
+ * (spike lesson — clock skew broke timestamp anchoring).
+ *
+ * `senderContains` is optional: a code FORWARDED by the user (the SafeSend
+ * relay flow — original recipient forwards the access-code email to Rhodes)
+ * arrives from the user's address, not the platform's, so sender filtering
+ * would miss it. `bodyMarker` narrows the candidate set instead.
  */
 export async function waitForOtp(opts: {
-  senderContains: string;
+  senderContains?: string;
+  bodyMarker?: RegExp;
   digits: number;
   timeoutMs?: number;
   pollMs?: number;
 }): Promise<string | null> {
-  const { senderContains, digits, timeoutMs = 5 * 60_000, pollMs = 5_000 } = opts;
-  const q = encodeURIComponent(`in:anywhere from:${senderContains}`);
+  const { senderContains, bodyMarker, digits, timeoutMs = 5 * 60_000, pollMs = 5_000 } = opts;
+  const q = encodeURIComponent(`in:anywhere${senderContains ? ` from:${senderContains}` : ""}`);
   const snapshot = new Set(
     ((await api<{ messages?: { id: string }[] }>(`/messages?q=${q}&maxResults=20`)).messages ?? []).map((m) => m.id),
   );
@@ -201,7 +207,9 @@ export async function waitForOtp(opts: {
     for (const m of list) {
       if (snapshot.has(m.id)) continue;
       const full = toInbound(await api<GmailMessageRaw>(`/messages/${m.id}?format=full`));
-      const match = (full.bodyText + " " + full.snippet).match(codeRe);
+      const haystack = full.bodyText + " " + full.snippet + " " + full.subject;
+      if (bodyMarker && !bodyMarker.test(haystack)) { snapshot.add(m.id); continue; }
+      const match = haystack.match(codeRe);
       if (match) return match[1];
       snapshot.add(m.id); // new but code-less — don't re-fetch it every poll
     }
