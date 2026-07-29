@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { rateLimit } from "@/lib/utils/rate-limit";
 import { lookupValidSend, logSendAccess, resolveSenderLabel, getSendDocuments } from "@/lib/providers/share-link";
 import { ShareDownload } from "./ShareDownload";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 // Public, unauthenticated share page (providers are not Rhodes users). Lives
 // OUTSIDE the (authenticated) group. Validates the token server-side; all
@@ -37,6 +38,9 @@ function Unavailable() {
 }
 
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
+  // Feature kill-switch: while provider sending is disabled, outstanding links
+  // render the same generic unavailable state as expired/revoked ones.
+  if (!PROVIDER_SENDING_ENABLED) return <Unavailable />;
   const { token } = await params;
   const admin = createAdminClient();
 
