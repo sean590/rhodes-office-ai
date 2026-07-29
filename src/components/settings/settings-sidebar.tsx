@@ -11,6 +11,7 @@ import {
   DocIcon,
   PeopleIcon,
   BuildingIcon,
+  MailIcon,
 } from "@/components/ui/icons";
 
 interface NavItem {
@@ -49,6 +50,7 @@ const SETTINGS_GROUPS: NavGroup[] = [
     items: [
       { href: "/settings/compliance", label: "Compliance rules", Icon: GearIcon },
       { href: "/settings/documents", label: "Document requirements", Icon: DocIcon },
+      { href: "/settings/mailbox", label: "Mailbox", Icon: MailIcon },
     ],
   },
 ];
