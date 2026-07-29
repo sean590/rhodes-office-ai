@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 import { NextResponse } from "next/server";
 import { can, ROLE_CAPABILITIES } from "@/lib/authz/policy";
 import { toolPermissionError } from "@/lib/mcp/schema";
@@ -23,15 +24,20 @@ describe("policy.can — the 3-role matrix", () => {
   });
   it("admin: + delete / send / manage / org:settings, but not owner-only", () => {
     expect(can("admin", "records:delete")).toBe(true);
-    expect(can("admin", "providers:send")).toBe(true);
+    // providers:send is granted in the matrix but currently kill-switched off
+    // (PROVIDER_SENDING_ENABLED=false in lib/features) — can() must deny it
+    // for every role until the feature is re-enabled.
+    expect(can("admin", "providers:send")).toBe(PROVIDER_SENDING_ENABLED);
     expect(can("admin", "members:manage")).toBe(true);
     expect(can("admin", "org:settings")).toBe(true);
     expect(can("admin", "members:promote_admin")).toBe(false);
     expect(can("admin", "org:delete")).toBe(false);
     expect(can("admin", "billing:manage")).toBe(false);
   });
-  it("owner: everything", () => {
-    for (const cap of ROLE_CAPABILITIES.owner) expect(can("owner", cap)).toBe(true);
+  it("owner: everything (minus kill-switched features)", () => {
+    for (const cap of ROLE_CAPABILITIES.owner) {
+      expect(can("owner", cap)).toBe(cap === "providers:send" ? PROVIDER_SENDING_ENABLED : true);
+    }
     expect(can("owner", "org:delete")).toBe(true);
     expect(can("owner", "billing:manage")).toBe(true);
   });
@@ -53,9 +59,13 @@ describe("toolPermissionError — chat MCP tools obey the same matrix", () => {
     expect(toolPermissionError(send, "member")).toMatch(/an admin/);
     expect(toolPermissionError(write, "member")).toBeNull();
   });
-  it("admin may delete + send", () => {
+  it("admin may delete; send obeys the kill-switch", () => {
     expect(toolPermissionError(del, "admin")).toBeNull();
-    expect(toolPermissionError(send, "admin")).toBeNull();
+    if (PROVIDER_SENDING_ENABLED) {
+      expect(toolPermissionError(send, "admin")).toBeNull();
+    } else {
+      expect(toolPermissionError(send, "admin")).not.toBeNull();
+    }
   });
   it("read tools are never gated", () => {
     expect(toolPermissionError(read, "viewer")).toBeNull();

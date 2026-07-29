@@ -38,6 +38,19 @@ import { investmentWriteTools } from "./tools/investments-write";
 import { documentWriteTools } from "./tools/documents-write";
 import { queueWriteTools } from "./tools/queue-write";
 import { serviceProviderWriteTools } from "./tools/service-providers-write";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
+
+// Tools that exist only to create/manage/suggest outbound provider sends.
+// Excluded from the registry while the feature is disabled so chat can't
+// trigger sends the UI hides (tool/route parity works both ways).
+const SEND_TOOL_NAMES = new Set([
+  "send_document_to_provider",
+  "revoke_provider_send",
+  "dismiss_send_suggestion",
+  "get_send_suggestions",
+  "get_provider_suggestions",
+  "list_provider_sends",
+]);
 
 /**
  * Single registry of every tool, sorted by name. Tests consume this directly
@@ -60,7 +73,7 @@ export function buildToolRegistry(): ToolDefinition[] {
     ...documentWriteTools,
     ...queueWriteTools,
     ...serviceProviderWriteTools,
-  ];
+  ].filter((t) => PROVIDER_SENDING_ENABLED || !SEND_TOOL_NAMES.has(t.name));
   return tools.sort((a, b) => a.name.localeCompare(b.name));
 }
 

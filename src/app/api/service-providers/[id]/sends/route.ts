@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 // GET /api/service-providers/[id]/sends — the document send log for a provider,
 // with document names joined.
@@ -9,6 +10,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
+    if (!PROVIDER_SENDING_ENABLED) return NextResponse.json([]);
     const ctx = await requireOrg();
     if (isError(ctx)) return ctx;
     const { orgId } = ctx;

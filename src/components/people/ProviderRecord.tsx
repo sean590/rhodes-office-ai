@@ -16,6 +16,7 @@ import { SectionHeader } from "@/components/ui/section-header";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useCan } from "@/components/authz/role-provider";
 import type { ProviderContact } from "@/lib/types/entities";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 const DISCIPLINE_LABELS: Record<string, string> = {
   tax: "Tax", bookkeeping: "Bookkeeping", legal: "Legal", valuation: "Valuation",
@@ -166,7 +167,7 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
         )}
       </Card>
 
-      <Card style={{ marginBottom: 16 }}>
+      {PROVIDER_SENDING_ENABLED && <Card style={{ marginBottom: 16 }}>
         <SectionHeader>What Rhodes routes here</SectionHeader>
         {provider.learned_routing.length === 0 ? (
           <div style={{ fontSize: 13, color: "#9494a0", padding: "8px 0" }}>Nothing learned yet — Rhodes picks this up as you send documents to {provider.name}.</div>
@@ -180,9 +181,9 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
             ))}
           </div>
         )}
-      </Card>
+      </Card>}
 
-      <Card style={{ padding: 0, overflow: "hidden" }}>
+      {PROVIDER_SENDING_ENABLED && <Card style={{ padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "16px 16px 0" }}><SectionHeader>Sent ({sends.length})</SectionHeader></div>
         {sends.length === 0 ? (
           <div style={{ fontSize: 13, color: "#9494a0", padding: 16 }}>No documents sent to {provider.name} yet.</div>
@@ -244,7 +245,7 @@ export function ProviderRecord({ providerId, onDeleted }: { providerId: string; 
             </tbody>
           </table>
         )}
-      </Card>
+      </Card>}
     </>
   );
 }

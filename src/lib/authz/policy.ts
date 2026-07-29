@@ -1,4 +1,5 @@
 import { OrgRole } from "@/lib/types/enums";
+import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 /**
  * Role-based access policy — the ONE place the permission matrix lives.
@@ -63,6 +64,10 @@ export const ROLE_CAPABILITIES: Record<OrgRole, ReadonlySet<Capability>> = {
 
 /** True if `role` is granted `cap`. */
 export function can(role: OrgRole, cap: Capability): boolean {
+  // Feature kill-switch: while provider sending is disabled, NO role has the
+  // capability — this single check hides every send surface at once (UI
+  // buttons via useCan, routes via requireSensitive, MCP write tools).
+  if (cap === "providers:send" && !PROVIDER_SENDING_ENABLED) return false;
   return ROLE_CAPABILITIES[role]?.has(cap) ?? false;
 }
 
