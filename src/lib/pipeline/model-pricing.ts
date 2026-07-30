@@ -26,12 +26,17 @@ interface ModelRates {
 
 // USD per 1,000,000 tokens.
 const PRICING: Record<string, ModelRates> = {
-  // Sonnet 4.x — the model the document agent runs on today.
+  // Claude 5 (current) — document agent runs Sonnet 5, chat runs Opus 5.
+  // Sonnet 5 has intro pricing of $2/$10 through 2026-08-31; we book the
+  // standard rate so cost figures don't silently jump when the promo ends.
+  "claude-sonnet-5": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-opus-5": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  // Claude 4.x — kept for cost attribution on historical runs.
   "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  // For future model-tiering cost modeling (route simple docs cheaper).
-  // VERIFY before relying on these two.
   "claude-haiku-4-5": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
-  "claude-opus-4-8": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
+  // Was wrongly listed at $15/$75 (Opus 4.1's price) until 2026-07-29 —
+  // Opus-family cost figures recorded before then are ~3× overstated.
+  "claude-opus-4-8": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
 };
 
 export function emptyUsage(): TokenUsage {
@@ -47,13 +52,13 @@ export function totalTokens(u: TokenUsage): number {
  *  unknown model (surface that as "cost unknown" in aggregation, don't trust
  *  it as free). */
 /** Fall back to family pricing when the exact version string isn't in the
- *  table (e.g. chat runs "claude-opus-4-6" while the table lists "-4-8") so a
+ *  table (e.g. a dated snapshot ID like "claude-haiku-4-5-20251001") so a
  *  model bump doesn't silently zero out cost. */
 function ratesFor(model: string): ModelRates | null {
   if (PRICING[model]) return PRICING[model];
   const m = model.toLowerCase();
-  if (m.includes("opus")) return PRICING["claude-opus-4-8"];
-  if (m.includes("sonnet")) return PRICING["claude-sonnet-4-6"];
+  if (m.includes("opus")) return PRICING["claude-opus-5"];
+  if (m.includes("sonnet")) return PRICING["claude-sonnet-5"];
   if (m.includes("haiku")) return PRICING["claude-haiku-4-5"];
   return null;
 }

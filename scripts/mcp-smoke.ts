@@ -12,7 +12,7 @@
  *     --user-email=sean@channels.com \
  *     --org-id=<uuid>                   \   # optional — defaults to user's active_organization_id
  *     --scenarios=rcm2025,committed,...     # optional — default: all
- *     --model=claude-opus-4-6               # optional
+ *     --model=claude-opus-5               # optional
  *     --out=../rhodes-mcp-phase1-smoke-findings.md
  *
  * Scenario keys (maps to the Phase 1 scaffolding spec §10 list):
@@ -605,7 +605,7 @@ async function main() {
 
   const admin = createClient(supabaseUrl, serviceRoleKey);
   const anthropic = new Anthropic() as unknown as AnthropicClientLike;
-  const model = args.model ?? "claude-opus-4-6";
+  const model = args.model ?? "claude-opus-5";
 
   const { userId, orgId } = await resolveUserAndOrg(
     admin,

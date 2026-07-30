@@ -24,11 +24,54 @@ concurrency:
 jobs:
   poll:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 16
     steps:
+      - name: Self-heal staging branch auth config
+        env:
+          SB_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          GOOGLE_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+          # Supabase re-syncs preview-branch config on pushes, wiping the
+          # dashboard-set Site URL / redirect list / Google provider (bit us
+          # 2026-07-29). Re-assert it from PROD's provider config + the
+          # staging URLs whenever drift is detected. Branch ref resolved
+          # dynamically so branch recreates keep healing.
+          ref=$(curl -sf "https://api.supabase.com/v1/projects/flcrgrtrguulaeupyaza/branches"             -H "Authorization: Bearer $SB_TOKEN" | jq -r '.[] | select(.name=="Staging") | .project_ref')
+          [ -n "$ref" ] || { echo "no Staging branch found"; exit 0; }
+          cur=$(curl -sf "https://api.supabase.com/v1/projects/$ref/config/auth" -H "Authorization: Bearer $SB_TOKEN")
+          site=$(echo "$cur" | jq -r '.site_url // ""')
+          google=$(echo "$cur" | jq -r '.external_google_enabled')
+          if [ "$site" = "https://staging.rhodesoffice.ai" ] && [ "$google" = "true" ]; then
+            echo "auth config intact"; exit 0
+          fi
+          echo "auth config drifted (site_url=$site google=$google) — restoring"
+          prod=$(curl -sf "https://api.supabase.com/v1/projects/flcrgrtrguulaeupyaza/config/auth" -H "Authorization: Bearer $SB_TOKEN")
+          jq -n             --arg cid "$(echo "$prod" | jq -r '.external_google_client_id')"             --arg csec "$(echo "$prod" | jq -r '.external_google_secret')"             '{site_url: "https://staging.rhodesoffice.ai",
+              uri_allow_list: "https://staging.rhodesoffice.ai/**,https://staging.rhodesoffice.ai/auth/callback",
+              external_google_enabled: true,
+              external_google_client_id: $cid,
+              external_google_secret: $csec}'           | curl -sf -X PATCH "https://api.supabase.com/v1/projects/$ref/config/auth"               -H "Authorization: Bearer $SB_TOKEN" -H "Content-Type: application/json" -d @- -o /dev/null
+          echo "restored"
       - name: Poll staging mailbox
         run: |
           set -euo pipefail
-          curl -sf --max-time 150 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
+          curl -sf --max-time 290 "https://staging.rhodesoffice.ai/api/cron/inbound-poll" \
+            -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
+            -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"
+      - name: Drain document queue
+        run: |
+          set -euo pipefail
+          # Staging has no Vercel crons; without this, ingested docs sit
+          # 'Queued' forever (bit us 2026-07-29). Loop until drained.
+          for i in 1 2 3 4; do
+            r=$(curl -sf --max-time 290 "https://staging.rhodesoffice.ai/api/cron/process-queue"               -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}"               -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}")
+            echo "$r"
+            echo "$r" | grep -q '"processed":0' && break
+          done
+      - name: Sweep SafeSend retrievals
+        run: |
+          set -euo pipefail
+          curl -sf --max-time 590 "https://staging.rhodesoffice.ai/api/cron/retrieve-safesend" \
             -H "Authorization: Bearer ${{ secrets.STAGING_CRON_SECRET }}" \
             -H "x-vercel-protection-bypass: ${{ secrets.STAGING_BYPASS_SECRET }}"

@@ -123,6 +123,21 @@ Files are under `s3://rhodes-backups/storage/documents/<original path>`.
 Re-upload to Supabase Storage at the same path; metadata already references
 it. Verify via the app's document download.
 
+## Staging data policy (org allowlist)
+
+**Customer data never leaves production.** Staging refreshes go through
+`scripts/backup/restore-staging.sh`, which restores a production dump and then
+purges every organization not in its `ALLOWED_ORG_IDS` list (currently only
+Sean's own org), including auth users with no remaining membership and all
+storage metadata. Changing the allowlist is a deliberate, reviewed edit to
+that script. For demos, use a synthetic demo org — never real customer data.
+
+```bash
+aws s3 cp s3://rhodes-backups/db/rhodes-YYYY-MM-DD.dump . --profile rhodes
+SUPABASE_STAGING_DB_URL=<staging pooler url> \
+  scripts/backup/restore-staging.sh rhodes-YYYY-MM-DD.dump
+```
+
 ## Quarterly restore drill
 
 Calendar: first week of Jan / Apr / Jul / Oct. Each drill: download latest
