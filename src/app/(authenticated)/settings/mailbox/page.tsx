@@ -322,6 +322,35 @@ export default function SettingsMailboxPage() {
     setTeachingId(null);
   };
 
+  // "File it anyway" (hardening): release a held row — auth-failed sender or
+  // the daily flood cap — after the user has looked at it. Same route as
+  // teach, force_ingest mode; deliberately does NOT learn the sender.
+  const handleForceFile = async (id: string) => {
+    setTeachingId(id);
+    try {
+      const res = await fetch(`/api/inbound/${id}/reprocess`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "force_ingest" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTeachNotes((n) => ({ ...n, [id]: { text: "Filing it now.", ok: true } }));
+        setTimeout(() => {
+          void Promise.all([fetchRows(), fetchHealth()]);
+        }, 1500);
+      } else {
+        setTeachNotes((n) => ({
+          ...n,
+          [id]: { text: data?.error || "Couldn't file this one — try again.", ok: false },
+        }));
+      }
+    } catch {
+      setTeachNotes((n) => ({ ...n, [id]: { text: "Couldn't file this one — try again.", ok: false } }));
+    }
+    setTeachingId(null);
+  };
+
   if (loading) {
     return (
       <div style={{ padding: 80, color: "#9494a0", fontSize: 13, textAlign: "center" }}>
@@ -388,6 +417,44 @@ export default function SettingsMailboxPage() {
 
   const canDismiss = (row: InboundRow) =>
     row.status === "needs_user" || row.status === "acknowledged" || row.status === "failed";
+
+  // Held rows: attachments the flood cap or the sender-auth gate stopped.
+  // (Unrecognized-host links are NOT force-filable — there's nothing to file.)
+  const isHeld = (row: InboundRow) =>
+    row.status === "needs_user" &&
+    (row.needs_user_reason === "sender failed authentication" ||
+      (row.needs_user_reason ?? "").startsWith("unusually"));
+
+  const forceFileControl = (row: InboundRow) => {
+    const note = teachNotes[row.id];
+    if (note) {
+      return (
+        <span style={{ fontSize: 12, fontWeight: 500, color: note.ok ? "#2d5a3d" : "#c47520" }}>
+          {note.text}
+        </span>
+      );
+    }
+    return (
+      <button
+        onClick={() => handleForceFile(row.id)}
+        disabled={teachingId === row.id}
+        style={{
+          background: "none",
+          border: "1px solid #e8e6df",
+          borderRadius: 6,
+          padding: "3px 10px",
+          fontSize: 11,
+          fontWeight: 600,
+          color: teachingId === row.id ? "#9494a0" : "#2d5a3d",
+          cursor: teachingId === row.id ? "default" : "pointer",
+          fontFamily: "inherit",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {teachingId === row.id ? "Filing..." : "File it anyway"}
+      </button>
+    );
+  };
 
   const dismissButton = (row: InboundRow) => (
     <button
@@ -664,6 +731,7 @@ export default function SettingsMailboxPage() {
                   </div>
                   <div style={{ marginTop: 8 }}>
                     <Disposition row={row} />
+                    {isHeld(row) && <div style={{ marginTop: 6 }}>{forceFileControl(row)}</div>}
                   </div>
                   <div style={{ fontSize: 11, color: "#9494a0", marginTop: 6 }}>
                     {formatStamp(row.received_at)}
@@ -688,6 +756,7 @@ export default function SettingsMailboxPage() {
                       <td style={tdStyle}>{fromCell(row)}</td>
                       <td style={tdStyle}>
                         <Disposition row={row} />
+                        {isHeld(row) && <div style={{ marginTop: 6 }}>{forceFileControl(row)}</div>}
                       </td>
                       <td style={{ ...tdStyle, color: "#6b6b76", whiteSpace: "nowrap", fontSize: 12 }}>
                         {formatStamp(row.received_at)}

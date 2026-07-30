@@ -21,6 +21,15 @@ import { triageMessage } from "./triage";
 const MAX_PER_RUN = 15;
 const FORWARD_ADDRESS = process.env.INBOUND_FORWARD_ADDRESS || "Rhodes@channels.com";
 
+// Flood guard: the mailbox is an unauthenticated front door and every auto-
+// ingested attachment costs an LLM run + a review-queue slot. Over-cap mail is
+// still received and recorded — just HELD from auto-processing (needs_user,
+// releasable via "File it anyway"), with ONE digest notice per day, not N.
+// A real family office sees a handful of document emails a day; these caps
+// only bind under something abnormal.
+const DAILY_INGEST_CAP = Number(process.env.INBOUND_DAILY_CAP) || 30;
+const SENDER_DAILY_INGEST_CAP = Number(process.env.INBOUND_SENDER_DAILY_CAP) || 8;
+
 type Admin = ReturnType<typeof createAdminClient>;
 
 export type InboundRunResult = {
@@ -97,7 +106,13 @@ export async function processInboundMail(): Promise<InboundRunResult> {
   return result;
 }
 
-async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, result: InboundRunResult) {
+async function handleMessage(
+  admin: Admin,
+  orgId: string,
+  msg: InboundMessage,
+  result: InboundRunResult,
+  opts?: { force?: boolean },
+) {
   const providerId = await inferProviderFromSender(admin, orgId, msg.fromEmail);
   const domain = msg.fromEmail.split("@").pop()?.toLowerCase() ?? "";
   const { data: learned } = await admin
@@ -109,6 +124,9 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
   const triage = triageMessage(msg, {
     knownProviderSender: Boolean(providerId),
     learnedDeliverySender: learned?.kind === "delivery",
+    // Force = the user clicked "File it anyway" on a held row — their explicit
+    // review IS the verification the auth gate was buying.
+    senderVerified: opts?.force ? true : msg.auth.verified,
   });
 
   // Idempotency: gmail_message_id is UNIQUE — if the row already exists this
@@ -126,6 +144,7 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
       status: "pending",
       provider_id: providerId,
       needs_user_reason: triage.classification === "needs_user" || triage.classification === "safesend" ? triage.reason : null,
+      auth_results: msg.auth,
     })
     .select("id")
     .single();
@@ -137,6 +156,18 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
 
   switch (triage.classification) {
     case "attachment": {
+      if (!opts?.force) {
+        const capReason = await dailyCapExceeded(admin, orgId, msg.fromEmail);
+        if (capReason) {
+          await admin
+            .from("inbound_deliveries")
+            .update({ status: "needs_user", needs_user_reason: capReason, updated_at: new Date().toISOString() })
+            .eq("id", deliveryId);
+          result.needsUser += 1;
+          await notifyCapDigestOnce(admin, orgId);
+          break;
+        }
+      }
       const { batchId, documentIds } = await ingestAttachments(admin, orgId, msg, triage.ingestableAttachments);
       await admin
         .from("inbound_deliveries")
@@ -208,9 +239,10 @@ export async function reprocessInboundMessage(
   admin: Admin,
   orgId: string,
   msg: InboundMessage,
+  opts?: { force?: boolean },
 ): Promise<{ deliveryId: string | null; status: string }> {
   const result: InboundRunResult = { scanned: 1, ingested: 0, needsUser: 0, ignored: 0, failed: 0 };
-  await handleMessage(admin, orgId, msg, result);
+  await handleMessage(admin, orgId, msg, result, opts);
   const { data } = await admin
     .from("inbound_deliveries")
     .select("id, status")
@@ -221,6 +253,74 @@ export async function reprocessInboundMessage(
     deliveryId: (data?.id as string) ?? null,
     status: (data?.status as string) ?? "pending",
   };
+}
+
+// ── Flood guard (daily auto-ingest caps + one digest notice per day) ────────
+
+/** Non-null = hold this attachment message; the string is the held reason
+ *  (a full sentence — copy.ts passes those through verbatim). */
+async function dailyCapExceeded(admin: Admin, orgId: string, sender: string): Promise<string | null> {
+  const dayStart = new Date();
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const base = () =>
+    admin
+      .from("inbound_deliveries")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", orgId)
+      .eq("status", "ingested")
+      .gte("received_at", dayStart.toISOString());
+  const [{ count: global }, { count: bySender }] = await Promise.all([
+    base(),
+    base().eq("sender", sender),
+  ]);
+  if ((bySender ?? 0) >= SENDER_DAILY_INGEST_CAP) {
+    return `unusually many emails from this sender today — held for your review, nothing was lost`;
+  }
+  if ((global ?? 0) >= DAILY_INGEST_CAP) {
+    return `unusually high email volume today — held for your review, nothing was lost`;
+  }
+  return null;
+}
+
+/** One cap notice per day (chat + email), no matter how many messages are
+ *  held — a flood of mail must not become a flood of notifications. */
+async function notifyCapDigestOnce(admin: Admin, orgId: string) {
+  const today = new Date().toISOString().slice(0, 10);
+  // Atomic claim: only the run that flips last_cap_notice_on sends the notice.
+  const { data: claimed } = await admin
+    .from("inbound_mail_state")
+    .update({ last_cap_notice_on: today, updated_at: new Date().toISOString() })
+    .eq("organization_id", orgId)
+    .or(`last_cap_notice_on.is.null,last_cap_notice_on.neq.${today}`)
+    .select("organization_id");
+  if (!claimed || claimed.length === 0) return;
+
+  try {
+    const session = await resolveInboundSession(admin, orgId);
+    if (session) {
+      await admin.from("chat_messages").insert({
+        session_id: session,
+        role: "assistant",
+        content:
+          `Rhodes' mailbox got more document email today than usual, so I've paused auto-filing ` +
+          `the overflow. Everything is safe and listed in Settings → Mailbox — review the held ` +
+          `items there and tap "File it anyway" on the ones you want processed.`,
+        metadata: { type: "inbound_cap_digest" },
+      });
+      await admin.from("chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session);
+    }
+  } catch (err) {
+    console.error("[INBOUND] cap digest chat notify failed:", err);
+  }
+  try {
+    const { inboundCapDigestEmail } = await import("@/lib/email-templates");
+    const { subject, html } = inboundCapDigestEmail();
+    for (const to of await adminEmails(admin)) {
+      await sendEmail({ to, subject, html });
+    }
+  } catch (err) {
+    console.error("[INBOUND] cap digest email failed:", err);
+  }
 }
 
 // ── Attachment ingestion (the ONE pipeline; drained by cron/process-queue) ──
@@ -475,6 +575,8 @@ export async function runSafesendAttempt(
         id: "", threadId: "", internalDate: Date.now(),
         from: delivery.sender, fromEmail: delivery.sender,
         subject: delivery.subject ?? "", snippet: "", bodyText: "", links: [], attachments: [],
+        // Synthesized for notification copy only — never triaged.
+        auth: { spf: null, dkim: null, dmarc: null, verified: true },
       } as InboundMessage, result.reason, delivery.id);
     }
   } catch (err) {

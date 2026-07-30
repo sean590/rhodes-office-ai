@@ -80,6 +80,17 @@ export type InboundAttachment = {
   size: number;
 };
 
+/** SPF/DKIM/DMARC verdicts from Gmail's own Authentication-Results header —
+ *  the mailbox front door is unauthenticated, so this is the ONLY sender-
+ *  identity signal we have before auto-ingesting an attachment. */
+export type InboundAuth = {
+  spf: string | null;
+  dkim: string | null;
+  dmarc: string | null;
+  /** dmarc=pass, or spf+dkim both pass. Unverified mail never auto-ingests. */
+  verified: boolean;
+};
+
 export type InboundMessage = {
   id: string;
   threadId: string;
@@ -91,6 +102,7 @@ export type InboundMessage = {
   bodyText: string; // decoded text/plain + text/html (tags stripped), truncated
   links: string[]; // http(s) links found in the body
   attachments: InboundAttachment[];
+  auth: InboundAuth;
 };
 
 // ── Parsing helpers ──────────────────────────────────────────────────
@@ -106,6 +118,28 @@ function header(msg: GmailMessageRaw, name: string): string {
 function parseAddress(from: string): string {
   const m = from.match(/<([^>]+)>/);
   return (m ? m[1] : from).trim().toLowerCase();
+}
+
+/**
+ * Parse Gmail's Authentication-Results header into SPF/DKIM/DMARC verdicts.
+ * Gmail's own MX prepends its header, and header() returns the topmost match,
+ * so we read Gmail's evaluation — not one a relay (or attacker) added below.
+ * Missing header or no passes → unverified: fail CLOSED, the worker holds
+ * unverified attachments for review instead of auto-filing them.
+ */
+function parseAuthResults(msg: GmailMessageRaw): InboundAuth {
+  const raw = header(msg, "Authentication-Results") || header(msg, "ARC-Authentication-Results");
+  const verdict = (mech: string): string | null =>
+    raw.match(new RegExp(`\\b${mech}=([a-z]+)`, "i"))?.[1]?.toLowerCase() ?? null;
+  const spf = verdict("spf");
+  const dkim = verdict("dkim");
+  const dmarc = verdict("dmarc");
+  return {
+    spf,
+    dkim,
+    dmarc,
+    verified: dmarc === "pass" || (spf === "pass" && dkim === "pass"),
+  };
 }
 
 function walkParts(part: GmailPart | undefined, out: { text: string[]; atts: InboundAttachment[] }) {
@@ -141,6 +175,7 @@ function toInbound(msg: GmailMessageRaw): InboundMessage {
     bodyText,
     links,
     attachments: out.atts,
+    auth: parseAuthResults(msg),
   };
 }
 

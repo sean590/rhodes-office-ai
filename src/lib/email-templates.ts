@@ -232,3 +232,24 @@ export function inboundNeedsYouEmail({
   `);
   return { subject: emailSubject, html };
 }
+
+/** Flood-guard digest — sent at most once per day, however many messages were
+ *  held. Deliberately count-free: the count keeps moving while mail arrives;
+ *  the mailbox page is the live truth. */
+export function inboundCapDigestEmail() {
+  const subject = "Rhodes held some of today's email for your review";
+  const html = layout(`
+    <h2 style="margin:0 0 8px;font-size:18px">More email than usual today</h2>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      Rhodes' mailbox received more document email today than it normally sees, so
+      auto-filing is paused for the overflow. Nothing was lost &mdash; the held
+      messages are listed in Settings &rarr; Mailbox, where you can review each one
+      and file the ones you want.
+    </p>
+    <a href="${process.env.NEXT_PUBLIC_APP_URL || "https://app.rhodesoffice.ai"}/settings/mailbox"
+       style="display:inline-block;background:${BRAND.green};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">
+      Review held email
+    </a>
+  `);
+  return { subject, html };
+}
