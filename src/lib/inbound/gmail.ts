@@ -121,14 +121,13 @@ function parseAddress(from: string): string {
 }
 
 /**
- * Parse Gmail's Authentication-Results header into SPF/DKIM/DMARC verdicts.
- * Gmail's own MX prepends its header, and header() returns the topmost match,
- * so we read Gmail's evaluation — not one a relay (or attacker) added below.
- * Missing header or no passes → unverified: fail CLOSED, the worker holds
- * unverified attachments for review instead of auto-filing them.
+ * Evaluate an Authentication-Results header value into SPF/DKIM/DMARC verdicts.
+ * Pure + exported for testing. Missing/blank → all null → unverified: we fail
+ * CLOSED, so the worker holds unverified attachments for review instead of
+ * auto-filing them. `verified` = DMARC pass (which implies From-domain
+ * alignment) OR both SPF and DKIM pass.
  */
-function parseAuthResults(msg: GmailMessageRaw): InboundAuth {
-  const raw = header(msg, "Authentication-Results") || header(msg, "ARC-Authentication-Results");
+export function evaluateAuthResults(raw: string): InboundAuth {
   const verdict = (mech: string): string | null =>
     raw.match(new RegExp(`\\b${mech}=([a-z]+)`, "i"))?.[1]?.toLowerCase() ?? null;
   const spf = verdict("spf");
@@ -140,6 +139,17 @@ function parseAuthResults(msg: GmailMessageRaw): InboundAuth {
     dmarc,
     verified: dmarc === "pass" || (spf === "pass" && dkim === "pass"),
   };
+}
+
+/**
+ * Read the message's Authentication-Results. Gmail's own MX prepends its
+ * header, and header() returns the topmost match, so we read Gmail's
+ * evaluation — not one a relay (or attacker) added below it.
+ */
+function parseAuthResults(msg: GmailMessageRaw): InboundAuth {
+  return evaluateAuthResults(
+    header(msg, "Authentication-Results") || header(msg, "ARC-Authentication-Results"),
+  );
 }
 
 function walkParts(part: GmailPart | undefined, out: { text: string[]; atts: InboundAttachment[] }) {
