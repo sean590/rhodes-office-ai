@@ -81,6 +81,9 @@ export async function processInboundMail(): Promise<InboundRunResult> {
     }
   }
 
+  await retryFailedDeliveries(admin, orgId, result);
+  await purgeIgnoredMetadata(admin, orgId);
+
   await admin.from("inbound_mail_state").upsert({
     organization_id: orgId,
     last_internal_date: maxSeen,
@@ -96,7 +99,17 @@ export async function processInboundMail(): Promise<InboundRunResult> {
 
 async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, result: InboundRunResult) {
   const providerId = await inferProviderFromSender(admin, orgId, msg.fromEmail);
-  const triage = triageMessage(msg, { knownProviderSender: Boolean(providerId) });
+  const domain = msg.fromEmail.split("@").pop()?.toLowerCase() ?? "";
+  const { data: learned } = await admin
+    .from("inbound_delivery_senders")
+    .select("kind")
+    .eq("organization_id", orgId)
+    .eq("domain", domain)
+    .maybeSingle();
+  const triage = triageMessage(msg, {
+    knownProviderSender: Boolean(providerId),
+    learnedDeliverySender: learned?.kind === "delivery",
+  });
 
   // Idempotency: gmail_message_id is UNIQUE — if the row already exists this
   // message was handled by a previous run (or is mid-flight); skip it.
@@ -130,6 +143,8 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
         .update({ status: "ingested", batch_id: batchId, document_ids: documentIds, updated_at: new Date().toISOString() })
         .eq("id", deliveryId);
       result.ingested += 1;
+      await recordInboundOutcome(admin, orgId, "inbound_filed", deliveryId, { sender: msg.fromEmail, files: documentIds.length });
+      await autoResolveOpenNudges(admin, orgId, providerId, msg.fromEmail, deliveryId);
       break;
     }
     case "safesend": {
@@ -137,7 +152,7 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
       // safesend rows up (too slow to run inline in the poll).
       await admin
         .from("inbound_deliveries")
-        .update({ safesend_link: triage.safesendLink, updated_at: new Date().toISOString() })
+        .update({ safesend_link: triage.safesendLink, safesend_links: triage.safesendLinks, updated_at: new Date().toISOString() })
         .eq("id", deliveryId);
       result.needsUser += 0;
       break;
@@ -157,7 +172,7 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
       if (codeMatch) {
         const { data: waiting } = await admin
           .from("inbound_deliveries")
-          .select("id, organization_id, sender, subject, safesend_link, attempts")
+          .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
           .eq("organization_id", orgId)
           .eq("status", "waiting_code")
           .not("safesend_link", "is", null)
@@ -181,6 +196,31 @@ async function handleMessage(admin: Admin, orgId: string, msg: InboundMessage, r
       result.ignored += 1;
     }
   }
+}
+
+/**
+ * Teach action (spec §3c "This is a delivery"): re-run full triage/dispatch on
+ * a single message after the caller has upserted the learned delivery-sender
+ * (and deleted the old ignored row — gmail_message_id is UNIQUE, so the stale
+ * row must be gone before re-handling). Returns the fresh row's disposition.
+ */
+export async function reprocessInboundMessage(
+  admin: Admin,
+  orgId: string,
+  msg: InboundMessage,
+): Promise<{ deliveryId: string | null; status: string }> {
+  const result: InboundRunResult = { scanned: 1, ingested: 0, needsUser: 0, ignored: 0, failed: 0 };
+  await handleMessage(admin, orgId, msg, result);
+  const { data } = await admin
+    .from("inbound_deliveries")
+    .select("id, status")
+    .eq("organization_id", orgId)
+    .eq("gmail_message_id", msg.id)
+    .maybeSingle();
+  return {
+    deliveryId: (data?.id as string) ?? null,
+    status: (data?.status as string) ?? "pending",
+  };
 }
 
 // ── Attachment ingestion (the ONE pipeline; drained by cron/process-queue) ──
@@ -402,6 +442,9 @@ export async function runSafesendAttempt(
         .from("inbound_deliveries")
         .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
+      const { data: drow } = await admin.from("inbound_deliveries").select("provider_id").eq("id", delivery.id).maybeSingle();
+      await recordInboundOutcome(admin, orgId, "inbound_retrieved", delivery.id, { sender: delivery.sender, files: result.files });
+      await autoResolveOpenNudges(admin, orgId, (drow?.provider_id as string) ?? null, delivery.sender, delivery.id);
     } else if (result.outcome === "waiting_code") {
       await admin
         .from("inbound_deliveries")
@@ -450,7 +493,7 @@ export async function processPendingSafesend(): Promise<{ ran: boolean; delivery
   const admin = createAdminClient();
   const { data: pending } = await admin
     .from("inbound_deliveries")
-    .select("id, organization_id, sender, subject, safesend_link, attempts")
+    .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
     .eq("organization_id", orgId)
     .eq("classification", "safesend")
     .eq("status", "pending")
@@ -461,4 +504,114 @@ export async function processPendingSafesend(): Promise<{ ran: boolean; delivery
   if (!pending) return { ran: false };
   await runSafesendAttempt(admin, orgId, pending as never);
   return { ran: true, delivery_id: pending.id as string };
+}
+
+// ── Increment 3: outcome audit, auto-resolve, purge, failed retry ────
+
+/** Done-lane entry (audit log; humanized by activity-humanizer). */
+async function recordInboundOutcome(
+  admin: Admin,
+  orgId: string,
+  action: "inbound_filed" | "inbound_retrieved" | "inbound_auto_resolved",
+  deliveryId: string,
+  metadata: Record<string, unknown>,
+) {
+  try {
+    const { logAuditEvent } = await import("@/lib/utils/audit");
+    await logAuditEvent({
+      userId: await orgOwnerId(admin, orgId),
+      action,
+      resourceType: "inbound_delivery",
+      resourceId: deliveryId,
+      metadata: { ...metadata, actor: "rhodes" },
+      organizationId: orgId,
+    });
+  } catch (err) {
+    console.error("[INBOUND] audit record failed:", err);
+  }
+}
+
+/**
+ * Auto-resolve (spec §1a): a document arriving from a provider/sender clears
+ * that provider's open nudges — resolution is the document arriving, never a
+ * click. Matches by provider when known, else sender domain, 30-day window.
+ */
+export async function autoResolveOpenNudges(
+  admin: Admin,
+  orgId: string,
+  providerId: string | null,
+  senderEmail: string,
+  causeDeliveryId: string,
+) {
+  try {
+    const domain = senderEmail.split("@").pop()?.toLowerCase() ?? "";
+    const q = admin
+      .from("inbound_deliveries")
+      .select("id, sender, provider_id")
+      .eq("organization_id", orgId)
+      .in("status", ["needs_user", "acknowledged", "waiting_code"])
+      .neq("id", causeDeliveryId)
+      .gte("received_at", new Date(Date.now() - 30 * 24 * 3600_000).toISOString());
+    const { data: open } = await q;
+    const matches = (open ?? []).filter((r) =>
+      providerId && r.provider_id ? r.provider_id === providerId : (r.sender ?? "").toLowerCase().endsWith("@" + domain),
+    );
+    for (const m of matches) {
+      await admin
+        .from("inbound_deliveries")
+        .update({ status: "resolved", updated_at: new Date().toISOString() })
+        .eq("id", m.id);
+      await recordInboundOutcome(admin, orgId, "inbound_auto_resolved", m.id as string, { resolved_by_delivery: causeDeliveryId });
+    }
+  } catch (err) {
+    console.error("[INBOUND] auto-resolve failed:", err);
+  }
+}
+
+/** 30-day skipped-mail purge (spec §3d): ignored rows shrink to the dedup stub. */
+export async function purgeIgnoredMetadata(admin: Admin, orgId: string) {
+  try {
+    await admin
+      .from("inbound_deliveries")
+      .update({ sender: null, subject: null, needs_user_reason: null, error: null })
+      .eq("organization_id", orgId)
+      .eq("status", "ignored")
+      .not("sender", "is", null)
+      .lt("received_at", new Date(Date.now() - 30 * 24 * 3600_000).toISOString());
+  } catch (err) {
+    console.error("[INBOUND] ignored purge failed:", err);
+  }
+}
+
+/** One automatic retry for failed rows (field finding: failures were terminal). */
+export async function retryFailedDeliveries(admin: Admin, orgId: string, result: InboundRunResult) {
+  const { data: failed } = await admin
+    .from("inbound_deliveries")
+    .select("id, gmail_message_id, attempts")
+    .eq("organization_id", orgId)
+    .eq("status", "failed")
+    .eq("attempts", 0)
+    .gte("received_at", new Date(Date.now() - 7 * 24 * 3600_000).toISOString())
+    .limit(3);
+  for (const row of failed ?? []) {
+    const { getMessage } = await import("./gmail");
+    const msg = await getMessage(row.gmail_message_id as string);
+    await admin
+      .from("inbound_deliveries")
+      .update({ attempts: 1, updated_at: new Date().toISOString() })
+      .eq("id", row.id);
+    if (!msg) continue;
+    try {
+      // Fresh dispatch against the SAME row: delete + re-handle (the unique
+      // gmail_message_id makes re-insertion clean).
+      await admin.from("inbound_deliveries").delete().eq("id", row.id);
+      await handleMessage(admin, orgId, msg, result);
+      await admin
+        .from("inbound_deliveries")
+        .update({ attempts: 1, updated_at: new Date().toISOString() })
+        .eq("gmail_message_id", row.gmail_message_id);
+    } catch (err) {
+      console.error("[INBOUND] retry failed:", err);
+    }
+  }
 }

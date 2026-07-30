@@ -172,6 +172,15 @@ export async function listNewMessages(sinceInternalDate: number, max = 25): Prom
     .sort((a, b) => a.internalDate - b.internalDate);
 }
 
+/** Fetch a single message by id (failed-row retry + the teach action). */
+export async function getMessage(id: string): Promise<InboundMessage | null> {
+  try {
+    return toInbound(await api<GmailMessageRaw>(`/messages/${id}?format=full`));
+  } catch {
+    return null;
+  }
+}
+
 /** Download one attachment's bytes. */
 export async function getAttachment(messageId: string, attachmentId: string): Promise<Buffer> {
   const data = await api<{ data: string }>(`/messages/${messageId}/attachments/${attachmentId}`);

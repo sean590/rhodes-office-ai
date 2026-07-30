@@ -78,8 +78,13 @@ function makeCtx(orgId: string): ToolContext {
 
 const VALID_UUID = "11111111-1111-4111-8111-111111111111";
 
-// Tools that create new rows (no existing resource id to ownership-check):
-const CREATE_TOOLS = new Set(["create_entity", "create_directory_entry", "create_investment", "create_service_provider"]);
+// Tools that create new rows (no existing resource id to ownership-check).
+// The provider-suggestion pair is keyed by sender DOMAIN, not a resource id —
+// the rows they write are implicitly scoped to ctx.orgId in the handler.
+const CREATE_TOOLS = new Set([
+  "create_entity", "create_directory_entry", "create_investment", "create_service_provider",
+  "accept_provider_suggestion", "dismiss_provider_suggestion",
+]);
 
 // Build a minimal valid input for each tool's schema so Zod parse passes.
 // Fields like entity_id, investment_id, etc. use VALID_UUID (wrong org → ownership fail).
@@ -88,6 +93,8 @@ const CREATE_TOOLS = new Set(["create_entity", "create_directory_entry", "create
 // for any tool whose minimal input isn't trivially "{each uuid key → VALID_UUID}".
 const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
   resolve_inbound_delivery: { delivery_id: "11111111-1111-4111-8111-111111111111", action: "dismissed" },
+  accept_provider_suggestion: { domain: "example-firm.com", name: "Example Firm" },
+  dismiss_provider_suggestion: { domain: "example-firm.com" },
   remove_entity_member: {
     entity_id: VALID_UUID,
     investor_name: "test",

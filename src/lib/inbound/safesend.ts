@@ -37,6 +37,7 @@ export type SafesendDelivery = {
   sender: string;
   subject: string | null;
   safesend_link: string;
+  safesend_links?: string[] | null;
   attempts: number;
 };
 
@@ -85,6 +86,7 @@ export async function retrieveSafesend(
       args: ["driver.mjs"],
       cwd: "/vercel/sandbox",
       env: {
+        SS_LINKS: (delivery.safesend_links?.length ? delivery.safesend_links : [delivery.safesend_link]).join(","),
         SS_LINK: delivery.safesend_link,
         SS_RECIPIENT: recipient,
         SS_OTP_WAIT_MS: String(OTP_WAIT_MS),

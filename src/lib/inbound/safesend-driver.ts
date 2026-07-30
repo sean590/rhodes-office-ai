@@ -19,7 +19,7 @@ import { chromium } from "playwright-core";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 
-const LINK = process.env.SS_LINK;
+const LINKS = (process.env.SS_LINKS || process.env.SS_LINK || "").split(",").map((l) => l.trim()).filter(Boolean);
 const RECIPIENT = process.env.SS_RECIPIENT;
 const OTP_FILE = "/vercel/sandbox/otp.txt";
 const OUT_DIR = "/vercel/sandbox/downloads";
@@ -33,29 +33,37 @@ const ctx = await browser.newContext({ acceptDownloads: true });
 const page = await ctx.newPage();
 
 try {
-  await page.goto(LINK, { waitUntil: "domcontentloaded", timeout: 45000 });
-  await page.waitForTimeout(2500);
-  const body = (await page.textContent("body").catch(() => "")) || "";
-  if (/locked/i.test(body) && /minutes/i.test(body)) { status("LOCKED"); process.exit(0); }
-  if (/expired|no longer available/i.test(body)) { status("EXPIRED"); process.exit(0); }
-
-  // Verify step: enter the ORIGINAL RECIPIENT's email (SafeSend validates it).
-  const emailBox = page.getByPlaceholder(/email/i).or(page.locator('input[type="email"]')).first();
-  await emailBox.fill(RECIPIENT, { timeout: 15000 });
-  await page.getByRole("button", { name: /verify/i }).first().click({ timeout: 10000 });
-  // Verify is only "sent" if the wizard ADVANCES to the code step. A wrong /
-  // unrecognized recipient shows an error and never sends a code — declaring
-  // VERIFY_SENT optimistically would leave the flow waiting for a code that
-  // isn't coming.
+  // Multi-link threads: try each candidate link until one verifies (a thread
+  // can hold several SendLinkRedirect URLs — some expired/locked/for another
+  // recipient). Cap at 3 candidates.
   let advanced = false;
-  const verifyDeadline = Date.now() + 15000;
-  while (Date.now() < verifyDeadline) {
-    if ((await page.locator('input[maxlength="1"]').count()) >= 4) { advanced = true; break; }
-    const bodyNow = (await page.textContent("body").catch(() => "")) || "";
-    if (/(does not match|not associated|unable to verify|invalid email|no record|not the intended)/i.test(bodyNow)) break;
-    await page.waitForTimeout(1500);
+  let lastBlock = "no-links";
+  for (const link of LINKS.slice(0, 3)) {
+    await page.goto(link, { waitUntil: "domcontentloaded", timeout: 45000 });
+    await page.waitForTimeout(2500);
+    const body = (await page.textContent("body").catch(() => "")) || "";
+    if (/locked/i.test(body) && /minutes/i.test(body)) { lastBlock = "LOCKED"; continue; }
+    if (/expired|no longer available/i.test(body)) { lastBlock = "EXPIRED"; continue; }
+
+    // Verify step: enter the ORIGINAL RECIPIENT's email (SafeSend validates it).
+    try {
+      const emailBox = page.getByPlaceholder(/email/i).or(page.locator('input[type="email"]')).first();
+      await emailBox.fill(RECIPIENT, { timeout: 15000 });
+      await page.getByRole("button", { name: /verify/i }).first().click({ timeout: 10000 });
+    } catch { lastBlock = "FAILED wizard-shape"; continue; }
+    // Only "sent" if the wizard ADVANCES to the code step — a rejected
+    // recipient shows an error and never sends a code.
+    const verifyDeadline = Date.now() + 15000;
+    while (Date.now() < verifyDeadline) {
+      if ((await page.locator('input[maxlength="1"]').count()) >= 4) { advanced = true; break; }
+      const bodyNow = (await page.textContent("body").catch(() => "")) || "";
+      if (/(does not match|not associated|unable to verify|invalid email|no record|not the intended)/i.test(bodyNow)) { lastBlock = "FAILED wrong-address"; break; }
+      await page.waitForTimeout(1500);
+    }
+    if (advanced) break;
+    if (lastBlock !== "FAILED wrong-address") lastBlock = "FAILED verify-no-advance";
   }
-  if (!advanced) { status("FAILED wrong-address"); process.exit(0); }
+  if (!advanced) { status(lastBlock.startsWith("FAILED") || lastBlock === "LOCKED" || lastBlock === "EXPIRED" ? lastBlock : "FAILED " + lastBlock); process.exit(0); }
   status("VERIFY_SENT");
 
   // The access code: orchestrator reads the mailbox and writes otp.txt.
