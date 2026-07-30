@@ -21,7 +21,13 @@ cd "$(dirname "$0")/.."
 # 72 (was 71): + lib/inbound/worker — the mailbox cron worker (system job, no
 # user context; auth.admin.listUsers for admin emails, storage upload, chat
 # session/message inserts — the exempt system-job category).
-BASELINE=72
+# 74 (was 72): + lib/inbound/safesend (SafeSend retrieval orchestrator — runs
+# in the retrieve cron/sandbox with no user context: storage upload + queue
+# inserts, the exempt system-job category) and + api/inbound/[id]/reprocess
+# (the teach / "File it anyway" correction control — writes inbound_delivery_
+# senders, which has only a SELECT policy for authenticated, so the raw client
+# is required; also deletes+re-dispatches the delivery row).
+BASELINE=74
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
