@@ -18,6 +18,10 @@ export function needsUserReasonSentence(reason: string | null): string {
       return "Looks like a document is waiting behind a link — asked you to forward it.";
     case "SafeSend download link":
       return "A secure link Rhodes can't fetch yet — asked you to forward it.";
+    case "sender failed authentication":
+      return "The sender's address couldn't be verified (possible spoofing) — held for your review.";
+    case "secure link on an unrecognized host":
+      return "A download link on a site Rhodes doesn't recognize — held rather than followed.";
     default:
       // Retrieval failures arrive as full sentences (locked link, expired,
       // wrong recipient, attempts exhausted) — show them, don't flatten them.

@@ -14,6 +14,7 @@ function msg(overrides: Partial<InboundMessage>): InboundMessage {
     bodyText: "",
     links: [],
     attachments: [],
+    auth: { spf: "pass", dkim: "pass", dmarc: "pass", verified: true },
     ...overrides,
   };
 }
@@ -150,5 +151,57 @@ describe("triageMessage", () => {
       { knownProviderSender: true },
     );
     expect(r.classification).toBe("attachment");
+  });
+
+  // ── Hardening: host allowlist + sender-auth gate ─────────────────────
+
+  it("SendLinkRedirect on a NON-SafeSend host is never visited — held as needs_user", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@evil.example", links: ["https://evil.example/SendLinkRedirect/abc123"] }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).toBe("needs_user");
+    expect(r.reason).toBe("secure link on an unrecognized host");
+    expect(r.safesendLink).toBeNull();
+    expect(r.safesendLinks).toHaveLength(0);
+  });
+
+  it("lookalike host (safesendreturns.com.evil.example) fails the allowlist", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@safesendreturns.com", links: ["https://safesendreturns.com.evil.example/SendLinkRedirect/x"] }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).not.toBe("safesend");
+  });
+
+  it("unverified sender's attachment is HELD, not filed (forged-document gate)", () => {
+    const r = triageMessage(
+      msg({
+        attachments: [att("capital-call.pdf", "application/pdf")],
+        auth: { spf: "fail", dkim: "fail", dmarc: "fail", verified: false },
+      }),
+      { knownProviderSender: true, senderVerified: false },
+    );
+    expect(r.classification).toBe("needs_user");
+    expect(r.reason).toBe("sender failed authentication");
+    expect(r.ingestableAttachments).toHaveLength(0);
+  });
+
+  it("unverified sender with a real SafeSend link is held too (real SafeSend passes DMARC)", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@safesendreturns.com", links: ["https://www.safesendreturns.com/SendLinkRedirect/abc"] }),
+      { knownProviderSender: false, senderVerified: false },
+    );
+    expect(r.classification).toBe("needs_user");
+    expect(r.reason).toBe("sender failed authentication");
+    expect(r.safesendLink).toBeNull();
+  });
+
+  it("unverified newsletter still just gets ignored (the gate only guards ingestion)", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "news@substack.com", bodyText: "Top stories. Unsubscribe anytime." }),
+      { knownProviderSender: false, senderVerified: false },
+    );
+    expect(r.classification).toBe("ignored");
   });
 });

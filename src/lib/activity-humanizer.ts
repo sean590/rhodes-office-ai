@@ -140,6 +140,9 @@ function describe(action: string, rt: string, m: Meta): Described {
     if (a === "inbound_taught") {
       return { lead: sender ? `Marked ${sender}'s email as a delivery — sender learned` : "Marked a skipped email as a delivery — sender learned", detail: null };
     }
+    if (a === "inbound_force_filed") {
+      return { lead: sender ? `Filed a held email from ${sender} after review` : "Filed a held email after review", detail: null };
+    }
     if (a === "inbound_dismissed") return { lead: "Dismissed an inbound email reminder", detail: null };
     if (a === "inbound_resolved") return { lead: "Marked an inbound email handled", detail: null };
     if (a === "inbound_acknowledged") return { lead: "Marked an inbound email as forwarded", detail: null };

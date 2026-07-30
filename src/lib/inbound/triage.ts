@@ -46,6 +46,20 @@ const SAFESEND_HOST = /safesend(returns)?\.com/i;
 const SAFESEND_DOWNLOAD = /SendLinkRedirect/i;
 const SAFESEND_UPLOAD = /\/DropOff\//i;
 
+// The sandbox will VISIT whatever we classify as safesend, so the parsed
+// hostname must be a real SafeSend domain — a path/query merely containing
+// "SendLinkRedirect" is attacker-craftable (evil.com/SendLinkRedirect/x).
+// Near-misses aren't dropped: they fall through to needs_user, and the
+// ledger tells us which legit variants (white-labels) to allowlist later.
+const SAFESEND_ALLOWED_HOST = /(^|\.)safesend(returns)?\.com$/i;
+function isSafesendHost(link: string): boolean {
+  try {
+    return SAFESEND_ALLOWED_HOST.test(new URL(link).hostname);
+  } catch {
+    return false;
+  }
+}
+
 // Known secure-delivery / portal notification senders (spike pattern catalog).
 // These are deliveries Rhodes cannot fetch in v1 → needs_user.
 const PORTAL_SENDER = [
@@ -77,8 +91,13 @@ export function triageMessage(
     knownProviderSender: boolean;
     /** The "This is a delivery" teach action learned this sender. */
     learnedDeliverySender?: boolean;
+    /** SPF/DKIM/DMARC verdict from gmail.ts. Defaults to true so the force-
+     *  ingest release path (and synthesized messages) can bypass the gate;
+     *  the poll worker ALWAYS passes the real verdict. */
+    senderVerified?: boolean;
   },
 ): TriageResult {
+  const senderVerified = opts.senderVerified !== false;
   const ingestable = msg.attachments.filter(
     (a) =>
       INGESTABLE_MIME.has(a.mimeType) &&
@@ -89,6 +108,18 @@ export function triageMessage(
   );
 
   if (ingestable.length > 0) {
+    // Spoofed-sender gate: an attachment from a sender that fails email
+    // authentication is exactly the forged-capital-call attack — hold it for
+    // human review instead of filing it alongside legitimate documents.
+    if (!senderVerified) {
+      return {
+        classification: "needs_user",
+        reason: "sender failed authentication",
+        ingestableAttachments: [],
+        safesendLink: null,
+        safesendLinks: [],
+      };
+    }
     return {
       classification: "attachment",
       reason: `${ingestable.length} ingestable attachment(s)`,
@@ -99,15 +130,41 @@ export function triageMessage(
   }
 
   const safesendLinks = msg.links.filter(
-    (l) => !SAFESEND_UPLOAD.test(l) && (SAFESEND_DOWNLOAD.test(l) || (SAFESEND_HOST.test(msg.fromEmail) && SAFESEND_HOST.test(l))),
+    (l) =>
+      !SAFESEND_UPLOAD.test(l) &&
+      isSafesendHost(l) &&
+      (SAFESEND_DOWNLOAD.test(l) || SAFESEND_HOST.test(msg.fromEmail)),
   );
-  if (safesendLinks.length > 0) {
+  if (safesendLinks.length > 0 && senderVerified) {
     return {
       classification: "safesend",
       reason: "SafeSend download link",
       ingestableAttachments: [],
       safesendLink: safesendLinks[0],
       safesendLinks,
+    };
+  }
+  if (safesendLinks.length > 0) {
+    // Real SafeSend host but unauthenticated sender — genuine SafeSend mail
+    // always passes DMARC, so treat the mismatch as suspicious, not fetchable.
+    return {
+      classification: "needs_user",
+      reason: "sender failed authentication",
+      ingestableAttachments: [],
+      safesendLink: null,
+      safesendLinks: [],
+    };
+  }
+
+  // SendLinkRedirect-shaped link on a host we don't recognize: never visit it,
+  // but never silently drop it either — could be a white-labeled SafeSend.
+  if (msg.links.some((l) => SAFESEND_DOWNLOAD.test(l) && !isSafesendHost(l))) {
+    return {
+      classification: "needs_user",
+      reason: "secure link on an unrecognized host",
+      ingestableAttachments: [],
+      safesendLink: null,
+      safesendLinks: [],
     };
   }
 
