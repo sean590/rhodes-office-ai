@@ -458,7 +458,7 @@ export async function* runOrchestratorStreaming(
   // Cost telemetry: accumulate token usage across iterations (chat runs on
   // Opus — ~5x Sonnet — so this is a material cost center to measure).
   const usageTotals = emptyUsage();
-  const model = input.model ?? "claude-opus-4-6";
+  const model = input.model ?? "claude-opus-5";
   const addUsage = (raw: unknown) => {
     const u = (raw ?? {}) as {
       input_tokens?: number; output_tokens?: number;
@@ -486,11 +486,12 @@ export async function* runOrchestratorStreaming(
     model,
     // 4096 was tight for tool-heavy turns: a 15-action staging batch with
     // brief per-action narration regularly exceeded that budget, leaving the
-    // turn truncated mid-prose with zero staged actions. 16k gives the model
-    // comfortable headroom to narrate AND emit tool_use blocks in one
-    // iteration. Each iteration in the loop gets its own budget, so this
-    // doesn't compound across multi-iteration turns.
-    max_tokens: 16384,
+    // turn truncated mid-prose with zero staged actions. 16k gave comfortable
+    // headroom; doubled to 32k for Claude 5, where adaptive thinking is on by
+    // default and thinking tokens count against max_tokens. Each iteration in
+    // the loop gets its own budget, so this doesn't compound across
+    // multi-iteration turns — and it's a cap, not a spend.
+    max_tokens: 32768,
     // Prompt caching: mark cache_control on the system block so the system
     // prompt + tool schemas (which precede it in cache order: tools, then
     // system, then messages) are cached for the 5-minute TTL window. Org
