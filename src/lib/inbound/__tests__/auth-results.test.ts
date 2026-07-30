@@ -23,11 +23,33 @@ describe("evaluateAuthResults", () => {
     expect(r.verified).toBe(false);
   });
 
-  it("spf pass + dkim fail + no dmarc token → NOT verified (needs both, or dmarc)", () => {
+  it("spf pass + dkim fail + no dmarc → verified (SPF aligned, DMARC didn't fail)", () => {
+    // dkim can break in transit (forwarding); a passing SPF with no DMARC fail
+    // is enough to auto-file.
     const r = evaluateAuthResults(
       "mx.google.com; dkim=fail header.i=@example.com; spf=pass smtp.mailfrom=example.com",
     );
-    expect(r).toEqual({ spf: "pass", dkim: "fail", dmarc: null, verified: false });
+    expect(r).toEqual({ spf: "pass", dkim: "fail", dmarc: null, verified: true });
+  });
+
+  it("REAL forwarded-mail shape (spf=none, dkim=pass, no dmarc) → verified — the false-hold bug", () => {
+    // Exact Authentication-Results Gmail wrote for Sean's forwards: Workspace
+    // DKIM via a gappssmtp.com delegate, channels.com has no SPF/DMARC. Must
+    // file, or the "forward it to Rhodes" front door holds every forward.
+    const r = evaluateAuthResults(
+      "mx.google.com; dkim=pass header.i=@channels-com.20251104.gappssmtp.com header.s=20251104 header.b=SadtcIyp; " +
+        "arc=pass (i=1); spf=none (google.com: sean@channels.com does not designate permitted sender hosts) " +
+        "smtp.mailfrom=sean@channels.com",
+    );
+    expect(r).toEqual({ spf: "none", dkim: "pass", dmarc: null, verified: true });
+  });
+
+  it("dmarc=fail overrides a passing dkim → NOT verified (spoof of a DMARC domain)", () => {
+    const r = evaluateAuthResults(
+      "mx.google.com; dkim=pass header.i=@attacker.example; spf=pass smtp.mailfrom=attacker.example; " +
+        "dmarc=fail (p=REJECT) header.from=bigfirm.com",
+    );
+    expect(r.verified).toBe(false);
   });
 
   it("spf pass + dkim pass, dmarc absent → verified (both-pass path)", () => {
