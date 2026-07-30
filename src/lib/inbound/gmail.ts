@@ -122,10 +122,28 @@ function parseAddress(from: string): string {
 
 /**
  * Evaluate an Authentication-Results header value into SPF/DKIM/DMARC verdicts.
- * Pure + exported for testing. Missing/blank → all null → unverified: we fail
- * CLOSED, so the worker holds unverified attachments for review instead of
- * auto-filing them. `verified` = DMARC pass (which implies From-domain
- * alignment) OR both SPF and DKIM pass.
+ * Pure + exported for testing.
+ *
+ * `verified` (safe to auto-file) = DMARC did NOT fail AND at least one
+ * mechanism passed. Rationale, calibrated against real Gmail headers:
+ *  - dmarc=fail is the strongest spoof signal (the From domain publishes a
+ *    policy and this message flunked it) → always hold.
+ *  - Otherwise we need SOME positive authentication. This matters because
+ *    legit forwarded mail is weakly authenticated: a Google Workspace forward
+ *    shows dkim=pass (signed via a *.gappssmtp.com delegate) but spf=none and
+ *    no dmarc token — an earlier "require DMARC or SPF+DKIM" rule wrongly held
+ *    every one of Sean's forwards. A single pass (spf OR dkim OR dmarc) clears
+ *    it, so the forwarding front door works.
+ *  - Nothing passing (all none/absent, or an explicit fail with no pass) →
+ *    fail CLOSED, hold for review.
+ *
+ * Known limitation (v1): we don't verify that the passing mechanism ALIGNS
+ * with the From domain — an attacker who DKIM-signs with their own domain
+ * (dkim=pass, header.i=@attacker) while spoofing From gets through IF the
+ * spoofed domain publishes no DMARC. Domains that publish DMARC (all serious
+ * financial institutions) are protected because the spoof yields dmarc=fail.
+ * Alignment-aware verification is a future hardening; the human review gate on
+ * everything is the backstop.
  */
 export function evaluateAuthResults(raw: string): InboundAuth {
   const verdict = (mech: string): string | null =>
@@ -133,12 +151,8 @@ export function evaluateAuthResults(raw: string): InboundAuth {
   const spf = verdict("spf");
   const dkim = verdict("dkim");
   const dmarc = verdict("dmarc");
-  return {
-    spf,
-    dkim,
-    dmarc,
-    verified: dmarc === "pass" || (spf === "pass" && dkim === "pass"),
-  };
+  const anyPass = spf === "pass" || dkim === "pass" || dmarc === "pass";
+  return { spf, dkim, dmarc, verified: dmarc !== "fail" && anyPass };
 }
 
 /**
