@@ -15,6 +15,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useCan } from "@/components/authz/role-provider";
 import { SuggestedSends } from "@/components/entities/SuggestedSends";
+import { useEmailSources, EmailSourceChip } from "@/components/documents/EmailSourceChip";
 import type { DocumentType } from "@/lib/types/enums";
 import type { Document as DocRecord, DocumentCategory } from "@/lib/types/entities";
 
@@ -73,6 +74,8 @@ export default function DocumentsPage() {
   const [entities, setEntities] = useState<EntityBasic[]>([]);
   const [loading, setLoading] = useState(true);
   const [categoryFilter, setCategoryFilter] = useState("all");
+  // doc_id → email provenance (spec §2): chips on rows that arrived by email.
+  const emailSources = useEmailSources();
   const [searchQuery, setSearchQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(30);
 
@@ -539,6 +542,7 @@ export default function DocumentsPage() {
                           <SparkleIcon size={12} />
                         </span>
                       )}
+                      {emailSources.has(doc.id) && <EmailSourceChip source={emailSources.get(doc.id)!} />}
                     </div>
                     <span
                       style={{
@@ -832,6 +836,7 @@ export default function DocumentsPage() {
                           <SparkleIcon size={12} />
                         </span>
                       )}
+                      {emailSources.has(doc.id) && <EmailSourceChip source={emailSources.get(doc.id)!} />}
                     </div>
 
                     {/* Entity link, or fall back to investment if doc is

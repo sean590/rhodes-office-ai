@@ -38,6 +38,7 @@ import { investmentWriteTools } from "./tools/investments-write";
 import { documentWriteTools } from "./tools/documents-write";
 import { queueWriteTools } from "./tools/queue-write";
 import { serviceProviderWriteTools } from "./tools/service-providers-write";
+import { inboundTools, inboundWriteTools } from "./tools/inbound";
 import { PROVIDER_SENDING_ENABLED } from "@/lib/features";
 
 // Tools that exist only to create/manage/suggest outbound provider sends.
@@ -73,6 +74,8 @@ export function buildToolRegistry(): ToolDefinition[] {
     ...documentWriteTools,
     ...queueWriteTools,
     ...serviceProviderWriteTools,
+    ...inboundTools,
+    ...inboundWriteTools,
   ].filter((t) => PROVIDER_SENDING_ENABLED || !SEND_TOOL_NAMES.has(t.name));
   return tools.sort((a, b) => a.name.localeCompare(b.name));
 }

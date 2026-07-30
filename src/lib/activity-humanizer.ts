@@ -124,6 +124,30 @@ function describe(action: string, rt: string, m: Meta): Described {
     return { lead: "Adjusted a document in review", detail: null, suppressed: true };
   }
 
+  // ── Inbound mailbox (actor = Rhodes) ─────────────────────────────────
+  if (rt === "inbound_delivery") {
+    const sender = str(m.sender);
+    const files = typeof m.files === "number" ? m.files : null;
+    if (a === "inbound_filed") {
+      return { lead: sender ? `Filed ${files ?? "the"} document${files === 1 ? "" : "s"} from ${sender}'s email` : "Filed documents from an email", detail: null };
+    }
+    if (a === "inbound_retrieved") {
+      return { lead: sender ? `Retrieved ${files ?? ""} document${files === 1 ? "" : "s"} from ${sender}'s secure link` : "Retrieved documents from a secure link", detail: null };
+    }
+    if (a === "inbound_auto_resolved") {
+      return { lead: "Cleared a reminder — the documents arrived", detail: null };
+    }
+    if (a === "inbound_taught") {
+      return { lead: sender ? `Marked ${sender}'s email as a delivery — sender learned` : "Marked a skipped email as a delivery — sender learned", detail: null };
+    }
+    if (a === "inbound_force_filed") {
+      return { lead: sender ? `Filed a held email from ${sender} after review` : "Filed a held email after review", detail: null };
+    }
+    if (a === "inbound_dismissed") return { lead: "Dismissed an inbound email reminder", detail: null };
+    if (a === "inbound_resolved") return { lead: "Marked an inbound email handled", detail: null };
+    if (a === "inbound_acknowledged") return { lead: "Marked an inbound email as forwarded", detail: null };
+  }
+
   // ── Entities ──────────────────────────────────────────────────────────
   if (a === "create" && rt === "entity") {
     const name = str(m.name) || str(m.entity_name);
@@ -331,6 +355,16 @@ function describe(action: string, rt: string, m: Meta): Described {
   if (rt === "directory_entry") {
     const verb = a === "delete" ? "Removed from directory" : a === "edit" ? "Updated directory entry" : "Added to directory";
     return { lead: verb, detail: str(m.name) || null };
+  }
+
+  // ── Provider discovery from inbound mail (spec §1c) ──────────────────
+  if (rt === "service_provider" && a === "provider_discovered") {
+    const name = str(m.name);
+    const domain = str(m.domain);
+    return {
+      lead: name ? `Added ${name} as a provider` : "Added a provider",
+      detail: domain ? `discovered from ${domain} emails` : null,
+    };
   }
 
   // ── Provider document sends ───────────────────────────────────────────

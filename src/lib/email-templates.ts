@@ -200,3 +200,56 @@ export function entityDiscoveredEmail(entityName: string, docName: string) {
     </a>
   `);
 }
+
+export function inboundNeedsYouEmail({
+  sender,
+  subject,
+  forwardAddress,
+}: {
+  sender: string;
+  subject: string | null;
+  forwardAddress: string;
+}) {
+  const emailSubject = `Action needed: ${sender} sent a document Rhodes can't fetch`;
+  const html = layout(`
+    <h2 style="margin:0 0 8px;font-size:18px">A document is waiting on you</h2>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      <strong style="color:#1a1a1f">${sender}</strong> sent something Rhodes couldn't
+      retrieve automatically${subject ? ` &mdash; &ldquo;${subject}&rdquo;` : ""}.
+    </p>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      Two ways to get it into Rhodes:
+    </p>
+    <ol style="color:${BRAND.muted};line-height:1.8;margin:0 0 24px;padding-left:20px">
+      <li>Forward the original email (or the downloaded file) to
+        <strong style="color:#1a1a1f">${forwardAddress}</strong></li>
+      <li>Download it yourself and upload it in Rhodes</li>
+    </ol>
+    <a href="${process.env.NEXT_PUBLIC_APP_URL || "https://app.rhodesoffice.ai"}/documents"
+       style="display:inline-block;background:${BRAND.green};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">
+      Upload in Rhodes
+    </a>
+  `);
+  return { subject: emailSubject, html };
+}
+
+/** Flood-guard digest — sent at most once per day, however many messages were
+ *  held. Deliberately count-free: the count keeps moving while mail arrives;
+ *  the mailbox page is the live truth. */
+export function inboundCapDigestEmail() {
+  const subject = "Rhodes held some of today's email for your review";
+  const html = layout(`
+    <h2 style="margin:0 0 8px;font-size:18px">More email than usual today</h2>
+    <p style="color:${BRAND.muted};line-height:1.6;margin:0 0 16px">
+      Rhodes' mailbox received more document email today than it normally sees, so
+      auto-filing is paused for the overflow. Nothing was lost &mdash; the held
+      messages are listed in Settings &rarr; Mailbox, where you can review each one
+      and file the ones you want.
+    </p>
+    <a href="${process.env.NEXT_PUBLIC_APP_URL || "https://app.rhodesoffice.ai"}/settings/mailbox"
+       style="display:inline-block;background:${BRAND.green};color:#fff;padding:10px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:500">
+      Review held email
+    </a>
+  `);
+  return { subject, html };
+}

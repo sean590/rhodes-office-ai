@@ -213,3 +213,12 @@ export function ClockIcon({ size = 18, className, color }: IconProps) {
     </svg>
   );
 }
+
+export function MailIcon({ size = 18, className, color }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color || "currentColor"} strokeWidth="1.5">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="m22 7-10 6L2 7" />
+    </svg>
+  );
+}

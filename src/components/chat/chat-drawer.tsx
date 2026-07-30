@@ -368,10 +368,23 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
   // Handle prefill from panel context (dashboard input, command palette,
   // /review's "Open in chat", etc.)
   useEffect(() => {
-    if (prefillHandled.current) return;
     const hasQuery = chatPanel.prefillQuery;
     const hasFiles = chatPanel.prefillFiles.length > 0;
     const hasSession = chatPanel.prefillSessionId;
+    const hasDraft = chatPanel.prefillDraft;
+
+    // All prefill state cleared (clearPrefill flushed) → re-arm for the next
+    // prefill. The panel stays mounted while open, so without this re-arm a
+    // second prefill (second "Upload instead" card, another command-palette
+    // query) would be silently swallowed by the one-shot ref below.
+    if (!hasQuery && !hasFiles && !hasSession && !hasDraft) {
+      prefillHandled.current = false;
+      return;
+    }
+    // One-shot guard: block re-entry on re-renders that happen between
+    // handling a prefill and clearPrefill's state update flushing (would
+    // otherwise double-schedule the auto-send below).
+    if (prefillHandled.current) return;
 
     // Session prefill: load the named session and pre-fill the input draft
     // (no auto-send — user reviews the framing first, per the unification
@@ -385,6 +398,16 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       void loadSession(sessionId).then(() => {
         if (draft) setInput(draft);
       });
+      return;
+    }
+
+    // Draft-only prefill (Home's inbound "Upload instead", etc.): set the
+    // input so the user can attach files and edit before sending — NO
+    // auto-send, mirroring the session-prefill draft behavior above.
+    if (hasDraft) {
+      prefillHandled.current = true;
+      setInput(chatPanel.prefillDraft || "");
+      chatPanel.clearPrefill();
       return;
     }
 
@@ -405,7 +428,7 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         }
       }, 300);
     }
-  }, [chatPanel.prefillQuery, chatPanel.prefillFiles, chatPanel.prefillSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chatPanel.prefillQuery, chatPanel.prefillFiles, chatPanel.prefillSessionId, chatPanel.prefillDraft]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleDrawerFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files || []);
