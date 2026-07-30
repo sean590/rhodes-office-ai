@@ -4,8 +4,8 @@
  * Settings → Automation → Mailbox — the one net-new inbound surface
  * (rhodes-inbound-v1-ui-spec.md §3). Connection card (address + health +
  * counters), recent activity (outcome rows only, human sentences), and the
- * collapsed skipped-mail count. The "This is a delivery" teach action is
- * Increment 3 and deliberately absent here.
+ * collapsed skipped-mail count with the "This is a delivery" teach action
+ * (§3c, Increment 3): reprocesses the message and learns the sender.
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -207,6 +207,9 @@ export default function SettingsMailboxPage() {
   const [checking, setChecking] = useState(false);
   const [showSkips, setShowSkips] = useState(false);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [teachingId, setTeachingId] = useState<string | null>(null);
+  // Per-row inline confirmation/error after the teach action.
+  const [teachNotes, setTeachNotes] = useState<Record<string, { text: string; ok: boolean }>>({});
 
   const fetchHealth = useCallback(async () => {
     try {
@@ -293,6 +296,30 @@ export default function SettingsMailboxPage() {
       /* row stays; user can retry */
     }
     setDismissingId(null);
+  };
+
+  // "This is a delivery" (spec §3c): reprocess + learn the sender. Confirmation
+  // shows inline, then the refetch clears the row out of the skipped list.
+  const handleTeach = async (id: string) => {
+    setTeachingId(id);
+    try {
+      const res = await fetch(`/api/inbound/${id}/reprocess`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setTeachNotes((n) => ({ ...n, [id]: { text: "Reprocessing — sender learned.", ok: true } }));
+        setTimeout(() => {
+          void Promise.all([fetchRows(), fetchHealth()]);
+        }, 1500);
+      } else {
+        setTeachNotes((n) => ({
+          ...n,
+          [id]: { text: data?.error || "Couldn't reprocess this one — try again.", ok: false },
+        }));
+      }
+    } catch {
+      setTeachNotes((n) => ({ ...n, [id]: { text: "Couldn't reprocess this one — try again.", ok: false } }));
+    }
+    setTeachingId(null);
   };
 
   if (loading) {
@@ -385,6 +412,38 @@ export default function SettingsMailboxPage() {
 
   const subduedRow = (row: InboundRow) =>
     row.status === "acknowledged" || row.status === "dismissed";
+
+  // The one skipped-row action (spec §3c) — or its inline confirmation/error.
+  const teachControl = (row: InboundRow) => {
+    const note = teachNotes[row.id];
+    if (note) {
+      return (
+        <span style={{ fontSize: 12, fontWeight: 500, color: note.ok ? "#2d5a3d" : "#c47520" }}>
+          {note.text}
+        </span>
+      );
+    }
+    return (
+      <button
+        onClick={() => handleTeach(row.id)}
+        disabled={teachingId === row.id}
+        style={{
+          background: "none",
+          border: "1px solid #e8e6df",
+          borderRadius: 6,
+          padding: "3px 10px",
+          fontSize: 11,
+          fontWeight: 600,
+          color: teachingId === row.id ? "#9494a0" : "#2d5a3d",
+          cursor: teachingId === row.id ? "default" : "pointer",
+          fontFamily: "inherit",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {teachingId === row.id ? "Reprocessing..." : "This is a delivery"}
+      </button>
+    );
+  };
 
   return (
     <div>
@@ -679,10 +738,16 @@ export default function SettingsMailboxPage() {
                           <tr key={row.id}>
                             <td style={{ ...tdStyle, width: isMobile ? "auto" : "34%" }}>
                               {fromCell(row)}
+                              {isMobile && row.sender && (
+                                <div style={{ marginTop: 8 }}>{teachControl(row)}</div>
+                              )}
                             </td>
                             {!isMobile && (
                               <td style={{ ...tdStyle, color: "#6b6b76", fontSize: 12 }}>
                                 Didn&apos;t look like a document delivery
+                                {row.sender && (
+                                  <div style={{ marginTop: 6 }}>{teachControl(row)}</div>
+                                )}
                               </td>
                             )}
                             <td
@@ -702,7 +767,9 @@ export default function SettingsMailboxPage() {
                     </table>
                   </div>
                   <div style={{ fontSize: 12, color: "#9494a0", marginTop: 8 }}>
-                    Skipped mail is kept for 30 days, then forgotten.
+                    Skipped mail is kept for 30 days, then forgotten. Marking one as a
+                    delivery reprocesses it — and teaches Rhodes to recognize that sender
+                    from now on.
                   </div>
                 </div>
               )}

@@ -1,11 +1,18 @@
 /**
  * MCP tools for the inbound mailbox (rhodes-inbound-v1-build-plan.md).
- * Chat parity for GET /api/inbound + POST /api/inbound/[id]/resolve, so the
- * agent can answer "did anything come in from my CPA?" and close out nudges.
+ * Chat parity for GET /api/inbound + POST /api/inbound/[id]/resolve (so the
+ * agent can answer "did anything come in from my CPA?" and close out nudges)
+ * and the /api/inbound/provider-suggestions discovery trio (spec §1c).
  */
 
 import { z } from "zod";
 import { defineTool, type ToolDefinition } from "../schema";
+import {
+  listProviderSuggestions,
+  acceptProviderSuggestion,
+  dismissProviderSuggestion,
+  suggestNameFromDomain,
+} from "@/lib/inbound/provider-discovery";
 
 export const listInboundDeliveriesTool = defineTool({
   name: "list_inbound_deliveries",
@@ -73,5 +80,70 @@ export const resolveInboundDeliveryTool = defineTool({
   },
 });
 
-export const inboundTools: ToolDefinition[] = [listInboundDeliveriesTool];
-export const inboundWriteTools: ToolDefinition[] = [resolveInboundDeliveryTool];
+const domainArg = z
+  .string()
+  .min(3)
+  .max(255)
+  .regex(/^[a-z0-9.-]+\.[a-z]{2,}$/i, "Invalid domain")
+  .describe("Sender email domain, e.g. 'bpwcpa.com'.");
+
+export const listProviderSuggestionsTool = defineTool({
+  name: "list_provider_suggestions",
+  description:
+    "List email domains that repeatedly sent document deliveries but aren't a " +
+    "service provider yet ('Add {Firm} as a provider?' suggestions). Each has " +
+    "the domain, delivery count, latest subject, and a suggested firm name.",
+  kind: "read",
+  inputSchema: z.object({}),
+  handler: async (_args, ctx) => {
+    const suggestions = await listProviderSuggestions(ctx.supabase, ctx.orgId);
+    return { data: { suggestions } };
+  },
+});
+
+export const acceptProviderSuggestionTool = defineTool({
+  name: "accept_provider_suggestion",
+  description:
+    "Add a discovered sender domain as a service provider: creates the provider " +
+    "(name + domain; details editable in People) and retroactively attributes " +
+    "that domain's past inbound emails to it.",
+  kind: "write",
+  inputSchema: z.object({
+    domain: domainArg,
+    name: z.string().min(1).max(255).optional()
+      .describe("Provider name; defaults to a cleaned-up form of the domain."),
+  }),
+  dryRun: async ({ domain, name }) => ({
+    summary: `Add ${name?.trim() || suggestNameFromDomain(domain)} (${domain.toLowerCase()}) as a service provider and attribute past emails from that domain`,
+  }),
+  handler: async ({ domain, name }, ctx) => {
+    const result = await acceptProviderSuggestion(
+      ctx.supabase, ctx.orgId, ctx.userId, domain,
+      name?.trim() || suggestNameFromDomain(domain),
+    );
+    return { data: result };
+  },
+});
+
+export const dismissProviderSuggestionTool = defineTool({
+  name: "dismiss_provider_suggestion",
+  description:
+    "Mark a suggested sender domain as not a service provider — permanently " +
+    "mutes 'Add as a provider?' suggestions for that domain.",
+  kind: "write",
+  inputSchema: z.object({ domain: domainArg }),
+  dryRun: async ({ domain }) => ({
+    summary: `Stop suggesting ${domain.toLowerCase()} as a provider`,
+  }),
+  handler: async ({ domain }, ctx) => {
+    await dismissProviderSuggestion(ctx.supabase, ctx.orgId, domain);
+    return { data: { ok: true, domain: domain.toLowerCase() } };
+  },
+});
+
+export const inboundTools: ToolDefinition[] = [listInboundDeliveriesTool, listProviderSuggestionsTool];
+export const inboundWriteTools: ToolDefinition[] = [
+  resolveInboundDeliveryTool,
+  acceptProviderSuggestionTool,
+  dismissProviderSuggestionTool,
+];

@@ -66,11 +66,18 @@ export type TriageResult = {
   reason: string;
   ingestableAttachments: InboundMessage["attachments"];
   safesendLink: string | null;
+  /** Every candidate download link in the body (multi-link threads) —
+   * retrieval falls back to the next when one is expired/locked/rejected. */
+  safesendLinks: string[];
 };
 
 export function triageMessage(
   msg: InboundMessage,
-  opts: { knownProviderSender: boolean },
+  opts: {
+    knownProviderSender: boolean;
+    /** The "This is a delivery" teach action learned this sender. */
+    learnedDeliverySender?: boolean;
+  },
 ): TriageResult {
   const ingestable = msg.attachments.filter(
     (a) =>
@@ -87,20 +94,20 @@ export function triageMessage(
       reason: `${ingestable.length} ingestable attachment(s)`,
       ingestableAttachments: ingestable,
       safesendLink: null,
+      safesendLinks: [],
     };
   }
 
-  const safesendLink =
-    msg.links.find((l) => SAFESEND_DOWNLOAD.test(l) && !SAFESEND_UPLOAD.test(l)) ??
-    (SAFESEND_HOST.test(msg.fromEmail)
-      ? msg.links.find((l) => SAFESEND_HOST.test(l) && !SAFESEND_UPLOAD.test(l)) ?? null
-      : null);
-  if (safesendLink) {
+  const safesendLinks = msg.links.filter(
+    (l) => !SAFESEND_UPLOAD.test(l) && (SAFESEND_DOWNLOAD.test(l) || (SAFESEND_HOST.test(msg.fromEmail) && SAFESEND_HOST.test(l))),
+  );
+  if (safesendLinks.length > 0) {
     return {
       classification: "safesend",
       reason: "SafeSend download link",
       ingestableAttachments: [],
-      safesendLink,
+      safesendLink: safesendLinks[0],
+      safesendLinks,
     };
   }
 
@@ -110,18 +117,21 @@ export function triageMessage(
   // A known provider (directory match or portal platform) talking about a
   // document, or ANY sender clearly announcing a waiting document with a
   // link, is a delivery Rhodes can't fetch in v1.
-  if (portalSender || (opts.knownProviderSender && deliveryish) || (deliveryish && msg.links.length > 0)) {
+  if (portalSender || opts.learnedDeliverySender || (opts.knownProviderSender && deliveryish) || (deliveryish && msg.links.length > 0)) {
     return {
       classification: "needs_user",
       reason: portalSender
         ? "portal/secure-delivery notification"
-        : opts.knownProviderSender
+        : opts.learnedDeliverySender
           ? "known provider announcing a document"
-          : "delivery-style message with link",
+          : opts.knownProviderSender
+            ? "known provider announcing a document"
+            : "delivery-style message with link",
       ingestableAttachments: [],
       safesendLink: null,
+      safesendLinks: [],
     };
   }
 
-  return { classification: "ignored", reason: "no delivery signals", ingestableAttachments: [], safesendLink: null };
+  return { classification: "ignored", reason: "no delivery signals", ingestableAttachments: [], safesendLink: null, safesendLinks: [] };
 }

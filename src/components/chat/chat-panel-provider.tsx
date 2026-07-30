@@ -14,6 +14,14 @@ interface ChatPanelContext {
    *  the session the worker pre-seeded for a deferred queue item. Cleared
    *  by `clearPrefill` after the drawer reads it. */
   prefillSessionId: string | null;
+  /** Draft-only prefill: the drawer sets its input to this text but does
+   *  NOT auto-send (no `rhodes:auto-send`). Used by Home's inbound
+   *  "Upload instead" so the user can attach files before sending —
+   *  a normal prefillQuery without a session auto-sends after 300ms.
+   *  Cleared by `clearPrefill` after the drawer reads it. */
+  prefillDraft: string | null;
+  /** Open the drawer with a draft-only prefill (see `prefillDraft`). */
+  openDraft: (draft: string) => void;
   clearPrefill: () => void;
   panelWidth: number;
   setPanelWidth: (w: number) => void;
@@ -27,6 +35,8 @@ const ChatPanelCtx = createContext<ChatPanelContext>({
   prefillQuery: null,
   prefillFiles: [],
   prefillSessionId: null,
+  prefillDraft: null,
+  openDraft: () => {},
   clearPrefill: () => {},
   panelWidth: 400,
   setPanelWidth: () => {},
@@ -37,6 +47,7 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
   const [prefillQuery, setPrefillQuery] = useState<string | null>(null);
   const [prefillFiles, setPrefillFiles] = useState<File[]>([]);
   const [prefillSessionId, setPrefillSessionId] = useState<string | null>(null);
+  const [prefillDraft, setPrefillDraft] = useState<string | null>(null);
   const [panelWidth, setPanelWidth] = useState(400);
 
   // Load from localStorage, default open on desktop only.
@@ -76,6 +87,11 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
     setIsOpen(true);
   }, []);
 
+  const openDraft = useCallback((draft: string) => {
+    if (draft) setPrefillDraft(draft);
+    setIsOpen(true);
+  }, []);
+
   // Listen for custom event from child components
   useEffect(() => {
     const handler = (e: Event) => {
@@ -92,10 +108,11 @@ export function ChatPanelProvider({ children }: { children: React.ReactNode }) {
     setPrefillQuery(null);
     setPrefillFiles([]);
     setPrefillSessionId(null);
+    setPrefillDraft(null);
   }, []);
 
   return (
-    <ChatPanelCtx.Provider value={{ isOpen, open, close, toggle, prefillQuery, prefillFiles, prefillSessionId, clearPrefill, panelWidth, setPanelWidth }}>
+    <ChatPanelCtx.Provider value={{ isOpen, open, close, toggle, prefillQuery, prefillFiles, prefillSessionId, prefillDraft, openDraft, clearPrefill, panelWidth, setPanelWidth }}>
       {children}
     </ChatPanelCtx.Provider>
   );

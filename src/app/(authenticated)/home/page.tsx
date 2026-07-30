@@ -50,6 +50,15 @@ interface InboundItem {
   provider_id: string | null;
 }
 
+// A provider-discovery suggestion (spec §1c): a delivery-looking sender domain
+// that repeats but isn't in People yet — "Add {Firm} as a provider?".
+interface ProviderSuggestion {
+  domain: string;
+  count: number;
+  latest_subject: string | null;
+  suggested_name: string;
+}
+
 // "Jane Doe <jane@willkie.com>" → "willkie.com". Sender-domain fallback for
 // the card title when the delivery has no matched provider.
 function senderDomain(sender: string | null): string | null {
@@ -179,6 +188,7 @@ export default function HomePage() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [obligations, setObligations] = useState<Obligation[]>([]);
   const [inbound, setInbound] = useState<InboundItem[]>([]);
+  const [providerSuggestions, setProviderSuggestions] = useState<ProviderSuggestion[]>([]);
   const [providerNames, setProviderNames] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState<RawActivity[]>([]);
   const [suggestedCount, setSuggestedCount] = useState(0);
@@ -233,13 +243,14 @@ export default function HomePage() {
       // no-store: the home queue is live — an action elsewhere (chat agent,
       // another tab) must reflect on the next load, never a cached snapshot.
       const noStore = { cache: "no-store" as const };
-      const [meRes, sRes, qRes, cRes, nRes, aRes] = await Promise.all([
+      const [meRes, sRes, qRes, cRes, nRes, aRes, psRes] = await Promise.all([
         fetch("/api/auth/me", noStore),
         fetch("/api/home/staged", noStore),
         fetch("/api/pipeline/queue?status=review_ready&limit=100", noStore),
         fetch("/api/compliance/upcoming", noStore),
         fetch("/api/inbound?limit=100", noStore).catch(() => null),
         fetch("/api/audit?limit=60", noStore).catch(() => null),
+        fetch("/api/inbound/provider-suggestions", noStore).catch(() => null),
       ]);
       if (meRes.ok) setUserId((await meRes.json())?.id ?? null);
       if (sRes.ok) setStaged(await sRes.json());
@@ -253,6 +264,10 @@ export default function HomePage() {
         setInbound(rows.filter((r): r is InboundItem => r.status === "needs_user" || r.status === "acknowledged" || r.status === "waiting_code"));
       }
       if (aRes && aRes.ok) setActivity(await aRes.json());
+      if (psRes && psRes.ok) {
+        const d = await psRes.json();
+        setProviderSuggestions(Array.isArray(d) ? d : []);
+      }
     } catch (err) {
       console.error("Home load error:", err);
     } finally {
@@ -384,11 +399,46 @@ export default function HomePage() {
     } catch { alert("Failed to update"); } finally { setBusyFor(item.id, false); }
   }, []);
 
-  // "Upload instead": open the chat drawer so the user can drop the files in.
-  // Opened EMPTY on purpose — a prefill query without a session AUTO-SENDS in
-  // the drawer (chat-drawer prefill: query-without-session → auto-send), which
-  // would fire a message before the user has attached anything.
-  const uploadInstead = useCallback(() => { chatPanel.open(); }, [chatPanel]);
+  // Provider discovery (spec §1c): "Add to People" creates the provider and
+  // retroactively attributes the domain's past emails; "Not a provider" mutes
+  // the domain for good (inbound_delivery_senders kind='not_provider').
+  const acceptProviderSuggestion = useCallback(async (s: ProviderSuggestion) => {
+    const key = `ps-${s.domain}`;
+    setBusyFor(key, true);
+    try {
+      const res = await fetch("/api/inbound/provider-suggestions/accept", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: s.domain, name: s.suggested_name }),
+      });
+      if (res.ok) {
+        setProviderSuggestions((p) => p.filter((x) => x.domain !== s.domain));
+        fetchAll(); // needs-you cards from this sender now carry the provider name
+      } else alert("Failed to add provider");
+    } catch { alert("Failed to add provider"); } finally { setBusyFor(key, false); }
+  }, [fetchAll]);
+
+  const dismissProviderSuggestion = useCallback(async (s: ProviderSuggestion) => {
+    const key = `ps-${s.domain}`;
+    setBusyFor(key, true);
+    try {
+      const res = await fetch("/api/inbound/provider-suggestions/dismiss", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: s.domain }),
+      });
+      if (res.ok) setProviderSuggestions((p) => p.filter((x) => x.domain !== s.domain));
+      else alert("Failed to dismiss");
+    } catch { alert("Failed to dismiss"); } finally { setBusyFor(key, false); }
+  }, []);
+
+  // "Upload instead": open the chat drawer with a DRAFT-only prefill so the
+  // user can attach the files before sending. Must NOT use chatPanel.open with
+  // a query — a prefill query without a session AUTO-SENDS in the drawer
+  // (chat-drawer prefill: query-without-session → auto-send), which would fire
+  // the message before the user has attached anything. openDraft only sets the
+  // input.
+  const uploadInstead = useCallback((n: InboundItem) => {
+    chatPanel.openDraft(`I have the documents ${inboundWho(n, providerNames)} sent by email — uploading them here.`);
+  }, [chatPanel, providerNames]);
 
   const approveGroup = useCallback(async (g: OriginGroup) => {
     setGroupBusy((b) => ({ ...b, [g.key]: true }));
@@ -580,7 +630,7 @@ export default function HomePage() {
           channel="email" meta={meta}
           actions={[
             ...(waiting ? [] : [{ label: "I forwarded it", variant: "primary" as const, onClick: () => resolveInbound(n, "acknowledged"), busy: busy[n.id] }]),
-            { label: "Upload instead", onClick: uploadInstead },
+            { label: "Upload instead", onClick: () => uploadInstead(n) },
             { label: "×", onClick: () => resolveInbound(n, "dismissed"), busy: busy[n.id] },
           ]}
           expandedContent={<InboundDetail item={n} />}
@@ -588,6 +638,22 @@ export default function HomePage() {
       </div>
     );
   };
+
+  // Provider-discovery card (spec §1c): "Add {Firm} as a provider?" for a
+  // repeated delivery-looking sender domain that isn't in People yet.
+  const renderProviderSuggestion = (s: ProviderSuggestion) => (
+    <InboxCard
+      key={s.domain}
+      icon="users" iconColor="var(--teal)"
+      title={`Add ${s.suggested_name} as a provider?`}
+      channel="email"
+      meta={`${s.count} emails received from ${s.domain} — not yet in People`}
+      actions={[
+        { label: "Add to People", variant: "primary", onClick: () => acceptProviderSuggestion(s), busy: busy[`ps-${s.domain}`] },
+        { label: "Not a provider", onClick: () => dismissProviderSuggestion(s), busy: busy[`ps-${s.domain}`] },
+      ]}
+    />
+  );
 
   const renderApprove = (g: OriginGroup) => {
     if (g.entries.length === 1) {
@@ -708,7 +774,7 @@ export default function HomePage() {
           onChange={(v) => setLane(v as typeof lane)}
           options={[
             { value: "needs", label: "Needs you", count: needsCount },
-            { value: "suggested", label: "Suggested", count: suggestedCount },
+            { value: "suggested", label: "Suggested", count: suggestedCount + providerSuggestions.length },
             { value: "done", label: "Done" },
           ]}
         />
@@ -716,8 +782,16 @@ export default function HomePage() {
 
       {/* Keep Suggested mounted (hidden) so its count populates the tab badge. */}
       <div style={{ display: lane === "suggested" ? "block" : "none" }}>
+        {/* Provider discovery (spec §1c) — repeated delivery-looking senders
+            not yet in People. Renders above SuggestedSends, which is currently
+            kill-switched (PROVIDER_SENDING_ENABLED) and often empty. */}
+        {providerSuggestions.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 10 }}>
+            {providerSuggestions.map(renderProviderSuggestion)}
+          </div>
+        )}
         <SuggestedSends bare onCount={setSuggestedCount} onSent={fetchAll} />
-        {!loading && suggestedCount === 0 && <Empty icon="sparkles" text="Nothing suggested right now. Rhodes surfaces sends here as documents come in." />}
+        {!loading && suggestedCount === 0 && providerSuggestions.length === 0 && <Empty icon="sparkles" text="Nothing suggested right now. Rhodes surfaces sends here as documents come in." />}
       </div>
 
       {lane === "needs" && (
