@@ -316,7 +316,11 @@ const DEFER_TOOL: Anthropic.Messages.Tool = {
 };
 
 const MAX_ITERATIONS = 12;
-const MAX_OUTPUT_TOKENS = 4096;
+// On Claude 5 models, adaptive thinking is on by default and thinking tokens
+// count against max_tokens. 4096 (the pre-5 value) risks a turn spending its
+// whole budget on thinking and truncating the tool call. Cap, not spend —
+// unused headroom costs nothing.
+const MAX_OUTPUT_TOKENS = 16384;
 
 export async function runDocumentAgent(
   input: DocumentAgentInput,
@@ -479,7 +483,7 @@ async function runDocumentAgentInternal(
   ];
 
   const toolCalls: DocumentAgentOutput["toolCalls"] = [];
-  const AGENT_MODEL = "claude-sonnet-4-6";
+  const AGENT_MODEL = "claude-sonnet-5";
   const usageTotals = emptyUsage();
   let turns = 0;
   let deferred: { reason: string } | null = null;
