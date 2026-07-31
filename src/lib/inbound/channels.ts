@@ -13,9 +13,12 @@
  * resolve/seed channels for the worker.
  */
 import { createHash, randomBytes } from "node:crypto";
-import type { createAdminClient } from "@/lib/supabase/admin";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
-type Admin = ReturnType<typeof createAdminClient>;
+// These helpers run under the service-role admin client passed in by the
+// worker/webhook; they never construct one, so we take the SupabaseClient type
+// directly (keeps the admin-ratchet count honest).
+type Admin = SupabaseClient;
 
 export type ChannelType = "rhodes_hosted" | "google_oauth" | "microsoft_oauth";
 

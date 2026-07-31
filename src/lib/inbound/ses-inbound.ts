@@ -92,6 +92,50 @@ export function sesThreatFlags(receipt?: SesReceipt): { spam: boolean; virus: bo
   return { spam: receipt?.spam === "FAIL", virus: receipt?.virus === "FAIL" };
 }
 
+export type SesEvent = {
+  messageId: string;
+  recipients: string[];
+  receipt: SesReceipt;
+  /** S3 object key SES wrote the raw MIME to (objectKeyPrefix + messageId). */
+  s3Key: string;
+};
+
+/**
+ * Extract what the webhook needs from an SES `Received` notification (the JSON
+ * inside the SNS `Message` field): the messageId, matched recipients, verdicts,
+ * and the S3 key. Pure — the caller fetches S3 and ingests. Returns null for a
+ * non-receipt / malformed payload.
+ */
+export function parseSesEvent(message: unknown, objectKeyPrefix = "inbound/"): SesEvent | null {
+  const m = message as {
+    mail?: { messageId?: string; destination?: string[] };
+    receipt?: {
+      recipients?: string[];
+      spfVerdict?: { status?: string };
+      dkimVerdict?: { status?: string };
+      dmarcVerdict?: { status?: string };
+      spamVerdict?: { status?: string };
+      virusVerdict?: { status?: string };
+    };
+  };
+  const messageId = m?.mail?.messageId;
+  if (!messageId) return null;
+  const recipients = m.receipt?.recipients ?? m.mail?.destination ?? [];
+  return {
+    messageId,
+    recipients,
+    receipt: {
+      spf: m.receipt?.spfVerdict?.status,
+      dkim: m.receipt?.dkimVerdict?.status,
+      dmarc: m.receipt?.dmarcVerdict?.status,
+      spam: m.receipt?.spamVerdict?.status,
+      virus: m.receipt?.virusVerdict?.status,
+      recipient: recipients[0],
+    },
+    s3Key: `${objectKeyPrefix}${messageId}`,
+  };
+}
+
 function headerValue(email: { headers?: Array<{ key: string; value: string }> }, name: string): string {
   return email.headers?.find((h) => h.key.toLowerCase() === name)?.value ?? "";
 }

@@ -230,6 +230,28 @@ async function handleMessage(
 }
 
 /**
+ * Push-transport entry (SES webhook): ingest one already-parsed, org-resolved
+ * message through the SAME handleMessage path the Gmail poll uses. Idempotent
+ * via the unique gmail_message_id column (reused as the transport-agnostic
+ * dedup key — a duplicate SNS delivery is a no-op).
+ */
+export async function ingestInboundMessage(
+  admin: Admin,
+  orgId: string,
+  msg: InboundMessage,
+): Promise<{ deliveryId: string | null; status: string }> {
+  const result: InboundRunResult = { scanned: 1, ingested: 0, needsUser: 0, ignored: 0, failed: 0 };
+  await handleMessage(admin, orgId, msg, result);
+  const { data } = await admin
+    .from("inbound_deliveries")
+    .select("id, status")
+    .eq("organization_id", orgId)
+    .eq("gmail_message_id", msg.id)
+    .maybeSingle();
+  return { deliveryId: (data?.id as string) ?? null, status: (data?.status as string) ?? "pending" };
+}
+
+/**
  * Teach action (spec §3c "This is a delivery"): re-run full triage/dispatch on
  * a single message after the caller has upserted the learned delivery-sender
  * (and deleted the old ignored row — gmail_message_id is UNIQUE, so the stale
@@ -351,7 +373,8 @@ async function ingestAttachments(
 
   const files = [];
   for (const att of attachments) {
-    const bytes = await getAttachment(msg.id, att.attachmentId);
+    // SES/MIME transport carries bytes inline; Gmail fetches lazily by id.
+    const bytes = att.bytes ?? (await getAttachment(msg.id, att.attachmentId));
     const safeName = att.filename.replace(/[^\w.\- ()]/g, "_") || "attachment";
     const storagePath = `${orgId}/queue/${batchId}/${Date.now()}-${safeName}`;
     const { error: upErr } = await admin.storage

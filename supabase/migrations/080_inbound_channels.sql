@@ -50,3 +50,21 @@ ALTER TABLE inbound_channels ENABLE ROW LEVEL SECURITY;
 CREATE POLICY inbound_channels_org_read ON inbound_channels
   FOR SELECT TO authenticated
   USING (organization_id IN (SELECT public.user_org_ids()));
+
+-- Multi-tenancy: the delivery dedup key must be per-ORG, not global. With
+-- multiple connected mailboxes (Plan B) or one message CC'd to two hosted
+-- addresses, a global UNIQUE on gmail_message_id would wrongly reject the
+-- second org's copy. Swap it for a composite unique (org, message id). The
+-- 23505-based idempotency in the worker still fires on a duplicate (org,msg).
+DO $$
+DECLARE cname text;
+BEGIN
+  SELECT conname INTO cname FROM pg_constraint
+   WHERE conrelid = 'inbound_deliveries'::regclass AND contype = 'u'
+     AND pg_get_constraintdef(oid) ILIKE '%(gmail_message_id)%';
+  IF cname IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE inbound_deliveries DROP CONSTRAINT %I', cname);
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_deliveries_org_msg
+  ON inbound_deliveries (organization_id, gmail_message_id);

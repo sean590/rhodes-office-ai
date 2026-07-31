@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseRawEmail, sesThreatFlags } from "../ses-inbound";
+import { parseRawEmail, sesThreatFlags, parseSesEvent } from "../ses-inbound";
 
 // A minimal multipart MIME with a text part and a PDF attachment.
 const PDF_B64 = Buffer.from("%PDF-1.4 fake pdf bytes").toString("base64");
@@ -67,5 +67,41 @@ describe("parseRawEmail (SES transport)", () => {
     expect(sesThreatFlags({ spam: "FAIL" })).toEqual({ spam: true, virus: false });
     expect(sesThreatFlags({ spam: "PASS", virus: "PASS" })).toEqual({ spam: false, virus: false });
     expect(sesThreatFlags(undefined)).toEqual({ spam: false, virus: false });
+  });
+});
+
+describe("parseSesEvent (SNS notification → webhook inputs)", () => {
+  const notification = {
+    mail: { messageId: "abc123", destination: ["smith-x@docs.rhodesoffice.ai"] },
+    receipt: {
+      recipients: ["smith-x@docs.rhodesoffice.ai"],
+      spfVerdict: { status: "PASS" },
+      dkimVerdict: { status: "PASS" },
+      dmarcVerdict: { status: "PASS" },
+      spamVerdict: { status: "PASS" },
+      virusVerdict: { status: "FAIL" },
+    },
+  };
+
+  it("extracts messageId, recipients, verdicts, and the S3 key", () => {
+    const evt = parseSesEvent(notification)!;
+    expect(evt.messageId).toBe("abc123");
+    expect(evt.recipients).toEqual(["smith-x@docs.rhodesoffice.ai"]);
+    expect(evt.s3Key).toBe("inbound/abc123");
+    expect(evt.receipt).toMatchObject({ spf: "PASS", dkim: "PASS", dmarc: "PASS", virus: "FAIL" });
+  });
+
+  it("honors a custom object-key prefix", () => {
+    expect(parseSesEvent(notification, "raw/")!.s3Key).toBe("raw/abc123");
+  });
+
+  it("returns null for a malformed / non-receipt payload", () => {
+    expect(parseSesEvent({})).toBeNull();
+    expect(parseSesEvent({ receipt: {} })).toBeNull();
+  });
+
+  it("falls back to mail.destination when receipt.recipients is absent", () => {
+    const evt = parseSesEvent({ mail: { messageId: "z", destination: ["a@docs.rhodesoffice.ai"] } })!;
+    expect(evt.recipients).toEqual(["a@docs.rhodesoffice.ai"]);
   });
 });
