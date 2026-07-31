@@ -119,6 +119,58 @@ export async function resolveOrgByRecipient(
   return { orgId: data.organization_id as string, channelId: data.id as string };
 }
 
+/**
+ * Get the org's Plan A hosted address, creating it on first call. One active
+ * hosted channel per org. Retries on the astronomically-unlikely token
+ * collision (recipient_token is UNIQUE). Idempotent: repeat calls return the
+ * same address.
+ */
+export async function getOrCreateHostedChannel(
+  admin: Admin,
+  orgId: string,
+  label?: string,
+): Promise<{ id: string; address: string; recipientToken: string }> {
+  const { data: existing } = await admin
+    .from("inbound_channels")
+    .select("id, address, recipient_token")
+    .eq("organization_id", orgId)
+    .eq("type", "rhodes_hosted")
+    .eq("status", "active")
+    .not("address", "is", null)
+    .maybeSingle();
+  if (existing) {
+    return {
+      id: existing.id as string,
+      address: existing.address as string,
+      recipientToken: existing.recipient_token as string,
+    };
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { address, recipientToken } = generateInboundAddress(label);
+    const { data, error } = await admin
+      .from("inbound_channels")
+      .insert({
+        organization_id: orgId,
+        type: "rhodes_hosted",
+        address,
+        recipient_token: recipientToken,
+        status: "active",
+        label: label ?? null,
+      })
+      .select("id, address, recipient_token")
+      .single();
+    if (!error && data) {
+      return {
+        id: data.id as string,
+        address: data.address as string,
+        recipientToken: data.recipient_token as string,
+      };
+    }
+    if (error && error.code !== "23505") throw error; // 23505 = token collision → retry
+  }
+  throw new Error("could not allocate a unique inbound address after retries");
+}
+
 /** Active mailbox-poll channels (oauth types) for the retrieval sweep. */
 export async function listActivePollChannels(admin: Admin): Promise<InboundChannel[]> {
   const { data } = await admin
