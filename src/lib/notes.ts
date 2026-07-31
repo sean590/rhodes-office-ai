@@ -6,6 +6,7 @@
  * isolation is enforced by the database, not this code.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { logAuditEvent } from "@/lib/utils/audit";
 
 /** The record kinds a note can attach to → the note_links FK column. */
 export const NOTE_TARGETS = {
@@ -118,5 +119,20 @@ export async function createNote(
       return { note: null, error: `Failed to link note: ${linkErr.message}` };
     }
   }
+  // Audit so the note surfaces in the linked entity's / investment's activity
+  // feed (which filters audit_log by entity_id / investment_id). A note on
+  // several records of one kind attributes to the first — the Notes tab shows
+  // the full association set.
+  await logAuditEvent({
+    userId,
+    action: "create_note",
+    resourceType: "note",
+    resourceId: note.id as string,
+    entityId: owned.find((t) => t.type === "entity")?.id ?? null,
+    investmentId: owned.find((t) => t.type === "investment")?.id ?? null,
+    organizationId: orgId,
+    metadata: { note_id: note.id, title: body.split("\n")[0].slice(0, 140), links: owned.length },
+  }).catch(() => {});
+
   return { note: { ...(note as Omit<NoteRecord, "links">), links: owned } };
 }
