@@ -183,7 +183,8 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
           style={{ ...inputStyle, minHeight: 72, resize: "vertical", marginBottom: 10 }}
         />
 
-        {/* Who did you speak with — people picker */}
+        {/* People associated with this record (generic — same form will host
+            email-chain intake later, not just call notes) */}
         <div style={{ marginBottom: 10, position: "relative" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <label style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em" }}>People</label>
@@ -193,7 +194,7 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
             <input
               value={peopleQuery}
               onChange={(e) => setPeopleQuery(e.target.value)}
-              placeholder="Who did you speak with?"
+              placeholder="Add people associated with this…"
               style={{ ...inputStyle, width: "auto", flex: 1, minWidth: 160, padding: "6px 10px", fontSize: 13 }}
             />
           </div>
