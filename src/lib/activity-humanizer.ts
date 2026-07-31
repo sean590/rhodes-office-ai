@@ -148,6 +148,12 @@ function describe(action: string, rt: string, m: Meta): Described {
     if (a === "inbound_acknowledged") return { lead: "Marked an inbound email as forwarded", detail: null };
   }
 
+  // ── Notes ─────────────────────────────────────────────────────────────
+  if (a === "create_note") {
+    const title = str(m.title);
+    return { lead: title ? `Added a note — ${title}` : "Added a note", detail: null };
+  }
+
   // ── Entities ──────────────────────────────────────────────────────────
   if (a === "create" && rt === "entity") {
     const name = str(m.name) || str(m.entity_name);
