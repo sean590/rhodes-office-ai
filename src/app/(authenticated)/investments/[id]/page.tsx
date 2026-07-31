@@ -11,6 +11,7 @@ import { useCan } from "@/components/authz/role-provider";
 import { AllocationsTab } from "@/components/investments/AllocationsTab";
 import { TransactionsTab } from "@/components/investments/TransactionsTab";
 import { DocumentsTab } from "@/components/investments/DocumentsTab";
+import { NotesTab } from "@/components/notes/NotesTab";
 import { humanizeActivity } from "@/lib/activity-humanizer";
 import type { InvestmentType, InvestmentStatus, InvestmentInvestor, CoInvestor } from "@/lib/types/investments";
 
@@ -48,6 +49,7 @@ const TABS = [
   { id: "allocations", label: "Allocations" },
   { id: "transactions", label: "Transactions" },
   { id: "documents", label: "Documents" },
+  { id: "notes", label: "Notes" },
   { id: "activity", label: "Activity" },
 ];
 
@@ -365,6 +367,10 @@ export default function InvestmentDetailPage() {
 
       {activeTab === "documents" && (
         <DocumentsTab investmentId={id} isMobile={isMobile} />
+      )}
+
+      {activeTab === "notes" && (
+        <NotesTab target={{ type: "investment", id }} />
       )}
 
       {activeTab === "activity" && (
