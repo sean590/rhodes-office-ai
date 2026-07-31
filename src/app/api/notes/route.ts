@@ -13,6 +13,40 @@ import {
 // Notes run inline (small writes; the caller needs the created note back).
 export const maxDuration = 30;
 
+// The table + name column each target type resolves through.
+const NAME_SOURCE: Record<NoteTargetType, { table: string; col: string }> = {
+  entity: { table: "entities", col: "name" },
+  investment: { table: "investments", col: "name" },
+  contact: { table: "directory_entries", col: "name" },
+  document: { table: "documents", col: "name" },
+};
+
+// Batch-resolve linked records' display names → { "type:id": name }.
+async function resolveLinkNames(
+  db: Awaited<ReturnType<typeof createClient>>,
+  orgId: string,
+  links: NoteTarget[],
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {};
+  const byType = new Map<NoteTargetType, string[]>();
+  for (const l of links) {
+    if (!byType.has(l.type)) byType.set(l.type, []);
+    byType.get(l.type)!.push(l.id);
+  }
+  for (const [type, ids] of byType) {
+    const { table, col } = NAME_SOURCE[type];
+    const { data } = await db
+      .from(table)
+      .select(`id, ${col}`)
+      .eq("organization_id", orgId)
+      .in("id", Array.from(new Set(ids)));
+    for (const row of (data ?? []) as unknown as Array<Record<string, string>>) {
+      out[`${type}:${row.id}`] = row[col];
+    }
+  }
+  return out;
+}
+
 // Shape a note_links row into a typed {type, id}.
 function shapeLinks(rows: Array<Record<string, string | null>>): NoteTarget[] {
   const out: NoteTarget[] = [];
@@ -88,6 +122,13 @@ export async function GET(request: Request) {
       };
       return { ...rest, links: shapeLinks(note_links ?? []) };
     });
+
+    // Resolve each linked record's display name so the UI can show
+    // associations by name ("Silverhawk I", "John Smith") instead of ids.
+    const names = await resolveLinkNames(db, orgId, shaped.flatMap((n) => n.links));
+    for (const n of shaped) {
+      n.links = n.links.map((l) => ({ ...l, name: names[`${l.type}:${l.id}`] ?? null }));
+    }
     return NextResponse.json(shaped);
   } catch (err) {
     console.error("GET /api/notes error:", err);
