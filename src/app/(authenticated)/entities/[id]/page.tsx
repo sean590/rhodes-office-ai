@@ -11,6 +11,7 @@ import { TagPill } from "@/components/ui/tag-pill";
 import { Dot } from "@/components/ui/dot";
 import { BuildingIcon, PlusIcon, XIcon, CheckIcon, SparkleIcon, DocIcon, FolderIcon, DownIcon, ChartIcon, ChatIcon, EllipsisVerticalIcon, PencilIcon } from "@/components/ui/icons";
 import { useSetPageContext } from "@/components/chat/page-context-provider";
+import { NotesTab } from "@/components/notes/NotesTab";
 import { UploadDropZone } from "@/components/pipeline/UploadDropZone";
 import { ProcessingView } from "@/components/pipeline/ProcessingView";
 import { DocumentChecklist, type ChecklistExpectation } from "@/components/entities/DocumentChecklist";
@@ -6185,6 +6186,7 @@ export default function EntityDetailPage() {
   tabs.push({ id: "investments", label: "Investments" });
   tabs.push({ id: "providers", label: "People" });
   tabs.push({ id: "documents", label: `Documents (${documents.length})` });
+  tabs.push({ id: "notes", label: "Notes" });
   if (!isJointTitle) {
     tabs.push({ id: "activity", label: "Activity" });
   }
@@ -6671,6 +6673,11 @@ export default function EntityDetailPage() {
             entityData={entity as unknown as Record<string, unknown>}
           />
         </>
+      )}
+
+      {/* Notes Tab */}
+      {activeTab === "notes" && (
+        <NotesTab target={{ type: "entity", id: entityId }} />
       )}
 
       {/* Activity Tab */}

@@ -656,6 +656,23 @@ export async function applyActions(
           break;
         }
 
+        case "create_note": {
+          const { createNote, parseTargets } = await import("@/lib/notes");
+          const { note, error } = await createNote(
+            supabase,
+            options.orgId!,
+            options.userId ?? null,
+            {
+              body: item.data.body as string,
+              noteDate: item.data.note_date as string | undefined,
+              targets: parseTargets(item.data.links),
+            },
+          );
+          if (error || !note) throw new Error(error || "Failed to create note");
+          results.push({ action: "create_note", success: true, data: note });
+          break;
+        }
+
         case "add_custom_field": {
           const { data: fieldDef, error: defError } = await supabase
             .from("custom_field_definitions")
