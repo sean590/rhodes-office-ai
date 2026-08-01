@@ -36,12 +36,97 @@ const LINK_LABEL: Record<string, string> = {
   document: "Document",
 };
 
+const INPUT_STYLE: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 12px",
+  fontSize: 14,
+  borderRadius: 8,
+  border: "1px solid var(--line)",
+  background: "#fff",
+  boxSizing: "border-box",
+};
+
+function Chip({ text, sub, onRemove }: { text: string; sub?: string; onRemove?: () => void }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 999, background: "rgba(45,90,61,0.07)", border: "1px solid rgba(45,90,61,0.14)", fontSize: 11.5, color: "var(--green)", fontWeight: 500 }}>
+      {sub && <span style={{ color: "var(--faint)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>{sub}</span>}
+      {text}
+      {onRemove && (
+        <button onClick={onRemove} aria-label="Remove" style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}>×</button>
+      )}
+    </span>
+  );
+}
+
+/** People associated with a note — searchable multi-select over the People
+ *  registry. Shared by the add form and the edit form. */
+function PeoplePicker({ value, onChange }: { value: Person[]; onChange: (people: Person[]) => void }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<Person[]>([]);
+  const abort = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    if (!query.trim()) {
+      setResults([]);
+      return;
+    }
+    abort.current?.abort();
+    const ac = new AbortController();
+    abort.current = ac;
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/notes/people?q=${encodeURIComponent(query)}`, { signal: ac.signal });
+        if (res.ok) setResults(await res.json());
+      } catch {
+        /* aborted / transient */
+      }
+    }, 200);
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
+  }, [query]);
+
+  const add = (p: Person) => {
+    if (!value.some((x) => x.id === p.id)) onChange([...value, p]);
+    setQuery("");
+    setResults([]);
+  };
+  const remove = (id: string) => onChange(value.filter((p) => p.id !== id));
+
+  return (
+    <div style={{ marginBottom: 10, position: "relative" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em" }}>People</label>
+        {value.map((p) => (
+          <Chip key={p.id} text={p.name} onRemove={() => remove(p.id)} />
+        ))}
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Add people associated with this…"
+          style={{ ...INPUT_STYLE, width: "auto", flex: 1, minWidth: 160, padding: "6px 10px", fontSize: 13 }}
+        />
+      </div>
+      {results.length > 0 && (
+        <div style={{ position: "absolute", zIndex: 10, marginTop: 4, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: 220, overflowY: "auto", minWidth: 220 }}>
+          {results.map((p) => (
+            <button key={p.id} onClick={() => add(p)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderBottom: "1px solid var(--line)", cursor: "pointer", fontSize: 13, color: "var(--ink)" }}>
+              {p.name} <span style={{ color: "var(--faint)", fontSize: 11 }}>{p.type}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Dated-notes panel for a record detail page. Collapsed rows show the title +
  * the records a note is associated with (by name) + its date; expanding shows
- * the full note. Notes can be tagged with people (who you spoke with) at
- * creation. Attaching to arbitrary additional records stays on the chat/API
- * path for now.
+ * the full note. Notes can be tagged with people at creation and edited in
+ * place (body, date, and people). Attaching to arbitrary additional records
+ * stays on the chat/API path.
  */
 export function NotesTab({ target }: { target: { type: NoteTargetType; id: string } }) {
   const [notes, setNotes] = useState<Note[]>([]);
@@ -50,20 +135,16 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
 
   const [body, setBody] = useState("");
   const [noteDate, setNoteDate] = useState(today());
+  const [selectedPeople, setSelectedPeople] = useState<Person[]>([]);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Inline edit (body + date) of an existing note.
+  // Inline edit (body + date + people).
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [editDate, setEditDate] = useState("");
+  const [editPeople, setEditPeople] = useState<Person[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
-
-  // People picker (who you spoke with).
-  const [peopleQuery, setPeopleQuery] = useState("");
-  const [peopleResults, setPeopleResults] = useState<Person[]>([]);
-  const [selectedPeople, setSelectedPeople] = useState<Person[]>([]);
-  const searchAbort = useRef<AbortController | null>(null);
 
   const fetchNotes = useCallback(async () => {
     try {
@@ -79,36 +160,6 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
   useEffect(() => {
     fetchNotes();
   }, [fetchNotes]);
-
-  // People search as you type.
-  useEffect(() => {
-    if (!peopleQuery.trim()) {
-      setPeopleResults([]);
-      return;
-    }
-    searchAbort.current?.abort();
-    const ac = new AbortController();
-    searchAbort.current = ac;
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/notes/people?q=${encodeURIComponent(peopleQuery)}`, { signal: ac.signal });
-        if (res.ok) setPeopleResults(await res.json());
-      } catch {
-        /* aborted / transient */
-      }
-    }, 200);
-    return () => {
-      clearTimeout(t);
-      ac.abort();
-    };
-  }, [peopleQuery]);
-
-  const addPerson = (p: Person) => {
-    setSelectedPeople((prev) => (prev.some((x) => x.id === p.id) ? prev : [...prev, p]));
-    setPeopleQuery("");
-    setPeopleResults([]);
-  };
-  const removePerson = (id: string) => setSelectedPeople((prev) => prev.filter((p) => p.id !== id));
 
   const addNote = async () => {
     if (!body.trim()) return;
@@ -163,16 +214,28 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
     setEditingId(n.id);
     setEditBody(n.body);
     setEditDate(n.note_date);
+    // Seed the picker with the note's current people (contact links).
+    setEditPeople(
+      n.links.filter((l) => l.type === "contact").map((l) => ({ id: l.id, name: l.name ?? "Unknown", type: "" })),
+    );
   };
   const cancelEdit = () => setEditingId(null);
   const saveEdit = async (id: string) => {
     if (!editBody.trim()) return;
     setSavingEdit(true);
     try {
+      // Preserve every non-people association (the record + any cross-links)
+      // and replace the people set with the edited one.
+      const note = notes.find((x) => x.id === id);
+      const preserved = (note?.links ?? [])
+        .filter((l) => l.type !== "contact")
+        .map((l) => ({ type: l.type, id: l.id }));
+      const links = [...preserved, ...editPeople.map((p) => ({ type: "contact", id: p.id }))];
+
       const res = await fetch(`/api/notes/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: editBody.trim(), note_date: editDate || undefined }),
+        body: JSON.stringify({ body: editBody.trim(), note_date: editDate || undefined, links }),
       });
       if (res.ok) {
         setEditingId(null);
@@ -188,25 +251,6 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
     }
   };
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "8px 12px",
-    fontSize: 14,
-    borderRadius: 8,
-    border: "1px solid var(--line)",
-    background: "#fff",
-    boxSizing: "border-box",
-  };
-  const chip = (text: string, sub?: string, onRemove?: () => void): React.ReactNode => (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", borderRadius: 999, background: "rgba(45,90,61,0.07)", border: "1px solid rgba(45,90,61,0.14)", fontSize: 11.5, color: "var(--green)", fontWeight: 500 }}>
-      {sub && <span style={{ color: "var(--faint)", fontWeight: 600, fontSize: 10, textTransform: "uppercase", letterSpacing: "0.04em" }}>{sub}</span>}
-      {text}
-      {onRemove && (
-        <button onClick={onRemove} aria-label="Remove" style={{ background: "none", border: "none", color: "var(--green)", cursor: "pointer", padding: 0, fontSize: 13, lineHeight: 1 }}>×</button>
-      )}
-    </span>
-  );
-
   return (
     <div>
       {/* Add a note */}
@@ -215,39 +259,13 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
           value={body}
           onChange={(e) => setBody(e.target.value)}
           placeholder="Add a note — a call, a meeting, a decision… (the first line becomes the title)"
-          style={{ ...inputStyle, minHeight: 72, resize: "vertical", marginBottom: 10 }}
+          style={{ ...INPUT_STYLE, minHeight: 72, resize: "vertical", marginBottom: 10 }}
         />
-
-        {/* People associated with this record (generic — same form will host
-            email-chain intake later, not just call notes) */}
-        <div style={{ marginBottom: 10, position: "relative" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em" }}>People</label>
-            {selectedPeople.map((p) => (
-              <span key={p.id}>{chip(p.name, undefined, () => removePerson(p.id))}</span>
-            ))}
-            <input
-              value={peopleQuery}
-              onChange={(e) => setPeopleQuery(e.target.value)}
-              placeholder="Add people associated with this…"
-              style={{ ...inputStyle, width: "auto", flex: 1, minWidth: 160, padding: "6px 10px", fontSize: 13 }}
-            />
-          </div>
-          {peopleResults.length > 0 && (
-            <div style={{ position: "absolute", zIndex: 10, marginTop: 4, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: 220, overflowY: "auto", minWidth: 220 }}>
-              {peopleResults.map((p) => (
-                <button key={p.id} onClick={() => addPerson(p)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: "none", border: "none", borderBottom: "1px solid var(--line)", cursor: "pointer", fontSize: 13, color: "var(--ink)" }}>
-                  {p.name} <span style={{ color: "var(--faint)", fontSize: 11 }}>{p.type}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
+        <PeoplePicker value={selectedPeople} onChange={setSelectedPeople} />
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           <div>
             <label style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em", marginRight: 8 }}>Date</label>
-            <input type="date" value={noteDate} onChange={(e) => setNoteDate(e.target.value)} style={{ ...inputStyle, width: "auto", display: "inline-block" }} />
+            <input type="date" value={noteDate} onChange={(e) => setNoteDate(e.target.value)} style={{ ...INPUT_STYLE, width: "auto", display: "inline-block" }} />
           </div>
           <div style={{ flex: 1 }} />
           <Button variant="primary" onClick={addNote} disabled={saving || !body.trim()}>
@@ -272,15 +290,16 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
             return (
               <div key={n.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
                 {editingId === n.id ? (
-                  /* Edit mode: full body + date */
+                  /* Edit mode: body + people + date */
                   <div>
                     <textarea
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
-                      style={{ ...inputStyle, minHeight: 100, resize: "vertical", marginBottom: 10 }}
+                      style={{ ...INPUT_STYLE, minHeight: 100, resize: "vertical", marginBottom: 10 }}
                     />
+                    <PeoplePicker value={editPeople} onChange={setEditPeople} />
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
+                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ ...INPUT_STYLE, width: "auto" }} />
                       <div style={{ flex: 1 }} />
                       <Button variant="secondary" onClick={cancelEdit}>Cancel</Button>
                       <Button variant="primary" onClick={() => saveEdit(n.id)} disabled={savingEdit || !editBody.trim()}>
@@ -309,7 +328,7 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
                       {n.links.length > 0 && (
                         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                           {n.links.map((l, i) => (
-                            <span key={`${l.type}:${l.id}:${i}`}>{chip(l.name ?? "Unknown", LINK_LABEL[l.type] ?? l.type)}</span>
+                            <Chip key={`${l.type}:${l.id}:${i}`} text={l.name ?? "Unknown"} sub={LINK_LABEL[l.type] ?? l.type} />
                           ))}
                         </div>
                       )}
