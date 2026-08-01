@@ -508,7 +508,13 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
 
   const sendMessage = useCallback(
     async (text: string) => {
-      const hasFiles = drawerFiles.length > 0;
+      // Auto-continuations ("[Continuing after approval|truncation] …") are
+      // programmatic sends, NOT the user's composed message. They must never
+      // consume or clear the user's in-progress draft or staged files — that's
+      // what wiped drafts when a continuation fired mid-compose.
+      const CONTINUATION_RE = /^\[Continuing[^\]]*\]\s*/;
+      const isAutoFollow = CONTINUATION_RE.test(text);
+      const hasFiles = !isAutoFollow && drawerFiles.length > 0;
       if (!text.trim() && !hasFiles) return;
       if (sending) return;
 
@@ -545,8 +551,6 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
       //   "[Continuing after truncation] …" after a max_tokens stop reason
       // Claude sees these in the API payload as a hint to resume; the user
       // shouldn't see the prefix in the chat bubble.
-      const CONTINUATION_RE = /^\[Continuing[^\]]*\]\s*/;
-      const isAutoFollow = CONTINUATION_RE.test(text);
       const displayText = isAutoFollow ? text.replace(CONTINUATION_RE, "") : text.trim();
       const content = displayText || (hasFiles ? `Uploaded ${drawerFiles.length} file${drawerFiles.length !== 1 ? "s" : ""}` : "");
       const optimisticMeta: ChatMessageMetadata = {};
@@ -576,10 +580,14 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
         created_at: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, userMsg]);
-      setInput("");
-      if (inputRef.current) inputRef.current.style.height = "auto";
-      const currentFiles = [...drawerFiles];
-      setDrawerFiles([]);
+      // Only a real user send clears the composer. Programmatic continuations
+      // leave the user's draft + staged files untouched.
+      const currentFiles = isAutoFollow ? [] : [...drawerFiles];
+      if (!isAutoFollow) {
+        setInput("");
+        if (inputRef.current) inputRef.current.style.height = "auto";
+        setDrawerFiles([]);
+      }
       setSending(true);
       setStreamingText("");
 
@@ -1161,6 +1169,9 @@ export function ChatDrawer({ isOpen, onClose, isMobile, embedded }: ChatDrawerPr
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
+      // While the assistant is responding, let Enter insert a newline so the
+      // user can keep composing; sending is deferred until the response ends.
+      if (sending) return;
       e.preventDefault();
       sendMessage(input);
     }
@@ -2095,11 +2106,10 @@ function DrawerInput({
         {/* File attach button */}
         <button
           onClick={() => fileInputRef.current?.click()}
-          disabled={sending}
           style={{
             width: 36, height: 36, borderRadius: 10,
             border: "1px solid #ddd9d0", background: "#f5f4f0",
-            cursor: sending ? "not-allowed" : "pointer",
+            cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
             flexShrink: 0, color: "#6b6b76",
           }}
@@ -2153,7 +2163,10 @@ function DrawerInput({
             e.currentTarget.style.borderColor = "#ddd9d0";
             e.currentTarget.style.background = "#f5f4f0";
           }}
-          disabled={sending}
+          // Intentionally NOT disabled while sending — the user can compose
+          // their next message while the assistant streams. Enter is guarded
+          // (sendMessage no-ops while sending) so the draft is preserved until
+          // the response finishes.
         />
         <button
           onClick={onSend}
