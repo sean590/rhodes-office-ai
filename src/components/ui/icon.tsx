@@ -19,7 +19,7 @@ import {
   IconDotsVertical, IconArrowLeft, IconArrowRight, IconArrowDownLeft, IconMail,
   IconMailQuestion,
   IconEye, IconAffiliate, IconWand, IconUpload, IconDownload, IconShield,
-  IconTrash, IconMenu2, IconScale, IconBriefcase,
+  IconTrash, IconMenu2, IconScale, IconBriefcase, IconArrowsExchange,
   type IconProps as TablerIconProps,
 } from "@tabler/icons-react";
 
@@ -78,6 +78,7 @@ const MAP = {
   "menu-2": IconMenu2,
   scale: IconScale,
   briefcase: IconBriefcase,
+  "arrows-exchange": IconArrowsExchange,
 } as const;
 
 export type IconName = keyof typeof MAP;

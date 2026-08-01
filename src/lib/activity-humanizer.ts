@@ -248,6 +248,14 @@ function describe(action: string, rt: string, m: Meta): Described {
   if (rt === "investment_investor") {
     return { lead: a === "delete" ? "Removed investor" : "Added investor", detail: str(m.investor_name) || null };
   }
+  if (rt === "ownership_transfer") {
+    const from = str(m.from_entity_name);
+    const to = str(m.to_entity_name);
+    const pct = m.transferred_pct != null ? `${m.transferred_pct}%` : "a stake";
+    const verb = str(m.transfer_type) === "sale" ? "sold" : str(m.transfer_type) === "gift" ? "gifted" : "transferred";
+    const lead = from && to ? `${from} ${verb} ${pct} to ${to}` : `Recorded an ownership transfer`;
+    return { lead, detail: str(m.investment_name) || null };
+  }
   if (a === "create" && rt === "investment_co_investor") {
     return { lead: "Added co-investor", detail: str(m.name) || null };
   }
@@ -422,6 +430,7 @@ const ICON: Record<string, { icon: IconName; color: string }> = {
   investment_allocation: { icon: "chart-pie", color: "var(--blue)" },
   investment_investor: { icon: "chart-pie", color: "var(--purple)" },
   investment_co_investor: { icon: "chart-pie", color: "var(--amber)" },
+  ownership_transfer: { icon: "arrows-exchange", color: "var(--purple)" },
   cap_table_entry: { icon: "chart-pie", color: "var(--blue)" },
   document: { icon: "file-text", color: "var(--blue)" },
   pipeline: { icon: "file-text", color: "var(--blue)" },
