@@ -233,6 +233,14 @@ const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
     entity_id: VALID_UUID,
     expectation_id: VALID_UUID,
   },
+  add_document_entity_link: {
+    document_id: VALID_UUID,
+    entity_id: VALID_UUID,
+  },
+  remove_document_entity_link: {
+    document_id: VALID_UUID,
+    entity_id: VALID_UUID,
+  },
   record_ownership_transfer: {
     investment_id: VALID_UUID,
     from_entity_id: VALID_UUID,

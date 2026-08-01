@@ -322,6 +322,70 @@ describe("apply.ts — ownership transfers", () => {
   });
 });
 
+describe("apply.ts — document entity links", () => {
+  const DOC = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  const HOME = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+  const OTHER = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
+  it("add_document_entity_link: upserts a junction row for an additional entity", async () => {
+    push("documents", { data: { id: DOC, entity_id: HOME, name: "Gift Agreement" }, error: null });
+    push("entities", { data: { id: OTHER, name: "Oakmont Trust" }, error: null });
+    push("document_entity_links", { data: null, error: null }); // upsert
+
+    const { results } = await applyActions(
+      [{ action: "add_document_entity_link", data: { document_id: DOC, entity_id: OTHER } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(true);
+    const upsert = captured.find((c) => c.op === "upsert" && c.table === "document_entity_links");
+    expect(upsert).toBeDefined();
+    const p = upsert!.payload as { entity_id: string; role: string; source: string };
+    expect(p.entity_id).toBe(OTHER);
+    expect(p.role).toBe("related");
+    expect(p.source).toBe("manual");
+  });
+
+  it("add_document_entity_link: no-op when the entity is already the home", async () => {
+    push("documents", { data: { id: DOC, entity_id: HOME, name: "Gift Agreement" }, error: null });
+    push("entities", { data: { id: HOME, name: "Springvale LLC" }, error: null });
+
+    const { results } = await applyActions(
+      [{ action: "add_document_entity_link", data: { document_id: DOC, entity_id: HOME } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(true);
+    expect((results[0].data as { already_primary: boolean }).already_primary).toBe(true);
+    expect(captured.some((c) => c.op === "upsert" && c.table === "document_entity_links")).toBe(false);
+  });
+
+  it("remove_document_entity_link: deletes an additional association", async () => {
+    push("documents", { data: { id: DOC, entity_id: HOME, name: "Gift Agreement" }, error: null });
+    push("document_entity_links", { data: null, error: null }); // delete
+
+    const { results } = await applyActions(
+      [{ action: "remove_document_entity_link", data: { document_id: DOC, entity_id: OTHER } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(true);
+    expect(captured.some((c) => c.op === "delete" && c.table === "document_entity_links")).toBe(true);
+  });
+
+  it("remove_document_entity_link: refuses to remove the home entity", async () => {
+    push("documents", { data: { id: DOC, entity_id: HOME, name: "Gift Agreement" }, error: null });
+
+    const { results } = await applyActions(
+      [{ action: "remove_document_entity_link", data: { document_id: DOC, entity_id: HOME } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toMatch(/home \(primary\) entity/);
+  });
+});
+
 describe("apply.ts — documents", () => {
   it("archive_document: sets deleted_at", async () => {
     push("documents", {
