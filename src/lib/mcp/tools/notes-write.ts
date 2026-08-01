@@ -34,4 +34,39 @@ export const createNoteTool = defineTool({
   },
 });
 
-export const notesWriteTools: ToolDefinition[] = [createNoteTool];
+export const updateNoteTool = defineTool({
+  name: "update_note",
+  description:
+    "Edit an existing note: change its text and/or date, and attach or detach associations (entities, investments, people, documents) — additively. Use add_links to attach (e.g. add a person to a note after the fact) and remove_links to detach. Resolve names to ids with the list_* tools first.",
+  kind: "write",
+  inputSchema: z.object({
+    note_id: z.string().uuid(),
+    body: z.string().optional(),
+    note_date: z.string().optional(),
+    add_links: z.array(noteLink).optional(),
+    remove_links: z.array(noteLink).optional(),
+  }),
+  dryRun: async (input) => ({
+    summary: `Update note${input.add_links?.length ? ` (+${input.add_links.length} link)` : ""}${input.remove_links?.length ? ` (-${input.remove_links.length} link)` : ""}`,
+    preview: input,
+  }),
+  handler: async (input, ctx) => {
+    const result = await dispatchAction(ctx, "update_note", input);
+    return { data: result.data };
+  },
+});
+
+export const deleteNoteTool = defineTool({
+  name: "delete_note",
+  capability: "records:delete",
+  description: "Delete a note. Its associations are removed with it.",
+  kind: "write",
+  inputSchema: z.object({ note_id: z.string().uuid() }),
+  dryRun: async (input) => ({ summary: `Delete note ${input.note_id}` }),
+  handler: async (input, ctx) => {
+    const result = await dispatchAction(ctx, "delete_note", input);
+    return { data: result.data };
+  },
+});
+
+export const notesWriteTools: ToolDefinition[] = [createNoteTool, updateNoteTool, deleteNoteTool];
