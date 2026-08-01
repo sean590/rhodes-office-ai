@@ -36,7 +36,8 @@ const UPDATE_DOC_FIELD_LABEL: Record<string, string> = {
 
 export const linkDocumentToEntityTool = defineTool({
   name: "link_document_to_entity",
-  description: "Link a document to an entity by setting documents.entity_id.",
+  description:
+    "Set a document's PRIMARY (home) entity — where it's filed — by setting documents.entity_id. This MOVES the document's home; it does not add an association. A document can also be associated with MULTIPLE entities at once: to keep a document on its current entity AND surface it on another, use add_document_entity_link instead of moving it.",
   kind: "write",
   inputSchema: z.object({
     document_id: z.string().uuid(),
@@ -86,6 +87,59 @@ export const linkDocumentToInvestmentTool = defineTool({
       investment_id: input.investment_id,
       document_id: input.document_id,
     });
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
+export const addDocumentEntityLinkTool = defineTool({
+  name: "add_document_entity_link",
+  description:
+    "Associate a document with an ADDITIONAL entity WITHOUT moving its home entity. A document has one primary/home entity plus any number of extra associations; a document linked this way appears on each associated entity's Documents list. Use this when a document is relevant to several entities at once (e.g. a gift agreement that should show on both the giving trust and the receiving entity) — the answer to 'can we keep it linked to X too?' is yes, via this tool. Optional `role` labels the association (defaults to 'related').",
+  kind: "write",
+  inputSchema: z.object({
+    document_id: z.string().uuid(),
+    entity_id: z.string().uuid(),
+    role: z.string().optional().describe("Association label, e.g. 'related', 'beneficiary', 'counterparty'. Defaults to 'related'."),
+  }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: input.document_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const [docName, entityName] = await Promise.all([
+      resolveName(ctx, "document", input.document_id),
+      resolveName(ctx, "entity", input.entity_id),
+    ]);
+    return { summary: `Also link "${docName}" to ${entityName} (keeps its home entity)` };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: input.document_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const result = await dispatchAction(ctx, "add_document_entity_link", input);
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
+export const removeDocumentEntityLinkTool = defineTool({
+  name: "remove_document_entity_link",
+  description:
+    "Remove an ADDITIONAL entity association from a document (added via add_document_entity_link). Does not delete the document or change its home entity. Refuses to remove the document's primary/home entity — use link_document_to_entity to reassign the home, or unlink_document to detach it.",
+  kind: "write",
+  inputSchema: z.object({
+    document_id: z.string().uuid(),
+    entity_id: z.string().uuid(),
+  }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: input.document_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const [docName, entityName] = await Promise.all([
+      resolveName(ctx, "document", input.document_id),
+      resolveName(ctx, "entity", input.entity_id),
+    ]);
+    return { summary: `Remove ${entityName} association from "${docName}"` };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "document", resourceId: input.document_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const result = await dispatchAction(ctx, "remove_document_entity_link", input);
     return { data: result.data, audit_event_id: result.audit_event_id };
   },
 });
@@ -654,6 +708,8 @@ export const splitDocumentTool = defineTool({
 export const documentWriteTools: ToolDefinition[] = [
   linkDocumentToEntityTool,
   linkDocumentToInvestmentTool,
+  addDocumentEntityLinkTool,
+  removeDocumentEntityLinkTool,
   unlinkDocumentTool,
   archiveDocumentTool,
   updateDocumentTool,
