@@ -43,6 +43,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { EntityStateBanner, NeedsAttentionCard } from "@/components/entities/NeedsAttentionCard";
 import { humanizeActivity } from "@/lib/activity-humanizer";
 import { SendToProviderCard } from "@/components/entities/SendToProviderCard";
+import { LinkDocumentEntityCard } from "@/components/entities/LinkDocumentEntityCard";
 import { useCan } from "@/components/authz/role-provider";
 import { isReferencedInRole, isFirstClassRelatedRole, ROLE_CHIP_LABELS } from "@/lib/utils/document-roles";
 
@@ -4681,6 +4682,8 @@ function DocumentsTab({
 
   /* ---- Send-to-provider card state ---- */
   const [sendDocId, setSendDocId] = useState<string | null>(null);
+  /* ---- Link-to-entities card state ---- */
+  const [linkDocId, setLinkDocId] = useState<string | null>(null);
   // Multi-select bundle send (from the Documents-tab select mode).
   const [sendBundle, setSendBundle] = useState<{ id: string; name: string }[] | null>(null);
 
@@ -5517,6 +5520,7 @@ function DocumentsTab({
                         {canSend && (
                           <button onClick={() => setSendDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#2d5a3d", fontWeight: 500, fontFamily: "inherit" }}>Send to provider</button>
                         )}
+                        <button onClick={() => setLinkDocId((cur) => (cur === doc.id ? null : doc.id))} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#7b4db5", fontWeight: 500, fontFamily: "inherit" }}>Link to entities</button>
                         {canDelete && <button onClick={() => handleDelete(doc.id)} style={{ background: "none", border: "1px solid #e8e6df", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontSize: 12, color: "#c73e3e", fontWeight: 500, fontFamily: "inherit" }}>Delete</button>}
                       </div>
                       {sendDocId === doc.id && (
@@ -5524,6 +5528,14 @@ function DocumentsTab({
                           documents={[{ id: doc.id, name: doc.name }]}
                           onSubmitted={() => onRefreshQuiet()}
                           onClose={() => setSendDocId(null)}
+                        />
+                      )}
+                      {linkDocId === doc.id && (
+                        <LinkDocumentEntityCard
+                          documentId={doc.id}
+                          documentName={doc.name}
+                          onChanged={() => onRefreshQuiet()}
+                          onClose={() => setLinkDocId(null)}
                         />
                       )}
                     </div>

@@ -1138,6 +1138,48 @@ export async function applyActions(
           break;
         }
 
+        case "add_document_entity_link": {
+          const { addDocumentEntityLink } = await import("@/lib/document-entity-links");
+          const documentId = item.data.document_id as string;
+          const entityId = resolveEntityId(item.data.entity_id);
+          if (!documentId) throw new Error("document_id is required");
+          if (!entityId) throw new Error("entity_id is required");
+          const { ok, error, alreadyPrimary } = await addDocumentEntityLink(
+            supabase,
+            options.orgId!,
+            options.userId ?? null,
+            { documentId, entityId, role: item.data.role as string | undefined },
+          );
+          if (!ok) throw new Error(error || "Failed to link document to entity");
+          results.push({
+            action: "add_document_entity_link",
+            success: true,
+            data: { document_id: documentId, entity_id: entityId, already_primary: !!alreadyPrimary },
+          });
+          break;
+        }
+
+        case "remove_document_entity_link": {
+          const { removeDocumentEntityLink } = await import("@/lib/document-entity-links");
+          const documentId = item.data.document_id as string;
+          const entityId = resolveEntityId(item.data.entity_id);
+          if (!documentId) throw new Error("document_id is required");
+          if (!entityId) throw new Error("entity_id is required");
+          const { ok, error } = await removeDocumentEntityLink(
+            supabase,
+            options.orgId!,
+            options.userId ?? null,
+            { documentId, entityId },
+          );
+          if (!ok) throw new Error(error || "Failed to remove document-entity link");
+          results.push({
+            action: "remove_document_entity_link",
+            success: true,
+            data: { document_id: documentId, entity_id: entityId },
+          });
+          break;
+        }
+
         case "link_document_to_entity": {
           const linkEntityDocId = item.data.document_id as string;
           const linkEntityId = item.data.entity_id as string;
