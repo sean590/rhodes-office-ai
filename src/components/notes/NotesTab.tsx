@@ -53,6 +53,12 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  // Inline edit (body + date) of an existing note.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBody, setEditBody] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
   // People picker (who you spoke with).
   const [peopleQuery, setPeopleQuery] = useState("");
   const [peopleResults, setPeopleResults] = useState<Person[]>([]);
@@ -153,6 +159,35 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
       return next;
     });
 
+  const startEdit = (n: Note) => {
+    setEditingId(n.id);
+    setEditBody(n.body);
+    setEditDate(n.note_date);
+  };
+  const cancelEdit = () => setEditingId(null);
+  const saveEdit = async (id: string) => {
+    if (!editBody.trim()) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/notes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: editBody.trim(), note_date: editDate || undefined }),
+      });
+      if (res.ok) {
+        setEditingId(null);
+        await fetchNotes();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Couldn't save the edit.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "8px 12px",
@@ -236,47 +271,74 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
             const hasMore = rest.length > 0;
             return (
               <div key={n.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
-                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                  <button
-                    onClick={() => hasMore && toggle(n.id)}
-                    aria-label={isOpen ? "Collapse" : "Expand"}
-                    style={{ background: "none", border: "none", cursor: hasMore ? "pointer" : "default", color: "var(--faint)", fontSize: 12, padding: "2px 2px 0", flexShrink: 0, width: 14, visibility: hasMore ? "visible" : "hidden" }}
-                  >
-                    {isOpen ? "▾" : "▸"}
-                  </button>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
-                      <button onClick={() => hasMore && toggle(n.id)} style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: hasMore ? "pointer" : "default", fontSize: 14, fontWeight: 600, color: "var(--ink)", lineHeight: 1.4 }}>
-                        {title}
-                      </button>
-                      <span style={{ fontSize: 12, color: "var(--faint)", whiteSpace: "nowrap", flexShrink: 0 }}>{fmtDate(n.note_date)}</span>
+                {editingId === n.id ? (
+                  /* Edit mode: full body + date */
+                  <div>
+                    <textarea
+                      value={editBody}
+                      onChange={(e) => setEditBody(e.target.value)}
+                      style={{ ...inputStyle, minHeight: 100, resize: "vertical", marginBottom: 10 }}
+                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ ...inputStyle, width: "auto" }} />
+                      <div style={{ flex: 1 }} />
+                      <Button variant="secondary" onClick={cancelEdit}>Cancel</Button>
+                      <Button variant="primary" onClick={() => saveEdit(n.id)} disabled={savingEdit || !editBody.trim()}>
+                        {savingEdit ? "Saving…" : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <button
+                      onClick={() => hasMore && toggle(n.id)}
+                      aria-label={isOpen ? "Collapse" : "Expand"}
+                      style={{ background: "none", border: "none", cursor: hasMore ? "pointer" : "default", color: "var(--faint)", fontSize: 12, padding: "2px 2px 0", flexShrink: 0, width: 14, visibility: hasMore ? "visible" : "hidden" }}
+                    >
+                      {isOpen ? "▾" : "▸"}
+                    </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 12 }}>
+                        <button onClick={() => hasMore && toggle(n.id)} style={{ background: "none", border: "none", padding: 0, textAlign: "left", cursor: hasMore ? "pointer" : "default", fontSize: 14, fontWeight: 600, color: "var(--ink)", lineHeight: 1.4 }}>
+                          {title}
+                        </button>
+                        <span style={{ fontSize: 12, color: "var(--faint)", whiteSpace: "nowrap", flexShrink: 0 }}>{fmtDate(n.note_date)}</span>
+                      </div>
+
+                      {/* Associations (by name) */}
+                      {n.links.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                          {n.links.map((l, i) => (
+                            <span key={`${l.type}:${l.id}:${i}`}>{chip(l.name ?? "Unknown", LINK_LABEL[l.type] ?? l.type)}</span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Full body when expanded */}
+                      {isOpen && hasMore && (
+                        <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, marginTop: 8, whiteSpace: "pre-wrap" }}>{rest}</div>
+                      )}
                     </div>
 
-                    {/* Associations (by name) */}
-                    {n.links.length > 0 && (
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                        {n.links.map((l, i) => (
-                          <span key={`${l.type}:${l.id}:${i}`}>{chip(l.name ?? "Unknown", LINK_LABEL[l.type] ?? l.type)}</span>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Full body when expanded */}
-                    {isOpen && hasMore && (
-                      <div style={{ fontSize: 13.5, color: "var(--muted)", lineHeight: 1.55, marginTop: 8, whiteSpace: "pre-wrap" }}>{rest}</div>
-                    )}
+                    <button
+                      onClick={() => startEdit(n)}
+                      title="Edit note"
+                      aria-label="Edit note"
+                      style={{ background: "none", border: "none", color: "var(--faint)", fontSize: 13, lineHeight: 1, cursor: "pointer", padding: "2px 6px", flexShrink: 0 }}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      onClick={() => deleteNote(n.id)}
+                      disabled={deletingId === n.id}
+                      title="Delete note"
+                      aria-label="Delete note"
+                      style={{ background: "none", border: "none", color: "var(--faint)", fontSize: 15, lineHeight: 1, cursor: deletingId === n.id ? "default" : "pointer", padding: "2px 6px", flexShrink: 0 }}
+                    >
+                      ×
+                    </button>
                   </div>
-
-                  <button
-                    onClick={() => deleteNote(n.id)}
-                    disabled={deletingId === n.id}
-                    title="Delete note"
-                    aria-label="Delete note"
-                    style={{ background: "none", border: "none", color: "var(--faint)", fontSize: 15, lineHeight: 1, cursor: deletingId === n.id ? "default" : "pointer", padding: "2px 6px", flexShrink: 0 }}
-                  >
-                    ×
-                  </button>
-                </div>
+                )}
               </div>
             );
           })}
