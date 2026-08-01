@@ -1965,6 +1965,37 @@ export async function applyActions(
           break;
         }
 
+        case "record_ownership_transfer": {
+          const { createOwnershipTransfer } = await import("@/lib/investment-transfers");
+          const investmentId = resolveInvestmentId(item.data.investment_id);
+          const fromEntityId = resolveEntityId(item.data.from_entity_id);
+          const toEntityId = resolveEntityId(item.data.to_entity_id);
+          if (!investmentId) throw new Error("investment_id is required");
+          if (!fromEntityId) throw new Error("from_entity_id is required");
+          if (!toEntityId) throw new Error("to_entity_id is required");
+
+          const { transfer, error } = await createOwnershipTransfer(
+            supabase,
+            options.orgId!,
+            options.userId ?? null,
+            {
+              investmentId,
+              fromEntityId,
+              toEntityId,
+              transferType: item.data.transfer_type as "gift" | "sale" | "other",
+              transferredPct: Number(item.data.transferred_pct),
+              fairMarketValue: (item.data.fair_market_value as number | null | undefined) ?? null,
+              costBasis: (item.data.cost_basis as number | null | undefined) ?? null,
+              transferDate: (item.data.transfer_date as string | null | undefined) ?? null,
+              documentId: (item.data.document_id as string | null | undefined) ?? null,
+              notes: (item.data.notes as string | null | undefined) ?? null,
+            },
+          );
+          if (error || !transfer) throw new Error(error || "Failed to record ownership transfer");
+          results.push({ action: "record_ownership_transfer", success: true, data: transfer });
+          break;
+        }
+
         case "archive_document": {
           const documentId = item.data.document_id as string;
           if (!documentId) throw new Error("document_id is required");

@@ -72,6 +72,16 @@ describe("activity humanizer", () => {
       .toBe("Recorded capital call of $50,000");
   });
 
+  it("labels ownership transfers with verb, parties, and pct", () => {
+    expect(text("transfer", "ownership_transfer", {
+      from_entity_name: "Springvale LLC", to_entity_name: "Oakmont Trust",
+      transferred_pct: 25, transfer_type: "gift", investment_name: "909 Park",
+    })).toBe("Springvale LLC gifted 25% to Oakmont Trust — 909 Park");
+    expect(text("transfer", "ownership_transfer", {
+      from_entity_name: "A", to_entity_name: "B", transferred_pct: 10, transfer_type: "sale",
+    })).toBe("A sold 10% to B");
+  });
+
   // ── Raw-code regression guards (the bugs that motivated consolidation) ─
 
   it("never leaks raw snake_case event codes", () => {
