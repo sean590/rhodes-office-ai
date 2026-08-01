@@ -49,7 +49,10 @@ export async function GET(
       const dirEntry = row.directory_entries as { name: string } | null;
       const entityEntry = row.member_entity as { name: string } | null;
       const { directory_entries: _, member_entity: _e, ...rest } = row;
-      return { ...rest, member_name: dirEntry?.name ?? entityEntry?.name ?? null };
+      // Prefer the live entity/directory name; fall back to the stored name for
+      // name-only members (no linkable id).
+      const storedName = (rest.member_name as string | null) ?? null;
+      return { ...rest, member_name: dirEntry?.name ?? entityEntry?.name ?? storedName };
     });
 
     return NextResponse.json(allocations);
@@ -138,6 +141,11 @@ export async function POST(
       }
       if (alloc.member_directory_id) {
         insertData.member_directory_id = alloc.member_directory_id;
+      }
+      // Fallback display name — the only way a name-only member (no id) shows a
+      // name instead of "Unknown".
+      if (alloc.member_name) {
+        insertData.member_name = String(alloc.member_name).slice(0, 200);
       }
 
       const { data, error } = await db
