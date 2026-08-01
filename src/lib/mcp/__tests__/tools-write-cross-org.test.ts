@@ -233,6 +233,13 @@ const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
     entity_id: VALID_UUID,
     expectation_id: VALID_UUID,
   },
+  record_ownership_transfer: {
+    investment_id: VALID_UUID,
+    from_entity_id: VALID_UUID,
+    to_entity_id: VALID_UUID,
+    transfer_type: "gift",
+    transferred_pct: 25,
+  },
   send_document_to_provider: {
     document_ids: [VALID_UUID],
     provider_id: VALID_UUID,

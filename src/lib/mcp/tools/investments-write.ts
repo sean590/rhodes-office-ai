@@ -474,6 +474,48 @@ export const setInvestmentAllocationsTool = defineTool({
   },
 });
 
+// --- record_ownership_transfer -----------------------------------------------
+
+export const recordOwnershipTransferTool = defineTool({
+  name: "record_ownership_transfer",
+  description:
+    "Record an ownership transfer of an investment stake from one internal entity to another — a gift, sale, or other. Applies the change to the cap table: the giving entity's capital_pct drops by transferred_pct (points of the whole investment) and the receiving entity gains it; profit share and committed capital move pro-rata. The giver must be an active investor with enough stake. Resolve entity names to ids with list_entities first.",
+  kind: "write",
+  inputSchema: z.object({
+    investment_id: z.string().uuid(),
+    from_entity_id: z.string().uuid().describe("The entity giving up the stake (must be an active investor)."),
+    to_entity_id: z.string().uuid().describe("The entity receiving the stake."),
+    transfer_type: z.enum(["gift", "sale", "other"]),
+    transferred_pct: z.number().describe("Ownership percentage POINTS of the whole investment being transferred (0-100)."),
+    fair_market_value: z.number().optional().nullable().describe("FMV of the transferred stake at the transfer date."),
+    cost_basis: z.number().optional().nullable().describe("Transferor's cost basis in the transferred stake."),
+    transfer_date: z.string().optional().nullable().describe("ISO date (YYYY-MM-DD) of the transfer; defaults to today."),
+    document_id: z.string().uuid().optional().nullable().describe("Supporting document (gift memo, assignment, bill of sale)."),
+    notes: z.string().optional().nullable(),
+  }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "investment", resourceId: input.investment_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.from_entity_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.to_entity_id });
+    const [fromName, toName, invName] = await Promise.all([
+      resolveName(ctx, "entity", input.from_entity_id),
+      resolveName(ctx, "entity", input.to_entity_id),
+      resolveName(ctx, "investment", input.investment_id),
+    ]);
+    return {
+      summary: `${fromName} transfers ${input.transferred_pct}% of ${invName} to ${toName} (${input.transfer_type})`,
+      preview: input,
+    };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "investment", resourceId: input.investment_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.from_entity_id });
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.to_entity_id });
+    const result = await dispatchAction(ctx, "record_ownership_transfer", input);
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
 // Suppress the unused import lint when LINE_ITEM_DESC is the only consumer.
 void LINE_ITEM_DESC;
 
@@ -491,4 +533,5 @@ export const investmentWriteTools: ToolDefinition[] = [
   updateInvestmentTransactionTool,
   deleteInvestmentTransactionTool,
   setInvestmentAllocationsTool,
+  recordOwnershipTransferTool,
 ];

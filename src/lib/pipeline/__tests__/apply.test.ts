@@ -209,6 +209,119 @@ describe("apply.ts — investment investors", () => {
   });
 });
 
+describe("apply.ts — ownership transfers", () => {
+  const INV = "11111111-1111-1111-1111-111111111111";
+  const FROM = "22222222-2222-2222-2222-222222222222";
+  const TO = "33333333-3333-3333-3333-333333333333";
+
+  function seedLookup(fromRow: Record<string, unknown> | null, toRow: Record<string, unknown> | null) {
+    push("investments", { data: { id: INV, name: "909 Park" }, error: null }); // investment lookup
+    push("entities", { data: [{ id: FROM, name: "Springvale LLC" }, { id: TO, name: "Oakmont Trust" }], error: null }); // entity name snapshots
+    push("investment_investors", { data: fromRow, error: null }); // from active investor
+  }
+
+  it("record_ownership_transfer: moves capital points and pro-rata profit/committed to a NEW investor", async () => {
+    seedLookup(
+      { id: "ii-from", investment_id: INV, entity_id: FROM, capital_pct: 40, profit_pct: 50, committed_capital: 100000, is_active: true },
+      null,
+    );
+    push("investment_investors", { data: null, error: null }); // from update (thenable)
+    push("investment_investors", { data: null, error: null }); // to existing lookup → none
+    push("investment_investors", { data: null, error: null }); // to insert (thenable)
+    push("investment_ownership_transfers", { data: { id: "tr-1", transferred_pct: 10 }, error: null });
+
+    const { results } = await applyActions(
+      [{ action: "record_ownership_transfer", data: {
+        investment_id: INV, from_entity_id: FROM, to_entity_id: TO,
+        transfer_type: "gift", transferred_pct: 10,
+      } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(true);
+
+    // FROM: 40% → 30%; profit 50 → 37.5 (moved 12.5); committed 100000 → 75000.
+    const fromUpdate = captured.find((c) => c.op === "update" && c.table === "investment_investors");
+    const fp = fromUpdate!.payload as { capital_pct: number; profit_pct: number; committed_capital: number; is_active: boolean };
+    expect(fp.capital_pct).toBe(30);
+    expect(fp.profit_pct).toBe(37.5);
+    expect(fp.committed_capital).toBe(75000);
+    expect(fp.is_active).toBe(true);
+
+    // TO (new investor): +10% capital, +12.5 profit, +25000 committed.
+    const toInsert = captured.find((c) => c.op === "insert" && c.table === "investment_investors");
+    const tp = toInsert!.payload as { capital_pct: number; profit_pct: number; committed_capital: number };
+    expect(tp.capital_pct).toBe(10);
+    expect(tp.profit_pct).toBe(12.5);
+    expect(tp.committed_capital).toBe(25000);
+
+    // Event row written with the name snapshots.
+    const evt = captured.find((c) => c.op === "insert" && c.table === "investment_ownership_transfers");
+    const ep = evt!.payload as { from_entity_name: string; to_entity_name: string; transferred_pct: number };
+    expect(ep.from_entity_name).toBe("Springvale LLC");
+    expect(ep.to_entity_name).toBe("Oakmont Trust");
+    expect(ep.transferred_pct).toBe(10);
+  });
+
+  it("record_ownership_transfer: deactivates the giver on a full-stake transfer", async () => {
+    seedLookup(
+      { id: "ii-from", investment_id: INV, entity_id: FROM, capital_pct: 40, profit_pct: 40, committed_capital: 80000, is_active: true },
+      null,
+    );
+    push("investment_investors", { data: null, error: null }); // from update
+    push("investment_investors", { data: null, error: null }); // to existing lookup
+    push("investment_investors", { data: null, error: null }); // to insert
+    push("investment_ownership_transfers", { data: { id: "tr-2" }, error: null });
+
+    const { results } = await applyActions(
+      [{ action: "record_ownership_transfer", data: {
+        investment_id: INV, from_entity_id: FROM, to_entity_id: TO,
+        transfer_type: "sale", transferred_pct: 40,
+      } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(true);
+    const fromUpdate = captured.find((c) => c.op === "update" && c.table === "investment_investors");
+    const fp = fromUpdate!.payload as { capital_pct: number; is_active: boolean };
+    expect(fp.capital_pct).toBe(0);
+    expect(fp.is_active).toBe(false);
+  });
+
+  it("record_ownership_transfer: rejects when the giver lacks enough stake", async () => {
+    seedLookup(
+      { id: "ii-from", investment_id: INV, entity_id: FROM, capital_pct: 5, profit_pct: 5, committed_capital: 1000, is_active: true },
+      null,
+    );
+
+    const { results } = await applyActions(
+      [{ action: "record_ownership_transfer", data: {
+        investment_id: INV, from_entity_id: FROM, to_entity_id: TO,
+        transfer_type: "gift", transferred_pct: 10,
+      } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toMatch(/cannot transfer/);
+  });
+
+  it("record_ownership_transfer: rejects when the giver is not an active investor", async () => {
+    seedLookup(null, null); // from active lookup → none
+
+    const { results } = await applyActions(
+      [{ action: "record_ownership_transfer", data: {
+        investment_id: INV, from_entity_id: FROM, to_entity_id: TO,
+        transfer_type: "gift", transferred_pct: 10,
+      } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toMatch(/not an active investor/);
+  });
+});
+
 describe("apply.ts — documents", () => {
   it("archive_document: sets deleted_at", async () => {
     push("documents", {

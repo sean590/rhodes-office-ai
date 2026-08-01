@@ -10,6 +10,7 @@ import { useSetPageContext } from "@/components/chat/page-context-provider";
 import { useCan } from "@/components/authz/role-provider";
 import { AllocationsTab } from "@/components/investments/AllocationsTab";
 import { TransactionsTab } from "@/components/investments/TransactionsTab";
+import { TransfersTab } from "@/components/investments/TransfersTab";
 import { DocumentsTab } from "@/components/investments/DocumentsTab";
 import { NotesTab } from "@/components/notes/NotesTab";
 import { humanizeActivity } from "@/lib/activity-humanizer";
@@ -48,6 +49,7 @@ function fmtDollarsFull(n: number): string {
 const TABS = [
   { id: "allocations", label: "Allocations" },
   { id: "transactions", label: "Transactions" },
+  { id: "transfers", label: "Transfers" },
   { id: "documents", label: "Documents" },
   { id: "notes", label: "Notes" },
   { id: "activity", label: "Activity" },
@@ -363,6 +365,15 @@ export default function InvestmentDetailPage() {
 
       {activeTab === "transactions" && (
         <TransactionsTab investmentId={id} investors={investment.investors} isMobile={isMobile} onTransactionsChanged={fetchInvestment} />
+      )}
+
+      {activeTab === "transfers" && (
+        <TransfersTab
+          investmentId={id}
+          investors={investment.investors}
+          isMobile={isMobile}
+          onTransferRecorded={fetchInvestment}
+        />
       )}
 
       {activeTab === "documents" && (
