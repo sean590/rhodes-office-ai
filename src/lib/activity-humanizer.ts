@@ -153,6 +153,10 @@ function describe(action: string, rt: string, m: Meta): Described {
     const title = str(m.title);
     return { lead: title ? `Added a note — ${title}` : "Added a note", detail: null };
   }
+  if (a === "update_note") {
+    const title = str(m.title);
+    return { lead: title ? `Updated a note — ${title}` : "Updated a note", detail: null };
+  }
 
   // ── Entities ──────────────────────────────────────────────────────────
   if (a === "create" && rt === "entity") {

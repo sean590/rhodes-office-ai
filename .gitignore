@@ -51,3 +51,7 @@ next-env.d.ts
 
 # Claude Code working notes (per-session design scratchpads, not durable docs)
 CLAUDE-CODE-*.md
+
+# Spike harness — local creds, downloads, screenshots (never commit)
+spike/
+Bugs/

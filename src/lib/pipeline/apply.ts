@@ -673,6 +673,27 @@ export async function applyActions(
           break;
         }
 
+        case "update_note": {
+          const { updateNote, parseTargets } = await import("@/lib/notes");
+          const { ok, error } = await updateNote(supabase, options.orgId!, options.userId ?? null, item.data.note_id as string, {
+            body: item.data.body as string | undefined,
+            noteDate: item.data.note_date as string | undefined,
+            addTargets: item.data.add_links ? parseTargets(item.data.add_links) : undefined,
+            removeTargets: item.data.remove_links ? parseTargets(item.data.remove_links) : undefined,
+          });
+          if (!ok) throw new Error(error || "Failed to update note");
+          results.push({ action: "update_note", success: true, data: { id: item.data.note_id } });
+          break;
+        }
+
+        case "delete_note": {
+          const { deleteNote } = await import("@/lib/notes");
+          const { ok, error } = await deleteNote(supabase, options.orgId!, item.data.note_id as string);
+          if (!ok) throw new Error(error || "Failed to delete note");
+          results.push({ action: "delete_note", success: true, data: { id: item.data.note_id } });
+          break;
+        }
+
         case "add_custom_field": {
           const { data: fieldDef, error: defError } = await supabase
             .from("custom_field_definitions")

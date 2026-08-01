@@ -143,7 +143,7 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
   const [editDate, setEditDate] = useState("");
-  const [editPeople, setEditPeople] = useState<Person[]>([]);
+  const [editLinks, setEditLinks] = useState<NoteLink[]>([]);
   const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchNotes = useCallback(async () => {
@@ -214,24 +214,14 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
     setEditingId(n.id);
     setEditBody(n.body);
     setEditDate(n.note_date);
-    // Seed the picker with the note's current people (contact links).
-    setEditPeople(
-      n.links.filter((l) => l.type === "contact").map((l) => ({ id: l.id, name: l.name ?? "Unknown", type: "" })),
-    );
+    setEditLinks(n.links); // the full current association set (all kinds)
   };
   const cancelEdit = () => setEditingId(null);
   const saveEdit = async (id: string) => {
     if (!editBody.trim()) return;
     setSavingEdit(true);
     try {
-      // Preserve every non-people association (the record + any cross-links)
-      // and replace the people set with the edited one.
-      const note = notes.find((x) => x.id === id);
-      const preserved = (note?.links ?? [])
-        .filter((l) => l.type !== "contact")
-        .map((l) => ({ type: l.type, id: l.id }));
-      const links = [...preserved, ...editPeople.map((p) => ({ type: "contact", id: p.id }))];
-
+      const links = editLinks.map((l) => ({ type: l.type, id: l.id }));
       const res = await fetch(`/api/notes/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -290,14 +280,39 @@ export function NotesTab({ target }: { target: { type: NoteTargetType; id: strin
             return (
               <div key={n.id} style={{ padding: "12px 0", borderBottom: "1px solid var(--line)" }}>
                 {editingId === n.id ? (
-                  /* Edit mode: body + people + date */
+                  /* Edit mode: body + associations + people + date */
                   <div>
                     <textarea
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       style={{ ...INPUT_STYLE, minHeight: 100, resize: "vertical", marginBottom: 10 }}
                     />
-                    <PeoplePicker value={editPeople} onChange={setEditPeople} />
+                    {/* Current associations (entities/investments/documents),
+                        removable. People are managed by the picker below. */}
+                    {editLinks.some((l) => l.type !== "contact") && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "var(--faint)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Linked to</label>
+                        {editLinks
+                          .filter((l) => l.type !== "contact")
+                          .map((l) => (
+                            <Chip
+                              key={`${l.type}:${l.id}`}
+                              text={l.name ?? "Unknown"}
+                              sub={LINK_LABEL[l.type] ?? l.type}
+                              onRemove={() => setEditLinks((prev) => prev.filter((x) => !(x.type === l.type && x.id === l.id)))}
+                            />
+                          ))}
+                      </div>
+                    )}
+                    <PeoplePicker
+                      value={editLinks.filter((l) => l.type === "contact").map((l) => ({ id: l.id, name: l.name ?? "Unknown", type: "" }))}
+                      onChange={(people) =>
+                        setEditLinks((prev) => [
+                          ...prev.filter((l) => l.type !== "contact"),
+                          ...people.map((p) => ({ type: "contact", id: p.id, name: p.name })),
+                        ])
+                      }
+                    />
                     <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} style={{ ...INPUT_STYLE, width: "auto" }} />
                       <div style={{ flex: 1 }} />
