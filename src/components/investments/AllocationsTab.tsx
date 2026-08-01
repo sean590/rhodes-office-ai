@@ -123,6 +123,13 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
     const members = membersByInvestor[investorId] || [];
     const allocMap = new Map(allocs.filter(a => a.member_entity_id).map(a => [a.member_entity_id as string, a]));
     const allocDirMap = new Map(allocs.filter(a => a.member_directory_id).map(a => [a.member_directory_id as string, a]));
+    // Name-only members (no id) are matched to their allocation by name, so the
+    // round-trip works (member shows checked with its %, not perpetually blank).
+    const allocByName = new Map(
+      allocs
+        .filter(a => !a.member_entity_id && !a.member_directory_id && a.member_name)
+        .map(a => [(a.member_name as string).toLowerCase(), a]),
+    );
 
     const editList: EditAllocation[] = [];
     const seenIds = new Set<string>();
@@ -131,7 +138,7 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
       const key = member.ref_entity_id ? `entity:${member.ref_entity_id}` : member.directory_entry_id ? `dir:${member.directory_entry_id}` : `pending:${member.id}`;
       if (seenIds.has(key)) continue;
       seenIds.add(key);
-      const alloc = member.ref_entity_id ? allocMap.get(member.ref_entity_id) : member.directory_entry_id ? allocDirMap.get(member.directory_entry_id) : null;
+      const alloc = member.ref_entity_id ? allocMap.get(member.ref_entity_id) : member.directory_entry_id ? allocDirMap.get(member.directory_entry_id) : allocByName.get(member.name.toLowerCase());
       editList.push({
         member_directory_id: member.directory_entry_id || null,
         member_entity_id: member.ref_entity_id || null,
@@ -169,6 +176,9 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
       const p: Record<string, unknown> = {
         allocation_pct: Number(a.allocation_pct),
         committed_amount: a.committed_amount !== "" ? Number(a.committed_amount) : null,
+        // Always send the member's display name as a fallback — the API prefers
+        // the live entity/directory name but needs this for name-only members.
+        member_name: a.name || null,
       };
       if (a.member_entity_id) p.member_entity_id = a.member_entity_id;
       if (a.member_directory_id) p.member_directory_id = a.member_directory_id;
