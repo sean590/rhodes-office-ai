@@ -198,6 +198,10 @@ export async function POST(request: Request) {
       try {
         let finalResult: OrchestratorResult | undefined;
 
+        // Wall-clock for the whole turn (agent loop incl. tool calls) — recorded
+        // as latency in the AI-usage ledger.
+        const turnStart = Date.now();
+
         // Stream all events EXCEPT done — hold done until after DB persist
         // so we can include the real message ID in the done payload.
         for await (const event of runOrchestratorStreaming({
@@ -260,6 +264,7 @@ export async function POST(request: Request) {
               model: finalResult.model ?? "unknown",
               usage: finalResult.usage,
               costUsd: finalResult.costUsd,
+              latencyMs: Date.now() - turnStart,
               organizationId: orgId,
               userId: user.id,
               resourceType: "chat_session",
