@@ -6407,6 +6407,9 @@ export default function EntityDetailPage() {
             openFilings={needsFilings.length}
             missingDocs={overviewMissingDocs.length}
             showAttention={!isPerson}
+            aiOverview={entity.ai_overview ?? null}
+            aiOverviewGeneratedAt={entity.ai_overview_generated_at ?? null}
+            aiOverviewStale={entity.ai_overview_stale ?? false}
           />
           {/* See Investments link for parent investor entities */}
           {isParentInvestor && (

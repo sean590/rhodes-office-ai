@@ -2051,6 +2051,19 @@ export async function applyActions(
           break;
         }
 
+        case "refresh_entity_overview": {
+          const { generateEntityOverview } = await import("@/lib/entity-overview");
+          const entityId = resolveEntityId(item.data.entity_id);
+          if (!entityId) throw new Error("entity_id is required");
+          const res = await generateEntityOverview(supabase, options.orgId!, entityId, { force: true });
+          results.push({
+            action: "refresh_entity_overview",
+            success: true,
+            data: { entity_id: entityId, overview: res.overview },
+          });
+          break;
+        }
+
         case "archive_document": {
           const documentId = item.data.document_id as string;
           if (!documentId) throw new Error("document_id is required");
