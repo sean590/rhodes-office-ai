@@ -27,7 +27,10 @@ cd "$(dirname "$0")/.."
 # (the teach / "File it anyway" correction control — writes inbound_delivery_
 # senders, which has only a SELECT policy for authenticated, so the raw client
 # is required; also deletes+re-dispatches the delivery row).
-BASELINE=74
+# 75 (was 74): + api/cron/refresh-overviews — the AI investment-overview
+# regenerator (system job, no user context: claims stale investments org-wide
+# and regenerates, the exempt system-job category).
+BASELINE=75
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
