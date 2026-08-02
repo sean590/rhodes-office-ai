@@ -76,10 +76,11 @@ describe("generateComplianceObligations — federal rules", () => {
     expect(fedIncomeIds).toEqual([]);
   });
 
-  it("generates BOI for an LLC even without tax_classification", async () => {
-    // BOI is keyed on entity_types only, not tax_classifications.
+  it("never generates BOI — FinCEN exempted domestic companies (Mar 2025)", async () => {
+    // FED_ALL_BOI has entity_types: [] so it matches nothing; Rhodes entities
+    // are all US-formed. See rhodes-compliance-data-integrity-spec.md §0a.
     const result = generateComplianceObligations(baseEntity());
-    expect(result.map((o) => o.rule_id)).toContain("FED_ALL_BOI");
+    expect(result.map((o) => o.rule_id)).not.toContain("FED_ALL_BOI");
   });
 
   it("generates 1040 + 1040-ES for a person entity with no tax_classification", async () => {

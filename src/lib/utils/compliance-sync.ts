@@ -13,6 +13,40 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { generateComplianceObligations } from "./compliance-engine";
 
+/**
+ * Pure reconciliation: which existing rows are stale and must be deleted?
+ * Two cases:
+ *  1. Rule no longer applies at all (rule_id absent from generated set).
+ *  2. Catalog correction moved a FUTURE due date: the rule still generates,
+ *     but the row's (rule_id, next_due_date) pair no longer matches — the
+ *     upsert inserts the corrected row, so the old one must go or the user
+ *     sees two pending deadlines, one wrong.
+ * A pending row with a PAST due date is user reality (an overdue filing) —
+ * the engine only ever emits future dates, so it is never touched.
+ * Exported for tests; see rhodes-compliance-data-integrity-spec.md §0b.
+ */
+export function computeStaleObligations<
+  T extends { rule_id: string; next_due_date: string | null; status: string },
+>(
+  existing: T[],
+  generated: Array<{ rule_id: string; next_due_date: string | null }>,
+  today: string = new Date().toISOString().split("T")[0],
+): T[] {
+  const generatedRuleIds = new Set(generated.map((g) => g.rule_id));
+  const generatedKeys = new Set(generated.map((g) => `${g.rule_id}|${g.next_due_date}`));
+  return existing.filter((ex) => {
+    if (ex.status !== "pending") return false;
+    if (!generatedRuleIds.has(ex.rule_id)) return true;
+    if (
+      ex.next_due_date &&
+      ex.next_due_date > today &&
+      !generatedKeys.has(`${ex.rule_id}|${ex.next_due_date}`)
+    )
+      return true;
+    return false;
+  });
+}
+
 export async function syncComplianceForEntity(
   entityId: string,
   orgId: string,
@@ -85,7 +119,6 @@ export async function syncComplianceForEntity(
   // Build lookup of existing.
   const existingMap = new Map<string, (typeof existing)[0]>();
   for (const ex of existing) existingMap.set(`${ex.rule_id}|${ex.next_due_date}`, ex);
-  const generatedRuleIds = new Set(generated.map((g) => g.rule_id));
 
   // Upsert — skip completed/exempt/not_applicable.
   const rows = generated
@@ -133,8 +166,9 @@ export async function syncComplianceForEntity(
     }
   }
 
-  // Remove stale pending obligations whose rules no longer apply.
-  const toRemove = existing.filter((ex) => !generatedRuleIds.has(ex.rule_id) && ex.status === "pending");
+  // Remove stale pending obligations (rule gone, or future due date corrected
+  // by a catalog change — see computeStaleObligations above).
+  const toRemove = computeStaleObligations(existing, generated);
   if (toRemove.length > 0) {
     await admin
       .from("compliance_obligations")
