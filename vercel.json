@@ -22,6 +22,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/refresh-overviews",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/retrieve-safesend",
       "schedule": "*/10 * * * *"
     }
