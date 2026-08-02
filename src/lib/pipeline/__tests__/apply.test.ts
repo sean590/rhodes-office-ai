@@ -116,6 +116,13 @@ vi.mock("@/lib/investment-overview", () => ({
   })),
 }));
 
+vi.mock("@/lib/entity-overview", () => ({
+  generateEntityOverview: vi.fn(async (_db, _org, id) => ({
+    overview: `Entity overview for ${id}`,
+    skipped: false,
+  })),
+}));
+
 // Import after mocks.
 import { applyActions } from "../apply";
 
@@ -402,6 +409,18 @@ describe("apply.ts — investment overview", () => {
     );
     expect(results[0].success).toBe(true);
     expect((results[0].data as { overview: string }).overview).toBe(`Overview for ${INV}`);
+  });
+});
+
+describe("apply.ts — entity overview", () => {
+  it("refresh_entity_overview: regenerates and returns the overview", async () => {
+    const ENT = "22222222-2222-2222-2222-222222222222";
+    const { results } = await applyActions(
+      [{ action: "refresh_entity_overview", data: { entity_id: ENT } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+    expect(results[0].success).toBe(true);
+    expect((results[0].data as { overview: string }).overview).toBe(`Entity overview for ${ENT}`);
   });
 });
 

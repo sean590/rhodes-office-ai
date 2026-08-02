@@ -724,6 +724,24 @@ export const removeCustomFieldTool = defineTool({
 // sync_entity_members) are read tools — see entities.ts. They call utility
 // functions directly and don't fit the dryRun/approval pattern.
 
+export const refreshEntityOverviewTool = defineTool({
+  name: "refresh_entity_overview",
+  description:
+    "Regenerate the AI overview (the plain-language briefing) for an entity right now, reading its current documents, notes, investments held, compliance obligations, and governance. Overviews also refresh automatically in the background when material info lands; use this to force an immediate refresh on request.",
+  kind: "write",
+  inputSchema: z.object({ entity_id: z.string().uuid() }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const name = await resolveName(ctx, "entity", input.entity_id);
+    return { summary: `Regenerate the AI overview for ${name}` };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "entity", resourceId: input.entity_id });
+    const result = await dispatchAction(ctx, "refresh_entity_overview", input);
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
 // --- Export -------------------------------------------------------------------
 
 export const entityWriteTools: ToolDefinition[] = [
@@ -754,4 +772,5 @@ export const entityWriteTools: ToolDefinition[] = [
   updateRegistrationTool,
   setCustomFieldTool,
   removeCustomFieldTool,
+  refreshEntityOverviewTool,
 ];
