@@ -4,6 +4,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { recordAiUsage } from "@/lib/ai-usage";
 import { extractFullText } from "./pdf-processor";
 import Anthropic from "@anthropic-ai/sdk";
 
@@ -379,6 +380,7 @@ export async function runTier1(
   input: Tier1Input,
   entityRoster: EntityRosterItem[],
   investmentRoster: InvestmentRosterItem[],
+  opts?: { orgId?: string | null; documentQueueId?: string | null },
 ): Promise<Tier1Result> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error("AI not configured — missing ANTHROPIC_API_KEY");
@@ -479,10 +481,12 @@ ${textSample}
 
 Classify this document and return JSON.`;
 
+  const TRIAGE_MODEL = "claude-haiku-4-5-20251001";
   let response;
+  const t0 = Date.now();
   try {
     response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: TRIAGE_MODEL,
       max_tokens: 1024,
       system: [{ type: "text", text: cacheablePrompt, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: userMessage }],
@@ -506,6 +510,22 @@ Classify this document and return JSON.`;
   const usage = response.usage;
   const usageAny = usage as unknown as Record<string, number>;
   console.log(`[TRIAGE] Tokens — input: ${usage.input_tokens}, cached: ${usageAny.cache_read_input_tokens || 0}, output: ${usage.output_tokens}`);
+
+  // Central AI-usage ledger — triage was previously unpriced/unrecorded.
+  await recordAiUsage(createAdminClient(), {
+    surface: "triage",
+    model: TRIAGE_MODEL,
+    usage: {
+      input: usage.input_tokens || 0,
+      output: usage.output_tokens || 0,
+      cacheRead: usageAny.cache_read_input_tokens || 0,
+      cacheCreation: usageAny.cache_creation_input_tokens || 0,
+    },
+    latencyMs: Date.now() - t0,
+    organizationId: opts?.orgId ?? null,
+    resourceType: "document_queue",
+    resourceId: opts?.documentQueueId ?? null,
+  });
 
   const content = response.content[0]?.type === "text" ? response.content[0].text : "";
 
@@ -566,6 +586,7 @@ export async function triageBatch(
       },
       entityRoster,
       investmentRoster,
+      { orgId, documentQueueId: item.id },
     ).then((result) => [item.id, result] as [string, Tier1Result])
   );
 
