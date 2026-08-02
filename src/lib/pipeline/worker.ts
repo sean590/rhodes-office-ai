@@ -14,6 +14,7 @@ import {
 } from "@/lib/mcp/orchestrator";
 import { redact } from "@/lib/mcp/redact";
 import { friendlyProcessingError } from "@/lib/pipeline/error-copy";
+import { recordAiUsage } from "@/lib/ai-usage";
 
 /**
  * Process a single queue item via the document agent. The agent is the
@@ -143,6 +144,18 @@ export async function processQueueItem(
         `${agentResult.toolCalls.length} tool calls, ${agentResult.tokensUsed} tokens. ` +
         agentResult.summary.slice(0, 200),
     );
+    // Central AI-usage ledger (in addition to the per-row extraction_* columns).
+    await recordAiUsage(admin, {
+      surface: "document_extraction",
+      model: agentResult.model,
+      usage: agentResult.usage,
+      costUsd: agentResult.costUsd,
+      organizationId: batchOrgId,
+      resourceType: "document_queue",
+      resourceId: itemId,
+      success: agentResult.status !== "failed",
+      metadata: { status: agentResult.status, turns: agentResult.turns, tool_calls: agentResult.toolCalls.length },
+    });
     await updateProgress("completing", 85);
 
     // 7. Translate the agent's outcome into queue state. The agent has

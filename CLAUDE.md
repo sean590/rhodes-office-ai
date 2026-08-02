@@ -72,12 +72,19 @@ via `process_attempts`. It never touches `review_ready`/terminal states.
 
 ## 5. Cost telemetry on every LLM call
 
-Every Claude call records the 4 token classes (input / output / cache_read /
-cache_creation) and a `cost_usd` via `computeCostUsd` (`model-pricing.ts`, with
-model-family fallback for version drift). Any **new** LLM surface must be
-instrumented from the start — we price the product off these numbers. Use
-Anthropic prompt caching (`cache_control: ephemeral`) where the prompt is reused
-within ~5 min; document ingestion relies on it (~70% cost reduction).
+Every call to any AI service (Claude today, any provider tomorrow) records the
+4 token classes (input / output / cache_read / cache_creation) and a `cost_usd`
+via `computeCostUsd` (`model-pricing.ts`, with model-family fallback for version
+drift). **Two writes, always:** (1) the per-surface columns for that surface's
+own UI (e.g. `document_queue.extraction_cost_usd`, `investments.ai_overview_*`,
+`chat_messages` cost), AND (2) one row in the central `ai_usage_events` ledger
+via `recordAiUsage()` (`lib/ai-usage.ts`) — surface, model, tokens, cost,
+latency, org, resource ref. The ledger is the cross-surface source of truth for
+cost-per-action analytics; a new AI call site is not done until it writes there.
+`recordAiUsage` is best-effort (never throws) so telemetry can't break the
+feature it measures. We price the product off these numbers. Use Anthropic
+prompt caching (`cache_control: ephemeral`) where the prompt is reused within
+~5 min; document ingestion relies on it (~70% cost reduction).
 
 ## 6. UX / client conventions
 

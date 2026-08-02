@@ -12,6 +12,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOrg, isError } from "@/lib/utils/org-context";
+import { recordAiUsage } from "@/lib/ai-usage";
 import { chatMessageSchema } from "@/lib/validations";
 import {
   runOrchestratorStreaming,
@@ -252,6 +253,20 @@ export async function POST(request: Request) {
               model: finalResult.model,
             },
           }).select("id").single();
+          // Central AI-usage ledger (in addition to the per-message cost_usd).
+          if (finalResult.usage) {
+            await recordAiUsage(admin, {
+              surface: "chat",
+              model: finalResult.model ?? "unknown",
+              usage: finalResult.usage,
+              costUsd: finalResult.costUsd,
+              organizationId: orgId,
+              userId: user.id,
+              resourceType: "chat_session",
+              resourceId: session_id,
+              metadata: { iterations: finalResult.iterations, message_id: savedMsg?.id ?? null },
+            });
+          }
           await admin
             .from("chat_sessions")
             .update({ updated_at: new Date().toISOString() })

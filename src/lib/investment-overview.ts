@@ -16,6 +16,7 @@ import { createHash } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeCostUsd, type TokenUsage } from "@/lib/pipeline/model-pricing";
+import { recordAiUsage } from "@/lib/ai-usage";
 
 const anthropic = new Anthropic();
 
@@ -211,12 +212,14 @@ export async function generateInvestmentOverview(
     return { overview: current.ai_overview as string, skipped: true };
   }
 
+  const t0 = Date.now();
   const response = await anthropic.messages.create({
     model: OVERVIEW_MODEL,
     max_tokens: 400,
     system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: `${ctx.text}\n\nWrite the briefing.` }],
   });
+  const latencyMs = Date.now() - t0;
 
   const overview = response.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
@@ -232,6 +235,17 @@ export async function generateInvestmentOverview(
     cacheCreation: u.cache_creation_input_tokens ?? 0,
   };
   const costUsd = computeCostUsd(OVERVIEW_MODEL, usage);
+
+  await recordAiUsage(db, {
+    surface: "investment_overview",
+    model: OVERVIEW_MODEL,
+    usage,
+    costUsd,
+    latencyMs,
+    organizationId: orgId,
+    resourceType: "investment",
+    resourceId: investmentId,
+  });
 
   const { error } = await db
     .from("investments")
