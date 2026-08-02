@@ -109,6 +109,13 @@ vi.mock("@/lib/utils/audit", () => ({
   logAuditEvent: vi.fn(async () => {}),
 }));
 
+vi.mock("@/lib/investment-overview", () => ({
+  generateInvestmentOverview: vi.fn(async (_db, _org, id) => ({
+    overview: `Overview for ${id}`,
+    skipped: false,
+  })),
+}));
+
 // Import after mocks.
 import { applyActions } from "../apply";
 
@@ -383,6 +390,18 @@ describe("apply.ts — document entity links", () => {
 
     expect(results[0].success).toBe(false);
     expect(results[0].error).toMatch(/home \(primary\) entity/);
+  });
+});
+
+describe("apply.ts — investment overview", () => {
+  it("refresh_investment_overview: regenerates and returns the overview", async () => {
+    const INV = "11111111-1111-1111-1111-111111111111";
+    const { results } = await applyActions(
+      [{ action: "refresh_investment_overview", data: { investment_id: INV } }],
+      { orgId: "org-1", userId: "user-1" },
+    );
+    expect(results[0].success).toBe(true);
+    expect((results[0].data as { overview: string }).overview).toBe(`Overview for ${INV}`);
   });
 });
 

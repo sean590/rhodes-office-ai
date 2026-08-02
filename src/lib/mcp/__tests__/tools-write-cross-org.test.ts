@@ -241,6 +241,9 @@ const INPUT_OVERRIDES: Record<string, Record<string, unknown>> = {
     document_id: VALID_UUID,
     entity_id: VALID_UUID,
   },
+  refresh_investment_overview: {
+    investment_id: VALID_UUID,
+  },
   record_ownership_transfer: {
     investment_id: VALID_UUID,
     from_entity_id: VALID_UUID,
