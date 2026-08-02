@@ -25,8 +25,23 @@ export interface MissingDoc {
   document_category: string;
 }
 
+/** Compact relative time for the AI-summary "updated …" stamp. */
+function overviewTimeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "yesterday" : `${d}d ago`;
+}
+
 export function EntityStateBanner({
   name, typeLabel, status, formationState, formedYear, overdueFilings, openFilings, missingDocs, showAttention = true,
+  aiOverview = null, aiOverviewGeneratedAt = null, aiOverviewStale = false,
 }: {
   name: string;
   typeLabel: string;
@@ -37,10 +52,14 @@ export function EntityStateBanner({
   openFilings: number;
   missingDocs: number;
   showAttention?: boolean;
+  aiOverview?: string | null;
+  aiOverviewGeneratedAt?: string | null;
+  aiOverviewStale?: boolean | null;
 }) {
   const statusWord = status.replace(/_/g, " ");
   const where = [formedYear ? `formed ${formedYear}` : null, formationState ? `in ${formationState}` : null].filter(Boolean).join(" ");
-  const lead = `${name} is ${statusWord}${typeLabel ? ` — a ${typeLabel}` : ""}${where ? `, ${where}` : ""}.`;
+  // The AI briefing when we have one; otherwise the templated state sentence.
+  const lead = aiOverview || `${name} is ${statusWord}${typeLabel ? ` — a ${typeLabel}` : ""}${where ? `, ${where}` : ""}.`;
 
   const attentionTotal = overdueFilings + (openFilings - overdueFilings) + missingDocs;
   const bits: { text: string; color: string }[] = [];
@@ -51,9 +70,16 @@ export function EntityStateBanner({
 
   return (
     <div style={{ marginBottom: 20, padding: "14px 18px", border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 999, background: statusWord === "active" ? "var(--green)" : "var(--muted)" }} />
-        <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)" }}>{lead}</span>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 999, marginTop: 6, background: statusWord === "active" ? "var(--green)" : "var(--muted)" }} />
+        <div style={{ flex: 1 }}>
+          <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.5 }}>{lead}</span>
+          {aiOverview && (
+            <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
+              {aiOverviewStale ? "Updating…" : aiOverviewGeneratedAt ? `AI summary · updated ${overviewTimeAgo(aiOverviewGeneratedAt)}` : "AI summary"}
+            </div>
+          )}
+        </div>
       </div>
       {showAttention && (
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, paddingLeft: 18, flexWrap: "wrap" }}>

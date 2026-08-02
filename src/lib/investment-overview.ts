@@ -13,15 +13,15 @@
  * priced via computeCostUsd and the four token classes are persisted.
  */
 import { createHash } from "crypto";
-import Anthropic from "@anthropic-ai/sdk";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { computeCostUsd, type TokenUsage } from "@/lib/pipeline/model-pricing";
-import { recordAiUsage } from "@/lib/ai-usage";
+import {
+  OVERVIEW_MODEL,
+  generateOverview,
+  markOverviewStale,
+  type AssembledContext,
+  type OverviewResult,
+} from "@/lib/ai-overview-core";
 
-const anthropic = new Anthropic();
-
-/** Balance of quality (reasoning about materiality) vs cost for a frequent job. */
-const OVERVIEW_MODEL = "claude-sonnet-5";
 const MAX_DOCS = 20;
 const MAX_NOTES = 15;
 const MAX_TXNS = 40;
@@ -39,12 +39,6 @@ function fmtMoney(n: unknown): string {
   const v = Number(n);
   if (!Number.isFinite(v)) return String(n ?? "");
   return `$${v.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-}
-
-interface AssembledContext {
-  text: string;
-  fingerprint: string;
-  hasSubstance: boolean;
 }
 
 /**
@@ -177,12 +171,6 @@ export async function assembleInvestmentContext(
   return { text, fingerprint, hasSubstance };
 }
 
-export interface OverviewResult {
-  overview: string | null;
-  skipped: boolean;
-  costUsd?: number;
-}
-
 /**
  * Generate (or refresh) an investment's overview and persist it. Clears the
  * stale flag. Skips the LLM call when the fingerprint is unchanged (unless
@@ -196,77 +184,16 @@ export async function generateInvestmentOverview(
 ): Promise<OverviewResult> {
   const ctx = await assembleInvestmentContext(db, orgId, investmentId);
   if (!ctx) return { overview: null, skipped: true };
-
-  const { data: current } = await db
-    .from("investments")
-    .select("ai_overview, ai_overview_fingerprint")
-    .eq("id", investmentId)
-    .maybeSingle();
-
-  // Nothing material changed since last generation — just clear the flag.
-  if (!opts.force && current?.ai_overview && current.ai_overview_fingerprint === ctx.fingerprint) {
-    await db
-      .from("investments")
-      .update({ ai_overview_stale: false, ai_overview_attempts: 0 })
-      .eq("id", investmentId);
-    return { overview: current.ai_overview as string, skipped: true };
-  }
-
-  const t0 = Date.now();
-  const response = await anthropic.messages.create({
-    model: OVERVIEW_MODEL,
-    max_tokens: 400,
-    system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: `${ctx.text}\n\nWrite the briefing.` }],
-  });
-  const latencyMs = Date.now() - t0;
-
-  const overview = response.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("")
-    .trim();
-
-  const u = response.usage as unknown as Record<string, number>;
-  const usage: TokenUsage = {
-    input: u.input_tokens ?? 0,
-    output: u.output_tokens ?? 0,
-    cacheRead: u.cache_read_input_tokens ?? 0,
-    cacheCreation: u.cache_creation_input_tokens ?? 0,
-  };
-  const costUsd = computeCostUsd(OVERVIEW_MODEL, usage);
-
-  await recordAiUsage(db, {
-    surface: "investment_overview",
-    model: OVERVIEW_MODEL,
-    usage,
-    costUsd,
-    latencyMs,
-    organizationId: orgId,
-    resourceType: "investment",
+  return generateOverview(db, {
+    table: "investments",
     resourceId: investmentId,
+    orgId,
+    surface: "investment_overview",
+    resourceType: "investment",
+    systemPrompt: SYSTEM_PROMPT,
+    context: ctx,
+    force: opts.force,
   });
-
-  const { error } = await db
-    .from("investments")
-    .update({
-      ai_overview: overview || null,
-      ai_overview_generated_at: new Date().toISOString(),
-      ai_overview_model: OVERVIEW_MODEL,
-      ai_overview_fingerprint: ctx.fingerprint,
-      ai_overview_stale: false,
-      ai_overview_attempts: 0,
-      ai_overview_cost_usd: costUsd,
-      ai_overview_input_tokens: usage.input,
-      ai_overview_output_tokens: usage.output,
-      ai_overview_cache_read_tokens: usage.cacheRead,
-      ai_overview_cache_creation_tokens: usage.cacheCreation,
-    })
-    .eq("id", investmentId)
-    .eq("organization_id", orgId);
-  if (error) throw new Error(`Failed to persist overview: ${error.message}`);
-
-  return { overview: overview || null, skipped: false, costUsd };
 }
 
 /** Flag investments for regeneration (app-side callers; triggers cover the DB). */
@@ -274,10 +201,5 @@ export async function markInvestmentOverviewStale(
   db: SupabaseClient,
   investmentIds: string[],
 ): Promise<void> {
-  const ids = investmentIds.filter(Boolean);
-  if (!ids.length) return;
-  await db
-    .from("investments")
-    .update({ ai_overview_stale: true, ai_overview_attempts: 0 })
-    .in("id", ids);
+  return markOverviewStale(db, "investments", investmentIds);
 }

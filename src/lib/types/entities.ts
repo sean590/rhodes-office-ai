@@ -23,6 +23,10 @@ export interface Entity {
   aliases: string[];
   created_at: string;
   updated_at: string;
+  // AI-generated overview (migration 086), regenerated in the background.
+  ai_overview?: string | null;
+  ai_overview_generated_at?: string | null;
+  ai_overview_stale?: boolean | null;
 }
 
 export interface EntityListItem extends Entity {
