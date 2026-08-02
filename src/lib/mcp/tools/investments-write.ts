@@ -516,6 +516,28 @@ export const recordOwnershipTransferTool = defineTool({
   },
 });
 
+// --- refresh_investment_overview ---------------------------------------------
+
+export const refreshInvestmentOverviewTool = defineTool({
+  name: "refresh_investment_overview",
+  description:
+    "Regenerate the AI overview (the plain-language briefing) for an investment right now, reading its current documents, notes, transactions, transfers, and investors. Overviews also refresh automatically in the background when material info lands; use this to force an immediate refresh on request (e.g. 'update the summary for this deal').",
+  kind: "write",
+  inputSchema: z.object({
+    investment_id: z.string().uuid(),
+  }),
+  dryRun: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "investment", resourceId: input.investment_id });
+    const invName = await resolveName(ctx, "investment", input.investment_id);
+    return { summary: `Regenerate the AI overview for ${invName}` };
+  },
+  handler: async (input, ctx) => {
+    await verifyResourceOwnership(ctx, { resourceType: "investment", resourceId: input.investment_id });
+    const result = await dispatchAction(ctx, "refresh_investment_overview", input);
+    return { data: result.data, audit_event_id: result.audit_event_id };
+  },
+});
+
 // Suppress the unused import lint when LINE_ITEM_DESC is the only consumer.
 void LINE_ITEM_DESC;
 
@@ -534,4 +556,5 @@ export const investmentWriteTools: ToolDefinition[] = [
   deleteInvestmentTransactionTool,
   setInvestmentAllocationsTool,
   recordOwnershipTransferTool,
+  refreshInvestmentOverviewTool,
 ];

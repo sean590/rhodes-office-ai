@@ -2038,6 +2038,19 @@ export async function applyActions(
           break;
         }
 
+        case "refresh_investment_overview": {
+          const { generateInvestmentOverview } = await import("@/lib/investment-overview");
+          const investmentId = resolveInvestmentId(item.data.investment_id);
+          if (!investmentId) throw new Error("investment_id is required");
+          const res = await generateInvestmentOverview(supabase, options.orgId!, investmentId, { force: true });
+          results.push({
+            action: "refresh_investment_overview",
+            success: true,
+            data: { investment_id: investmentId, overview: res.overview },
+          });
+          break;
+        }
+
         case "archive_document": {
           const documentId = item.data.document_id as string;
           if (!documentId) throw new Error("document_id is required");

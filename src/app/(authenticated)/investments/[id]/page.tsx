@@ -29,6 +29,9 @@ interface InvestmentDetail {
   date_exited: string | null;
   preferred_return_pct: number | null;
   preferred_return_basis: string | null;
+  ai_overview: string | null;
+  ai_overview_generated_at: string | null;
+  ai_overview_stale: boolean | null;
   investors: InvestmentInvestor[];
   co_investors: CoInvestor[];
   participant_count: number;
@@ -44,6 +47,20 @@ interface InvestmentDetail {
 
 function fmtDollarsFull(n: number): string {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+/** Compact relative time for the AI-summary "updated …" stamp. */
+function timeAgo(iso: string): string {
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return "";
+  const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? "yesterday" : `${d}d ago`;
 }
 
 const TABS = [
@@ -229,10 +246,20 @@ export default function InvestmentDetailPage() {
           </div>
         </div>
 
-        {/* Lead with state, not schema — a plain-language summary of the investment */}
+        {/* AI briefing when we have one; otherwise the templated state sentence.
+            The overview is generated in the background and on chat request. */}
         <div style={{ marginTop: 14, padding: "14px 18px", border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "var(--card)", display: "flex", alignItems: "flex-start", gap: 10 }}>
           <span style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 999, marginTop: 6, background: investment.status === "active" ? "var(--green)" : "var(--muted)" }} />
-          <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.5 }}>{stateSentence}</span>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", lineHeight: 1.5 }}>
+              {investment.ai_overview || stateSentence}
+            </span>
+            {investment.ai_overview && (
+              <div style={{ fontSize: 11.5, color: "var(--faint)", marginTop: 6 }}>
+                {investment.ai_overview_stale ? "Updating…" : investment.ai_overview_generated_at ? `AI summary · updated ${timeAgo(investment.ai_overview_generated_at)}` : "AI summary"}
+              </div>
+            )}
+          </div>
         </div>
 
         {showDeleteConfirm && (
