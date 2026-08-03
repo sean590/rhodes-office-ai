@@ -108,13 +108,14 @@ export function triageMessage(
   );
 
   if (ingestable.length > 0) {
-    // Spoofed-sender gate: an attachment from a sender that fails email
-    // authentication is exactly the forged-capital-call attack — hold it for
-    // human review instead of filing it alongside legitimate documents.
+    // Active-spoof gate: the caller passes senderVerified=false ONLY on a strong
+    // spoof signal (dmarc=fail — the From domain publishes DMARC and this
+    // message failed it), the forged-capital-call attack. Everything else
+    // (incl. "gray" forwards) auto-ingests; this holds just the dangerous case.
     if (!senderVerified) {
       return {
         classification: "needs_user",
-        reason: "sender failed authentication",
+        reason: "sender failed DMARC — possible spoof, held for review",
         ingestableAttachments: [],
         safesendLink: null,
         safesendLinks: [],

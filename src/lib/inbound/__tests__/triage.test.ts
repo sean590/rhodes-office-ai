@@ -174,7 +174,7 @@ describe("triageMessage", () => {
     expect(r.classification).not.toBe("safesend");
   });
 
-  it("unverified sender's attachment is HELD, not filed (forged-document gate)", () => {
+  it("active-spoof (dmarc=fail) attachment is HELD, not filed (forged-document gate)", () => {
     const r = triageMessage(
       msg({
         attachments: [att("capital-call.pdf", "application/pdf")],
@@ -183,8 +183,23 @@ describe("triageMessage", () => {
       { knownProviderSender: true, senderVerified: false },
     );
     expect(r.classification).toBe("needs_user");
-    expect(r.reason).toBe("sender failed authentication");
+    expect(r.reason).toBe("sender failed DMARC — possible spoof, held for review");
     expect(r.ingestableAttachments).toHaveLength(0);
+  });
+
+  it("a 'gray' forward (dmarc not fail) auto-ingests — the worker passes senderVerified=true for it", () => {
+    // Forwards structurally can't pass SPF/DKIM alignment (gray), but they're
+    // the primary flow. worker.ts computes senderVerified = dmarc !== "fail",
+    // so a gray forward arrives here trusted and its attachment is filed.
+    const r = triageMessage(
+      msg({
+        attachments: [att("invoice.pdf", "application/pdf")],
+        auth: { spf: "gray", dkim: "gray", dmarc: "gray", verified: false },
+      }),
+      { knownProviderSender: false, senderVerified: true },
+    );
+    expect(r.classification).toBe("attachment");
+    expect(r.ingestableAttachments).toHaveLength(1);
   });
 
   it("unverified sender with a real SafeSend link is held too (real SafeSend passes DMARC)", () => {
