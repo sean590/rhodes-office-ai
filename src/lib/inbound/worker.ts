@@ -648,11 +648,15 @@ export async function runSafesendAttempt(
   }
 }
 
-/** One retrieval per cron tick: oldest pending safesend delivery. */
 // Global concurrency cap per tick — total sandboxes booted, ACROSS all orgs.
-// Each boots a sandbox and may wait up to OTP_WAIT_MS (3.5m), so keep it modest;
-// the retrieve cron's 600s budget covers the slowest concurrent path.
-const SAFESEND_SWEEP_BATCH = 3;
+// Each boots a sandbox and may wait up to OTP_WAIT_MS (3.5m); they run
+// concurrently inside the retrieve cron's 600s budget, so the cap trades cost
+// (a few cents per retrieval, only on real backlog) against burst throughput —
+// NOT platform headroom. Vercel Pro allows 2,000 concurrent sandboxes and an
+// idle-start rate of ~150 vCPU/min (~75 default sandboxes/min), so 12 is far
+// under quota; it's sized to absorb one power user's forward burst (which blew
+// through the old cap of 3) plus other orgs' pending work in a single tick.
+const SAFESEND_SWEEP_BATCH = 12;
 const SAFESEND_MAX_ATTEMPTS = 2; // matches MAX_ATTEMPTS in safesend.ts
 // Candidate pool to draw the fair slice from (oldest-first across all orgs).
 const SAFESEND_CANDIDATE_POOL = 60;
