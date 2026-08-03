@@ -124,9 +124,15 @@ async function handleMessage(
   const triage = triageMessage(msg, {
     knownProviderSender: Boolean(providerId),
     learnedDeliverySender: learned?.kind === "delivery",
-    // Force = the user clicked "File it anyway" on a held row — their explicit
-    // review IS the verification the auth gate was buying.
-    senderVerified: opts?.force ? true : msg.auth.verified,
+    // Auto-ingest posture: forwarding is the primary flow (~70%), and a forward
+    // structurally can't pass SPF/DKIM alignment — verdicts come back "gray", so
+    // a strict "verified" gate would hold nearly every legitimate forward. The
+    // hosted address is an unguessable per-org token shared only with trusted
+    // parties, volume caps still apply below, and every doc lands in review
+    // regardless — so we auto-ingest unless there's an ACTIVE spoof signal
+    // (dmarc=fail: the From domain publishes DMARC and this message failed it).
+    // Force = the user clicked "File it anyway" on a held row.
+    senderVerified: opts?.force ? true : msg.auth.dmarc !== "fail",
   });
 
   // Idempotency: gmail_message_id is UNIQUE — if the row already exists this
