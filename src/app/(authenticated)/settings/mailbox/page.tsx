@@ -200,6 +200,9 @@ export default function SettingsMailboxPage() {
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState<Health | null>(null);
+  // The org's unique hosted forwarding address (SES multi-tenant). Fetching it
+  // provisions one on first view, so every org ends up with an address.
+  const [hostedAddress, setHostedAddress] = useState<string | null>(null);
   const [activity, setActivity] = useState<InboundRow[]>([]);
   const [skipped, setSkipped] = useState<InboundRow[]>([]);
   const [myEmail, setMyEmail] = useState<string | null>(null);
@@ -253,6 +256,13 @@ export default function SettingsMailboxPage() {
       await Promise.all([
         fetchHealth(),
         fetchRows(),
+        // Provisions + returns the org's hosted forwarding address.
+        fetch("/api/inbound/address")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((data) => {
+            if (data?.address && !cancelled) setHostedAddress(String(data.address));
+          })
+          .catch(() => {}),
         fetch("/api/auth/me")
           .then((res) => (res.ok ? res.json() : null))
           .then((data) => {
@@ -360,23 +370,18 @@ export default function SettingsMailboxPage() {
   }
 
   const status = health?.status ?? "not_connected";
-  const address = health?.mailbox_address || INBOUND_ADDRESS;
+  // Prefer the org's hosted forwarding address (multi-tenant SES); fall back to
+  // the legacy Gmail mailbox address, then the config default.
+  const address = hostedAddress || health?.mailbox_address || INBOUND_ADDRESS;
   const isForwarded = (sender: string | null) =>
     !!myEmail && !!sender && sender.toLowerCase() === myEmail;
 
   const healthChip =
-    status === "connected" ? (
-      <Chip
-        label={
-          health?.last_success_at
-            ? `Connected · checked ${formatStamp(health.last_success_at)}`
-            : "Connected"
-        }
-        color="#2d8a4e"
-        bg="#eef6f0"
-      />
-    ) : status === "problem" ? (
+    status === "problem" ? (
       <Chip label="Connection problem" color="#c47520" bg="#fbf3e8" />
+    ) : hostedAddress || status === "connected" ? (
+      // The hosted SES address is always live — no "connection" to make.
+      <Chip label="Active" color="#2d8a4e" bg="#eef6f0" />
     ) : (
       <Chip label="Not connected" color="#6b6b76" bg="#f0eee8" />
     );
@@ -422,7 +427,8 @@ export default function SettingsMailboxPage() {
   // (Unrecognized-host links are NOT force-filable — there's nothing to file.)
   const isHeld = (row: InboundRow) =>
     row.status === "needs_user" &&
-    (row.needs_user_reason === "sender failed authentication" ||
+    ((row.needs_user_reason ?? "").includes("DMARC") ||
+      (row.needs_user_reason ?? "").includes("authentication") ||
       (row.needs_user_reason ?? "").startsWith("unusually"));
 
   const forceFileControl = (row: InboundRow) => {
@@ -527,7 +533,7 @@ export default function SettingsMailboxPage() {
           Mailbox
         </h1>
         <p style={{ fontSize: 13, color: "#9494a0", margin: "4px 0 0 0" }}>
-          Rhodes&apos; email address, its connection, and what arrived
+          Your forwarding address — and everything that&apos;s arrived through it
         </p>
       </div>
 
@@ -539,32 +545,12 @@ export default function SettingsMailboxPage() {
           isMobile={isMobile}
           headerRight={healthChip}
         >
-          {status === "not_connected" ? (
-            <div>
+          <>
               <p style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 12px 0", lineHeight: 1.5 }}>
-                Once connected, Rhodes gets its own email address. Give it to your providers —
-                or forward document emails to it — and everything that arrives is filed for you.
+                Forward document emails — invoices, statements, K-1s — to the address below,
+                or give it to your providers to send to directly. Rhodes files whatever
+                arrives, and matches it to the right entity or investment.
               </p>
-              <button
-                onClick={handleCheckAgain}
-                disabled={checking}
-                style={{
-                  background: checking ? "#e8e6df" : "#2d5a3d",
-                  color: checking ? "#9494a0" : "#ffffff",
-                  border: "none",
-                  borderRadius: 6,
-                  padding: "8px 16px",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: checking ? "default" : "pointer",
-                  fontFamily: "inherit",
-                }}
-              >
-                {checking ? "Checking..." : "Connect"}
-              </button>
-            </div>
-          ) : (
-            <>
               {status === "problem" && (
                 <div
                   style={{
@@ -691,8 +677,7 @@ export default function SettingsMailboxPage() {
                   waiting on you
                 </span>
               </div>
-            </>
-          )}
+          </>
         </SectionCard>
 
         {/* ---- Recent activity (spec §3b) ---- */}
