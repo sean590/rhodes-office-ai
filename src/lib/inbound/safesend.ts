@@ -11,23 +11,34 @@ import { SAFESEND_DRIVER_SOURCE } from "./safesend-driver";
  * SafeSend auto-retrieval (usable-bar item B — the agentic fetch).
  *
  * Runs the deterministic wizard driver in a Vercel Sandbox (our own vendor
- * boundary; ephemeral VM per retrieval) while THIS process watches Rhodes'
- * mailbox for the 8-digit access code and passes it into the VM.
+ * boundary; ephemeral VM per retrieval). The wizard clicks Verify — which is
+ * what makes SafeSend email the 8-digit code — and then KEEPS THE SESSION
+ * ALIVE at the code screen for the full window. SafeSend binds the "awaiting
+ * code" state to the live browser session server-side (confirmed empirically:
+ * it can't be restored after teardown, and re-opening forces a new Verify →
+ * a new code that invalidates the prior one), so we must feed the code into
+ * THIS live attempt rather than respin.
  *
- * Recipient rule: SafeSend emails the code to the delivery's ORIGINAL
- * recipient. For a forwarded delivery ("Fwd:" from an org user) that's the
- * FORWARDER — the code lands in their inbox and they forward it to Rhodes
- * (the relay loop); the mailbox watch matches codes by content, not sender,
- * so a forwarded code counts. For direct-to-Rhodes deliveries the code
- * arrives in Rhodes' own mailbox and the loop is fully automatic.
+ * The code reaches the live attempt two ways, raced:
+ *   1. Gmail inline — waitForOtp polls Rhodes' Gmail (direct deliveries, or a
+ *      code forwarded to the Gmail address).
+ *   2. DB relay (transport-agnostic) — when the original recipient forwards the
+ *      code to ANY of the org's addresses (Gmail or the SES hosted address),
+ *      the inbound handler deposits it on this delivery row (relayed_access_code)
+ *      and this loop picks it up. Works for orgs without Gmail.
+ * The "forward the code" nudge fires the moment Verify sends (onVerifySent),
+ * while the window is live — not after it dies.
  *
- * Outcomes: retrieved (files → the ONE pipeline) · waiting_code (nudge sent;
- * a later code email triggers resume) · needs_user (locked/expired/attempts
+ * Outcomes: retrieved (files → the ONE pipeline) · waiting_code (window elapsed
+ * with no code; the sweep re-attempts) · needs_user (locked/expired/attempts
  * exhausted — the standing nothing-silently-missed fallback).
  */
 
 const MAX_ATTEMPTS = 2; // SafeSend locks links after repeated code requests
-const OTP_WAIT_MS = 3.5 * 60_000;
+// Live window we hold the verified session open, waiting for the code. Bounded
+// by the retrieve-safesend route's maxDuration (800s) minus boot/verify/download
+// overhead — see src/app/api/cron/retrieve-safesend/route.ts.
+const OTP_WAIT_MS = 10 * 60_000;
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -53,7 +64,7 @@ function isOrgForwarder(sender: string, subject: string | null): boolean {
 export async function retrieveSafesend(
   admin: Admin,
   delivery: SafesendDelivery,
-  opts: { mailboxAddress: string; seededCode?: string },
+  opts: { mailboxAddress: string; onVerifySent?: (recipient: string) => Promise<void> },
 ): Promise<RetrievalResult> {
   // Original recipient: the forwarder for relayed deliveries, Rhodes itself
   // for direct ones.
@@ -61,7 +72,9 @@ export async function retrieveSafesend(
     ? delivery.sender
     : opts.mailboxAddress;
 
-  const sandbox = await Sandbox.create({ runtime: "node22", timeout: 8 * 60_000 });
+  // Sandbox must outlive boot (~40s) + verify (~30s) + the OTP window (10m) +
+  // download (~60s) — kept under the route's 800s maxDuration.
+  const sandbox = await Sandbox.create({ runtime: "node22", timeout: 13 * 60_000 });
   try {
     // Toolchain: playwright chromium + AL2023 libs (validated 2026-07-29,
     // ~26s). No LLM anywhere in this loop.
@@ -76,7 +89,6 @@ export async function retrieveSafesend(
     ]);
     await sandbox.writeFiles([
       { path: "/vercel/sandbox/driver.mjs", content: Buffer.from(SAFESEND_DRIVER_SOURCE) },
-      ...(opts.seededCode ? [{ path: "/vercel/sandbox/otp.txt", content: Buffer.from(opts.seededCode) }] : []),
     ]);
 
     // Launch the driver detached, then watch its status file while ALSO
@@ -107,25 +119,33 @@ export async function retrieveSafesend(
     }
     if (early?.startsWith("FAILED") || early === null) return { outcome: "needs_user", reason: `safesend wizard failed (${early ?? "no status"})` };
 
-    // Inline OTP watch — ONLY when the Gmail mailbox is connected (that's what
-    // waitForOtp polls). Skipped when Gmail isn't configured, or for a seeded
-    // resume: then the driver times out → 'waiting_code', and the transport-
-    // agnostic code-relay resumes it when the code email arrives at any of the
-    // org's addresses. So retrieval works for orgs without the Gmail mailbox.
-    if (!opts.seededCode && gmailConfigured()) {
-      const code = await waitForOtp({
-        bodyMarker: /access code|safesend/i,
-        digits: 8,
-        timeoutMs: OTP_WAIT_MS,
-        pollMs: 6_000,
-      });
-      if (code) {
-        await sandbox.writeFiles([{ path: "/vercel/sandbox/otp.txt", content: Buffer.from(code) }]);
-      }
-      // No code → the driver times out on its own; classified below.
-    }
+    // Verify just fired → the code is now in flight to `recipient`, and the
+    // session is live at the code screen. Prompt the forward NOW (while the
+    // window is open), and stamp the attempt start so the DB relay only feeds
+    // us a code newer than this Verify (never a stale one from a prior attempt).
+    const verifiedAt = new Date();
+    await admin
+      .from("inbound_deliveries")
+      .update({ retrieval_started_at: verifiedAt.toISOString(), updated_at: verifiedAt.toISOString() })
+      .eq("id", delivery.id);
+    await opts.onVerifySent?.(recipient).catch(() => {});
 
-    const final = await waitStatus(sandbox, ["DOWNLOADED", "FAILED"], OTP_WAIT_MS + 90_000);
+    // Race two code sources for the live window; first hit wins and is typed
+    // into the still-open box. Gmail inline (direct/Gmail-forwarded) OR the
+    // transport-agnostic DB relay (recipient forwards to any org address → the
+    // inbound handler deposits it here). Whichever resolves a code, we write it.
+    const code = await Promise.race([
+      gmailConfigured()
+        ? waitForOtp({ bodyMarker: /access code|safesend/i, digits: 8, timeoutMs: OTP_WAIT_MS, pollMs: 6_000 }).catch(() => null)
+        : new Promise<string | null>(() => {}), // never resolves — lets the relay win
+      pollRelayedCode(admin, delivery.id, verifiedAt, OTP_WAIT_MS, 5_000),
+    ]);
+    if (code) {
+      await sandbox.writeFiles([{ path: "/vercel/sandbox/otp.txt", content: Buffer.from(code) }]);
+    }
+    // No code within the window → the driver times out on its own; classified below.
+
+    const final = await waitStatus(sandbox, ["DOWNLOADED", "FAILED"], OTP_WAIT_MS + 120_000);
     if (final?.startsWith("DOWNLOADED")) {
       const ingest = await ingestDownloads(admin, delivery);
       return { outcome: "retrieved", ...ingest };
@@ -221,6 +241,29 @@ export async function nudgeForCode(admin: Admin, delivery: SafesendDelivery, rec
 async function run(sandbox: Sandbox, cmd: string, args: string[]) {
   const r = await sandbox.runCommand({ cmd, args, cwd: "/vercel/sandbox" });
   if (r.exitCode !== 0) throw new Error(`${cmd} ${args[0]} failed (${r.exitCode}): ${(await r.stderr()).slice(-200)}`);
+}
+
+/**
+ * Poll this delivery row for a code the inbound handler relayed in — i.e. the
+ * recipient forwarded the SafeSend code to one of the org's addresses and the
+ * handler deposited it here. Only accept a code stamped at/after this attempt's
+ * Verify (`since`); anything older is a leftover from a prior attempt (SafeSend
+ * would have invalidated it) and must be ignored. Resolves null at timeout.
+ */
+async function pollRelayedCode(admin: Admin, deliveryId: string, since: Date, timeoutMs: number, pollMs: number): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const { data } = await admin
+      .from("inbound_deliveries")
+      .select("relayed_access_code, relayed_code_at")
+      .eq("id", deliveryId)
+      .maybeSingle();
+    const code = data?.relayed_access_code as string | null | undefined;
+    const at = data?.relayed_code_at as string | null | undefined;
+    if (code && at && new Date(at).getTime() >= since.getTime()) return code;
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  return null;
 }
 
 async function waitStatus(sandbox: Sandbox, prefixes: string[], timeoutMs: number): Promise<string | null> {
