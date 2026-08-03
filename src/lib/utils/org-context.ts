@@ -20,6 +20,17 @@ export async function requireOrg(): Promise<OrgResult> {
     return NextResponse.json({ error: "No organization" }, { status: 403 });
   }
 
+  // Offboarding lockout: a soft-deleted org is inaccessible to all data routes
+  // during its 30-day grace. Only the recovery flow (which uses getCurrentUser
+  // directly, not requireOrg) can touch it. The client keys off `code` to route
+  // the owner to the recovery screen instead of surfacing errors.
+  if (user.orgDeleted) {
+    return NextResponse.json(
+      { error: "This organization is scheduled for deletion.", code: "org_deleted" },
+      { status: 403 },
+    );
+  }
+
   return { user, orgId: user.orgId };
 }
 
