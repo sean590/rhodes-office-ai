@@ -29,7 +29,7 @@ export async function DELETE(
     // Verify target user belongs to the same organization
     const { data: targetMembership } = await admin
       .from("organization_members")
-      .select("id")
+      .select("id, role")
       .eq("user_id", id)
       .eq("organization_id", orgId)
       .maybeSingle();
@@ -38,19 +38,41 @@ export async function DELETE(
       return NextResponse.json({ error: "User not found in organization" }, { status: 404 });
     }
 
-    // Remove org membership
+    // The owner can't be removed here — offboarding the org owner goes through
+    // account deletion, not member removal. (Guards against an admin deleting
+    // the owner's account.)
+    if (targetMembership.role === "owner") {
+      return NextResponse.json(
+        { error: "Cannot delete the organization owner. Transfer ownership first, or delete the organization." },
+        { status: 400 },
+      );
+    }
+
+    // Remove the membership in THIS org only.
     await admin.from("organization_members").delete().eq("user_id", id).eq("organization_id", orgId);
 
-    // Delete from user_profiles
-    await admin.from("user_profiles").delete().eq("id", id);
+    // If the user still belongs to other organizations, this is a removal from
+    // THIS org — not an account deletion. Keep their auth account + profile;
+    // just clear the active org if it pointed here.
+    const { count: remaining } = await admin
+      .from("organization_members")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", id);
 
-    // Delete from users table (where external_id matches)
-    await admin.from("users").delete().eq("external_id", id);
-
-    // Delete from Supabase Auth
-    const { error: authError } = await admin.auth.admin.deleteUser(id);
-    if (authError) {
-      console.error("Failed to delete auth user:", authError);
+    if ((remaining ?? 0) > 0) {
+      await admin
+        .from("user_profiles")
+        .update({ active_organization_id: null })
+        .eq("id", id)
+        .eq("active_organization_id", orgId);
+    } else {
+      // No orgs left → fully delete the account.
+      await admin.from("user_profiles").delete().eq("id", id);
+      await admin.from("users").delete().eq("external_id", id);
+      const { error: authError } = await admin.auth.admin.deleteUser(id);
+      if (authError) {
+        console.error("Failed to delete auth user:", authError);
+      }
     }
 
     const reqHeaders = await headers();
