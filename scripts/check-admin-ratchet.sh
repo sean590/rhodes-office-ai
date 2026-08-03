@@ -30,7 +30,10 @@ cd "$(dirname "$0")/.."
 # 75 (was 74): + api/cron/refresh-overviews — the AI investment-overview
 # regenerator (system job, no user context: claims stale investments org-wide
 # and regenerates, the exempt system-job category).
-BASELINE=75
+# 76 (was 75): + api/inbound/ses — the SES inbound webhook (unauthenticated SNS
+# delivery, no user context: resolves org from the recipient address inside the
+# handler and ingests via the shared pipeline, the exempt system-job category).
+BASELINE=76
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
