@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInboundMessageFromMime, resolveOrgByRecipients } from "../ses";
+import { buildInboundMessageFromMime, resolveOrgByRecipients, rotateInboundAddress } from "../ses";
 
 // A minimal raw MIME email with a text body (+ link) and one PDF attachment.
 function sampleMime(): Buffer {
@@ -93,5 +93,33 @@ describe("SES inbound — org routing", () => {
     const { admin } = fakeAdmin([]);
     const org = await resolveOrgByRecipients(admin as never, ["random@gmail.com"]);
     expect(org).toBeNull();
+  });
+});
+
+describe("SES inbound — address rotation", () => {
+  it("deactivates the current address, then mints a fresh one", async () => {
+    const ops: string[] = [];
+    let insertedLocal = "";
+    const chain: Record<string, unknown> = {
+      update: (patch: { is_active?: boolean }) => {
+        ops.push(`update:is_active=${patch.is_active}`);
+        return chain;
+      },
+      eq: () => chain,
+      insert: (row: { local_part: string }) => {
+        insertedLocal = row.local_part;
+        ops.push("insert");
+        return Promise.resolve({ error: null });
+      },
+      then: (resolve: (v: { error: null }) => unknown) => resolve({ error: null }),
+    };
+    const admin = { from: () => chain };
+
+    const address = await rotateInboundAddress(admin as never, "org-1", "user-1");
+    expect(address).toMatch(/^rhodes-[a-z2-9]{8}@docs\.rhodesoffice\.ai$/);
+    expect(address).toBe(`${insertedLocal}@docs.rhodesoffice.ai`);
+    // Old address is deactivated BEFORE the new one is inserted.
+    expect(ops[0]).toBe("update:is_active=false");
+    expect(ops).toContain("insert");
   });
 });

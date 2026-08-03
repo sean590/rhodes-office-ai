@@ -58,6 +58,16 @@ export async function POST(request: Request) {
     .update({ active_organization_id: org.id })
     .eq("id", user.id);
 
+  // Provision the org's hosted inbound forwarding address up front, so every
+  // org has one from day one (not just on first Settings → Mailbox view).
+  // Best-effort — a provisioning hiccup must not fail org creation.
+  try {
+    const { getOrCreateInboundAddress } = await import("@/lib/inbound/ses");
+    await getOrCreateInboundAddress(admin, org.id, user.id);
+  } catch (err) {
+    console.error("[organizations] inbound address provisioning failed:", err);
+  }
+
   const { ipAddress, userAgent } = getRequestContext(request.headers);
   await logAuditEvent({
     userId: user.id,
