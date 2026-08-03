@@ -10,6 +10,11 @@ export interface CurrentUser {
   orgId: string;
   orgRole: OrgRole;
   orgName: string;
+  // Soft-delete offboarding: when the active org is scheduled for deletion, the
+  // app is locked out (requireOrg 403s) except the recovery flow, until either
+  // the owner recovers it or the 30-day grace elapses and it's hard-deleted.
+  orgDeleted: boolean;
+  deletionScheduledFor: string | null;
 }
 
 export async function getCurrentUser(): Promise<CurrentUser | null> {
@@ -31,9 +36,11 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
   let orgRole: OrgRole = "viewer";
   let orgName = "";
+  let orgDeleted = false;
+  let deletionScheduledFor: string | null = null;
 
   if (activeOrgId) {
-    // Fetch org membership and org name in parallel
+    // Fetch org membership and org (name + soft-delete state) in parallel
     const [memberRes, orgRes] = await Promise.all([
       admin
         .from("organization_members")
@@ -43,13 +50,15 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
         .single(),
       admin
         .from("organizations")
-        .select("name")
+        .select("name, deleted_at, deletion_scheduled_for")
         .eq("id", activeOrgId)
         .single(),
     ]);
 
     orgRole = (memberRes.data?.role as OrgRole) || "viewer";
     orgName = orgRes.data?.name || "";
+    orgDeleted = Boolean(orgRes.data?.deleted_at);
+    deletionScheduledFor = (orgRes.data?.deletion_scheduled_for as string | null) ?? null;
   }
 
   return {
@@ -60,6 +69,8 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
     orgId: activeOrgId,
     orgRole,
     orgName,
+    orgDeleted,
+    deletionScheduledFor,
   };
 }
 

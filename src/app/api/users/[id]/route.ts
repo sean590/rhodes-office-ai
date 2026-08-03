@@ -48,31 +48,15 @@ export async function DELETE(
       );
     }
 
-    // Remove the membership in THIS org only.
+    // Single-org model (launch): a user belongs to exactly one org, so removing
+    // them from it IS deleting their account — there's no other org to keep it
+    // for. (Multi-org — the CPA/professional view — will revisit this.)
     await admin.from("organization_members").delete().eq("user_id", id).eq("organization_id", orgId);
-
-    // If the user still belongs to other organizations, this is a removal from
-    // THIS org — not an account deletion. Keep their auth account + profile;
-    // just clear the active org if it pointed here.
-    const { count: remaining } = await admin
-      .from("organization_members")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", id);
-
-    if ((remaining ?? 0) > 0) {
-      await admin
-        .from("user_profiles")
-        .update({ active_organization_id: null })
-        .eq("id", id)
-        .eq("active_organization_id", orgId);
-    } else {
-      // No orgs left → fully delete the account.
-      await admin.from("user_profiles").delete().eq("id", id);
-      await admin.from("users").delete().eq("external_id", id);
-      const { error: authError } = await admin.auth.admin.deleteUser(id);
-      if (authError) {
-        console.error("Failed to delete auth user:", authError);
-      }
+    await admin.from("user_profiles").delete().eq("id", id);
+    await admin.from("users").delete().eq("external_id", id);
+    const { error: authError } = await admin.auth.admin.deleteUser(id);
+    if (authError) {
+      console.error("Failed to delete auth user:", authError);
     }
 
     const reqHeaders = await headers();
