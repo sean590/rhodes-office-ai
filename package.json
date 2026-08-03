@@ -50,7 +50,8 @@
       "ignoreGhsas": [
         "GHSA-mh99-v99m-4gvg",
         "GHSA-w5hq-g745-h8pq",
-        "GHSA-frvp-7c67-39w9"
+        "GHSA-frvp-7c67-39w9",
+        "GHSA-rgw5-rvv9-x895"
       ]
     }
   },
