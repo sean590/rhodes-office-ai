@@ -20,8 +20,36 @@
 // fat-finger guard against scheduling the wrong org.
 
 import { createClient } from "@supabase/supabase-js";
+import { Resend } from "resend";
 
 const GRACE_DAYS = 30;
+
+// Best-effort member notification — support-triggered, so keep it factual.
+async function notifyMembers(db, orgId, orgName, scheduledFor) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) { console.log("  (RESEND_API_KEY not set — skipped member notification)"); return; }
+  const from = process.env.EMAIL_FROM || "Rhodes <noreply@notify.rhodesoffice.ai>";
+  const resend = new Resend(key);
+  const when = new Date(scheduledFor).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  const { data: members } = await db.from("organization_members").select("user_id").eq("organization_id", orgId);
+  let sent = 0;
+  for (const m of members ?? []) {
+    const { data } = await db.auth.admin.getUserById(m.user_id);
+    const email = data?.user?.email;
+    if (!email) continue;
+    const html =
+      `<p>The Rhodes account <strong>${orgName}</strong> has been scheduled for deletion on <strong>${when}</strong>.</p>` +
+      `<p>All data is preserved until then. The account owner can recover it before that date from within Rhodes. ` +
+      `If this is unexpected, reply to this email and we'll help.</p>`;
+    try {
+      await resend.emails.send({ from, to: email, subject: `${orgName} is scheduled for deletion`, html });
+      sent++;
+    } catch (e) {
+      console.error(`  email to ${email} failed:`, e?.message || e);
+    }
+  }
+  console.log(`  Notified ${sent} member(s).`);
+}
 const [, , mode, orgId, confirmName] = process.argv;
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -78,6 +106,7 @@ if (mode === "schedule") {
   console.log(`✓ Scheduled "${org.name}" for deletion.`);
   console.log(`  Locked out now; recoverable until ${scheduledFor.toISOString()} (${GRACE_DAYS}-day grace).`);
   console.log(`  The owner can self-recover in-app, or run: offboard-org.mjs recover ${orgId}`);
+  await notifyMembers(db, orgId, org.name, scheduledFor);
   process.exit(0);
 }
 
