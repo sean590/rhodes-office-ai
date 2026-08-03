@@ -55,3 +55,9 @@ CLAUDE-CODE-*.md
 # Spike harness — local creds, downloads, screenshots (never commit)
 spike/
 Bugs/
+
+# Local operational artifacts — contain personal data (recipient emails,
+# per-session handoff notes); never commit.
+SESSION-HANDOFF-*.md
+scripts/.beta-invite-sent.json
+scripts/send-beta-invite-blast.ts
