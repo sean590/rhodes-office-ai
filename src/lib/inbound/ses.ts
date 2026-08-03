@@ -249,18 +249,8 @@ function newLocalPart(): string {
   return out;
 }
 
-/** The org's active hosted address, provisioning one on first use. */
-export async function getOrCreateInboundAddress(admin: Admin, orgId: string, createdBy?: string | null): Promise<string> {
-  const { data: existing } = await admin
-    .from("inbound_addresses")
-    .select("local_part, domain")
-    .eq("organization_id", orgId)
-    .eq("is_active", true)
-    .limit(1)
-    .maybeSingle();
-  if (existing) return `${existing.local_part}@${existing.domain}`;
-
-  // Retry on the (very unlikely) unique collision.
+/** Insert a fresh active address, retrying on the (very unlikely) collision. */
+async function insertNewAddress(admin: Admin, orgId: string, createdBy?: string | null): Promise<string> {
   for (let attempt = 0; attempt < 5; attempt++) {
     const local = newLocalPart();
     const { error } = await admin.from("inbound_addresses").insert({
@@ -273,4 +263,32 @@ export async function getOrCreateInboundAddress(admin: Admin, orgId: string, cre
     if (!/duplicate|unique/i.test(error.message)) throw new Error(`provision inbound address: ${error.message}`);
   }
   throw new Error("could not provision a unique inbound address");
+}
+
+/** The org's active hosted address, provisioning one on first use. */
+export async function getOrCreateInboundAddress(admin: Admin, orgId: string, createdBy?: string | null): Promise<string> {
+  const { data: existing } = await admin
+    .from("inbound_addresses")
+    .select("local_part, domain")
+    .eq("organization_id", orgId)
+    .eq("is_active", true)
+    .limit(1)
+    .maybeSingle();
+  if (existing) return `${existing.local_part}@${existing.domain}`;
+  return insertNewAddress(admin, orgId, createdBy);
+}
+
+/**
+ * Rotate the org's hosted address: deactivate the current one(s) and mint a
+ * fresh token. Use when an address may have leaked — mail to the old address
+ * stops resolving immediately (resolveOrgByRecipients requires is_active). The
+ * old rows are retained (is_active=false) for audit, not deleted.
+ */
+export async function rotateInboundAddress(admin: Admin, orgId: string, createdBy?: string | null): Promise<string> {
+  await admin
+    .from("inbound_addresses")
+    .update({ is_active: false })
+    .eq("organization_id", orgId)
+    .eq("is_active", true);
+  return insertNewAddress(admin, orgId, createdBy);
 }

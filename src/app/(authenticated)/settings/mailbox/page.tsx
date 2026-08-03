@@ -207,6 +207,8 @@ export default function SettingsMailboxPage() {
   const [skipped, setSkipped] = useState<InboundRow[]>([]);
   const [myEmail, setMyEmail] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [confirmRotate, setConfirmRotate] = useState(false);
   const [checking, setChecking] = useState(false);
   const [showSkips, setShowSkips] = useState(false);
   const [dismissingId, setDismissingId] = useState<string | null>(null);
@@ -291,6 +293,25 @@ export default function SettingsMailboxPage() {
     setChecking(true);
     await fetchHealth();
     setChecking(false);
+  };
+
+  const handleRotate = async () => {
+    setRotating(true);
+    try {
+      const res = await fetch("/api/inbound/address", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rotate" }),
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d?.address) setHostedAddress(String(d.address));
+      }
+    } catch {
+      /* keep the old address on failure */
+    }
+    setRotating(false);
+    setConfirmRotate(false);
   };
 
   const handleDismiss = async (id: string) => {
@@ -645,7 +666,88 @@ export default function SettingsMailboxPage() {
                 >
                   {copied ? "Copied" : "Copy"}
                 </button>
+                {hostedAddress && !confirmRotate && (
+                  <button
+                    onClick={() => setConfirmRotate(true)}
+                    style={{
+                      background: "none",
+                      border: "1px solid #e8e6df",
+                      borderRadius: 6,
+                      padding: "3px 10px",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#6b6b76",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                    title="Generate a new address and disable this one"
+                  >
+                    Regenerate
+                  </button>
+                )}
               </div>
+
+              {confirmRotate && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: "10px 12px",
+                    background: "#fbf3e8",
+                    border: "1px solid rgba(196,117,32,0.25)",
+                    borderRadius: 8,
+                    fontSize: 12.5,
+                    color: "#6b6b76",
+                    lineHeight: 1.5,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span style={{ flex: 1, minWidth: 200 }}>
+                    Generate a new address? The current one stops working immediately — anyone
+                    you&apos;ve given it to will need the new one.
+                  </span>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      onClick={handleRotate}
+                      disabled={rotating}
+                      style={{
+                        background: rotating ? "#e8e6df" : "#c47520",
+                        color: rotating ? "#9494a0" : "#fff",
+                        border: "none",
+                        borderRadius: 6,
+                        padding: "4px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        cursor: rotating ? "default" : "pointer",
+                        fontFamily: "inherit",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {rotating ? "Generating…" : "Regenerate"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmRotate(false)}
+                      disabled={rotating}
+                      style={{
+                        background: "none",
+                        border: "1px solid #e8e6df",
+                        borderRadius: 6,
+                        padding: "4px 12px",
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: "#6b6b76",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Counters */}
               <div
