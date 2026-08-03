@@ -78,6 +78,9 @@ export type InboundAttachment = {
   filename: string;
   mimeType: string;
   size: number;
+  /** Inline bytes when the transport already has them (SES/MIME parse).
+   *  Gmail leaves this unset and the bytes are fetched by attachmentId. */
+  content?: Buffer;
 };
 
 /** SPF/DKIM/DMARC verdicts from Gmail's own Authentication-Results header —

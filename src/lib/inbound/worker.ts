@@ -235,6 +235,22 @@ async function handleMessage(
  * (and deleted the old ignored row — gmail_message_id is UNIQUE, so the stale
  * row must be gone before re-handling). Returns the fresh row's disposition.
  */
+/**
+ * Ingest a single NEW inbound message from ANY transport (the Gmail poll or the
+ * SES webhook). Runs the exact same path as the poller — auth gate, triage,
+ * flood caps, and attachment ingestion into the one pipeline — for the given
+ * org. The transport is responsible only for producing the normalized
+ * InboundMessage and resolving the org.
+ */
+export async function ingestInboundMessage(
+  admin: Admin,
+  orgId: string,
+  msg: InboundMessage,
+): Promise<void> {
+  const result: InboundRunResult = { scanned: 1, ingested: 0, needsUser: 0, ignored: 0, failed: 0 };
+  await handleMessage(admin, orgId, msg, result);
+}
+
 export async function reprocessInboundMessage(
   admin: Admin,
   orgId: string,
@@ -351,7 +367,8 @@ async function ingestAttachments(
 
   const files = [];
   for (const att of attachments) {
-    const bytes = await getAttachment(msg.id, att.attachmentId);
+    // SES supplies inline MIME bytes; Gmail fetches them by attachmentId.
+    const bytes = att.content ?? (await getAttachment(msg.id, att.attachmentId));
     const safeName = att.filename.replace(/[^\w.\- ()]/g, "_") || "attachment";
     const storagePath = `${orgId}/queue/${batchId}/${Date.now()}-${safeName}`;
     const { error: upErr } = await admin.storage
