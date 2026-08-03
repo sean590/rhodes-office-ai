@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractAccessCode } from "../worker";
+import { extractAccessCode, fairSafesendPick } from "../worker";
 import type { InboundMessage } from "../gmail";
 
 function msg(p: Partial<InboundMessage>): InboundMessage {
@@ -38,5 +38,30 @@ describe("SafeSend access-code recognition", () => {
   it("ignores non-8-digit numbers", () => {
     const m = msg({ subject: "Your access code", bodyText: "Reference 12345 (5 digits) and 123456789 (9)." });
     expect(extractAccessCode(m)).toBeNull();
+  });
+});
+
+describe("SafeSend sweep fairness (fairSafesendPick)", () => {
+  const d = (id: string, org: string) => ({ id, organization_id: org });
+
+  it("round-robins across orgs — no single org monopolizes the cap", () => {
+    // orgA has 3 (older), orgB has 1. Cap 3 → A, B, A (B served before A's 2nd).
+    const cands = [d("a1", "A"), d("a2", "A"), d("a3", "A"), d("b1", "B")];
+    const picked = fairSafesendPick(cands, 3).map((p) => p.id);
+    expect(picked).toHaveLength(3);
+    expect(picked).toContain("a1"); // A's oldest
+    expect(picked).toContain("b1"); // B gets a slot despite A's backlog
+    expect(picked).not.toContain("a3"); // A's third waits
+  });
+
+  it("a lone org fills every free slot (drains fast when uncontended)", () => {
+    const cands = [d("a1", "A"), d("a2", "A"), d("a3", "A"), d("a4", "A")];
+    const picked = fairSafesendPick(cands, 3).map((p) => p.id);
+    expect(picked).toEqual(["a1", "a2", "a3"]);
+  });
+
+  it("never exceeds the cap and handles fewer candidates than the cap", () => {
+    expect(fairSafesendPick([d("a1", "A"), d("b1", "B")], 3)).toHaveLength(2);
+    expect(fairSafesendPick([], 3)).toHaveLength(0);
   });
 });
