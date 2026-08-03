@@ -39,6 +39,10 @@ export async function GET() {
         orgId: currentUser.orgId,
         orgRole: currentUser.orgRole,
         orgName: currentUser.orgName,
+        // Offboarding: when the active org is soft-deleted the client shows the
+        // recovery screen (owner) or a scheduled-for-deletion notice (member).
+        orgDeleted: currentUser.orgDeleted,
+        deletionScheduledFor: currentUser.deletionScheduledFor,
         primary_entity_id: profile?.primary_entity_id ?? null,
         session_expires_at: await getSessionExpiresAt(),
         // MFA enrollment grace deadline (null until set). The client pairs this
