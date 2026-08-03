@@ -115,6 +115,31 @@ export function extractAccessCode(msg: InboundMessage): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Deposit a forwarded access code onto the org's live SafeSend attempt (or a
+ * delivery waiting to re-attempt). The live retrieval (status 'retrieving')
+ * polls relayed_access_code and types it into its still-open session — no
+ * re-Verify, so the code stays valid the full 20-min TTL. Targets the most
+ * recently-started attempt for the org. Returns true if a target was found.
+ */
+async function relayAccessCode(admin: Admin, orgId: string, code: string): Promise<boolean> {
+  const { data: target } = await admin
+    .from("inbound_deliveries")
+    .select("id")
+    .eq("organization_id", orgId)
+    .in("status", ["retrieving", "waiting_code"])
+    .not("safesend_link", "is", null)
+    .order("retrieval_started_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (!target) return false;
+  await admin
+    .from("inbound_deliveries")
+    .update({ relayed_access_code: code, relayed_code_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq("id", target.id as string);
+  return true;
+}
+
 async function handleMessage(
   admin: Admin,
   orgId: string,
@@ -172,29 +197,17 @@ async function handleMessage(
   // Access-code relay — MUST precede classification dispatch. A SafeSend "here's
   // your access code" email carries both an 8-digit code AND a safesend link, so
   // it would otherwise classify as a NEW 'safesend' package (the bug). Instead,
-  // use the code to resume this org's waiting_code delivery. Transport-agnostic:
-  // the code can arrive at any of the org's addresses (Gmail or the SES hosted
-  // address) and still resumes the right delivery.
+  // DEPOSIT the code onto this org's live retrieval so its still-open session
+  // types it in (no re-Verify → the code stays valid). Transport-agnostic: the
+  // code can arrive at any of the org's addresses (Gmail or the SES hosted one).
   const relayCode = extractAccessCode(msg);
-  if (relayCode) {
-    const { data: waiting } = await admin
+  if (relayCode && (await relayAccessCode(admin, orgId, relayCode))) {
+    await admin
       .from("inbound_deliveries")
-      .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
-      .eq("organization_id", orgId)
-      .eq("status", "waiting_code")
-      .not("safesend_link", "is", null)
-      .order("received_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (waiting) {
-      await admin
-        .from("inbound_deliveries")
-        .update({ status: "ignored", needs_user_reason: "access code relay", updated_at: new Date().toISOString() })
-        .eq("id", deliveryId);
-      result.ignored += 1;
-      await runSafesendAttempt(admin, orgId, waiting as never, relayCode);
-      return;
-    }
+      .update({ status: "ignored", needs_user_reason: "access code relay", updated_at: new Date().toISOString() })
+      .eq("id", deliveryId);
+    result.ignored += 1;
+    return;
   }
 
   switch (triage.classification) {
@@ -237,31 +250,19 @@ async function handleMessage(
       break;
     }
     default: {
-      // Relay resume: an otherwise-ignorable email carrying an 8-digit code
-      // with SafeSend markers, while a delivery waits on its code, is the
-      // user completing the loop — run the retrieval NOW with that code.
+      // Relay resume: an otherwise-ignorable email carrying an 8-digit code with
+      // SafeSend markers, while a delivery has a live attempt, is the user
+      // completing the loop — deposit it onto that attempt's open session.
       const codeMatch = /access code|safesend/i.test(msg.subject + " " + msg.bodyText)
         ? (msg.bodyText + " " + msg.snippet).match(/(?<!\d)(\d{8})(?!\d)/)
         : null;
-      if (codeMatch) {
-        const { data: waiting } = await admin
+      if (codeMatch && (await relayAccessCode(admin, orgId, codeMatch[1]))) {
+        await admin
           .from("inbound_deliveries")
-          .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
-          .eq("organization_id", orgId)
-          .eq("status", "waiting_code")
-          .not("safesend_link", "is", null)
-          .order("received_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (waiting) {
-          await admin
-            .from("inbound_deliveries")
-            .update({ status: "ignored", needs_user_reason: "access code relay", updated_at: new Date().toISOString() })
-            .eq("id", deliveryId);
-          result.ignored += 1;
-          await runSafesendAttempt(admin, orgId, waiting as never, codeMatch[1]);
-          return;
-        }
+          .update({ status: "ignored", needs_user_reason: "access code relay", updated_at: new Date().toISOString() })
+          .eq("id", deliveryId);
+        result.ignored += 1;
+        return;
       }
       await admin
         .from("inbound_deliveries")
@@ -573,7 +574,6 @@ export async function runSafesendAttempt(
     safesend_link: string;
     attempts: number;
   },
-  seededCode?: string,
 ): Promise<void> {
   const { retrieveSafesend, nudgeForCode } = await import("./safesend");
   const { data: state } = await admin
@@ -582,6 +582,26 @@ export async function runSafesendAttempt(
     .eq("organization_id", orgId)
     .maybeSingle();
   const mailboxAddress = (state?.mailbox_address as string) || FORWARD_ADDRESS;
+
+  // Fired the instant Verify sends (session live at the code screen): prompt the
+  // forward NOW, while the ~10-min window is open, so the code lands in-session.
+  const onVerifySent = async (recipient: string) => {
+    await nudgeForCode(admin, delivery, recipient, mailboxAddress).catch(() => {});
+    try {
+      const session = await resolveInboundSession(admin, orgId);
+      if (session) {
+        await admin.from("chat_messages").insert({
+          session_id: session,
+          role: "assistant",
+          content: `I'm fetching the documents ${delivery.sender} sent via secure link. SafeSend emailed an access code to ${recipient} — forward that email to ${mailboxAddress} in the next ~10 minutes and I'll finish up.`,
+          metadata: { type: "inbound_needs_user", inbound_delivery_id: delivery.id, sender: delivery.sender, subject: delivery.subject, reason: "waiting_code" },
+        });
+        await admin.from("chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session);
+      }
+    } catch (err) {
+      console.error("[SAFESEND] verify-sent chat notify failed:", err);
+    }
+  };
 
   if (delivery.attempts >= 2) {
     await admin
@@ -596,36 +616,23 @@ export async function runSafesendAttempt(
     .eq("id", delivery.id);
 
   try {
-    const result = await retrieveSafesend(admin, delivery, { mailboxAddress, seededCode });
+    const result = await retrieveSafesend(admin, delivery, { mailboxAddress, onVerifySent });
     if (result.outcome === "retrieved") {
       await admin
         .from("inbound_deliveries")
-        .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, updated_at: new Date().toISOString() })
+        .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, relayed_access_code: null, updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
       const { data: drow } = await admin.from("inbound_deliveries").select("provider_id").eq("id", delivery.id).maybeSingle();
       await recordInboundOutcome(admin, orgId, "inbound_retrieved", delivery.id, { sender: delivery.sender, files: result.files });
       await autoResolveOpenNudges(admin, orgId, (drow?.provider_id as string) ?? null, delivery.sender, delivery.id);
     } else if (result.outcome === "waiting_code") {
+      // The window elapsed with no forwarded code (the nudge already went out at
+      // Verify). Leave it for the sweep to re-attempt — clear the stale relay
+      // slot so a code forwarded late can't be typed into the NEXT attempt.
       await admin
         .from("inbound_deliveries")
-        .update({ status: "waiting_code", needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ status: "waiting_code", needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, relayed_access_code: null, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
-      await nudgeForCode(admin, delivery, result.recipient, mailboxAddress);
-      // In-app: same channel as every inbound notification.
-      try {
-        const session = await resolveInboundSession(admin, orgId);
-        if (session) {
-          await admin.from("chat_messages").insert({
-            session_id: session,
-            role: "assistant",
-            content: `I'm fetching the documents ${delivery.sender} sent via secure link. SafeSend emailed an access code to ${result.recipient} — forward that email to ${mailboxAddress} and I'll finish up.`,
-            metadata: { type: "inbound_needs_user", inbound_delivery_id: delivery.id, sender: delivery.sender, subject: delivery.subject, reason: "waiting_code" },
-          });
-          await admin.from("chat_sessions").update({ updated_at: new Date().toISOString() }).eq("id", session);
-        }
-      } catch (err) {
-        console.error("[SAFESEND] waiting_code chat notify failed:", err);
-      }
     } else {
       await admin
         .from("inbound_deliveries")
@@ -693,11 +700,21 @@ export function fairSafesendPick<T extends PendingSafesend>(candidates: T[], cap
 
 export async function processPendingSafesend(): Promise<{ ran: number }> {
   const admin = createAdminClient();
+
+  // Reclaim orphaned live attempts: a 'retrieving' row whose owning route died
+  // (deploy/crash/timeout) without transitioning it. 15m > the 13m sandbox cap,
+  // so a genuinely-live attempt is never reclaimed out from under itself.
+  await admin
+    .from("inbound_deliveries")
+    .update({ status: "pending", updated_at: new Date().toISOString() })
+    .eq("status", "retrieving")
+    .lt("retrieval_started_at", new Date(Date.now() - 15 * 60_000).toISOString());
+
   // Sweep pending SafeSend deliveries ACROSS ALL ORGS, each processed in its own
   // organization_id context. (No INBOUND_ORG_ID gate — that was a single-tenant
   // leftover; per-row org isolation is fully preserved. No gmailConfigured gate
-  // either — retrieveSafesend only uses the Gmail mailbox for the OPTIONAL inline
-  // OTP wait; without it the code-relay path resumes the delivery.)
+  // either — retrieveSafesend uses Gmail only for the OPTIONAL inline OTP race;
+  // without it the transport-agnostic DB relay feeds the live attempt.)
   const { data: candidates } = await admin
     .from("inbound_deliveries")
     .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
@@ -710,15 +727,33 @@ export async function processPendingSafesend(): Promise<{ ran: number }> {
   if (!candidates?.length) return { ran: 0 };
   // Fair share across orgs, bounded by the global concurrency cap.
   type SafesendRow = PendingSafesend & { attempts: number };
-  const pending = fairSafesendPick(candidates as unknown as SafesendRow[], SAFESEND_SWEEP_BATCH);
+  const picked = fairSafesendPick(candidates as unknown as SafesendRow[], SAFESEND_SWEEP_BATCH);
+
+  // Atomically claim each row (pending → retrieving) BEFORE launching. A
+  // conditional update on status='pending' means only one tick can win a given
+  // delivery, so an overlapping tick can't spin up a second sandbox for it —
+  // the root cause of the duplicate-OTP storm. Clear any stale relay slot on
+  // claim so a code forwarded for a prior attempt can't leak into this one.
+  const claimed: SafesendRow[] = [];
+  for (const d of picked) {
+    const { data: won } = await admin
+      .from("inbound_deliveries")
+      .update({ status: "retrieving", retrieval_started_at: new Date().toISOString(), relayed_access_code: null, relayed_code_at: null, updated_at: new Date().toISOString() })
+      .eq("id", d.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+    if (won) claimed.push(d);
+  }
+  if (!claimed.length) return { ran: 0 };
   await Promise.all(
-    pending.map((d) =>
+    claimed.map((d) =>
       runSafesendAttempt(admin, d.organization_id, d as never).catch((err) =>
         console.error(`[safesend] ${d.id} failed:`, err),
       ),
     ),
   );
-  return { ran: pending.length };
+  return { ran: claimed.length };
 }
 
 // ── Increment 3: outcome audit, auto-resolve, purge, failed retry ────
