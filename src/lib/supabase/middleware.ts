@@ -80,6 +80,10 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/waitlist") ||
     request.nextUrl.pathname.startsWith("/api/health") ||
     request.nextUrl.pathname.startsWith("/api/cron") ||
+    // SES inbound webhook: SNS is not a Rhodes user. Authenticated by SNS
+    // message-signature verification in the route, not a session. Scoped to the
+    // exact path so the other /api/inbound/* routes stay session-protected.
+    request.nextUrl.pathname === "/api/inbound/ses" ||
     // Secure document share links: providers are NOT Rhodes users. Access is
     // gated by the unguessable token + server-side expiry/revocation checks.
     request.nextUrl.pathname.startsWith("/share") ||
