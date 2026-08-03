@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { registerBatchFiles } from "@/lib/pipeline/register-files";
 import { sendEmail } from "@/lib/email";
 import { inboundNeedsYouEmail } from "@/lib/email-templates";
-import { waitForOtp } from "./gmail";
+import { waitForOtp, gmailConfigured } from "./gmail";
 import { SAFESEND_DRIVER_SOURCE } from "./safesend-driver";
 
 /**
@@ -107,8 +107,12 @@ export async function retrieveSafesend(
     }
     if (early?.startsWith("FAILED") || early === null) return { outcome: "needs_user", reason: `safesend wizard failed (${early ?? "no status"})` };
 
-    // Watch the mailbox for the code UNLESS one was seeded (resume flow).
-    if (!opts.seededCode) {
+    // Inline OTP watch — ONLY when the Gmail mailbox is connected (that's what
+    // waitForOtp polls). Skipped when Gmail isn't configured, or for a seeded
+    // resume: then the driver times out → 'waiting_code', and the transport-
+    // agnostic code-relay resumes it when the code email arrives at any of the
+    // org's addresses. So retrieval works for orgs without the Gmail mailbox.
+    if (!opts.seededCode && gmailConfigured()) {
       const code = await waitForOtp({
         bodyMarker: /access code|safesend/i,
         digits: 8,
