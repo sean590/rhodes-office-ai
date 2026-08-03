@@ -58,6 +58,11 @@ const OUTCOME_STATUSES = new Set([
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
+// Support/ticket destination for "request a portal". Zendesk lands pre-launch;
+// until then the beta card shows a "coming soon" placeholder, not a dead link.
+// Flip this to the real URL (one line) when support tickets go live.
+const SUPPORT_TICKET_URL: string | null = null;
+
 function Chip({ label, color, bg }: { label: string; color: string; bg: string }) {
   return (
     <span
@@ -779,6 +784,50 @@ export default function SettingsMailboxPage() {
                   waiting on you
                 </span>
               </div>
+          </>
+        </SectionCard>
+
+        {/* ---- Secure document links (beta) ---- */}
+        <SectionCard
+          title="Secure document links"
+          subtitle="Retrieve documents from secure-delivery portals — no logins to chase."
+          isMobile={isMobile}
+          headerRight={<Chip label="Beta" color="#6b6b76" bg="#f0eee8" />}
+        >
+          <>
+            <p style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 12px 0", lineHeight: 1.5 }}>
+              Rhodes can open secure-delivery portals and file the documents for you. This is
+              an early beta: it works with <b style={{ color: "#1a1a1f", fontWeight: 600 }}>SafeSend</b>{" "}
+              today, and we&apos;re adding more portals over time.
+            </p>
+            <p style={{ fontSize: 13, color: "#6b6b76", margin: "0 0 12px 0", lineHeight: 1.5 }}>
+              When a portal emails you an access code, forward that code email to your Rhodes
+              address and we&apos;ll finish automatically — you have about 10 minutes.
+            </p>
+            <div
+              style={{
+                padding: "10px 12px",
+                background: "#faf9f6",
+                border: "1px solid #e8e6df",
+                borderRadius: 8,
+                fontSize: 12.5,
+                color: "#6b6b76",
+                lineHeight: 1.5,
+              }}
+            >
+              Using a different portal?{" "}
+              {SUPPORT_TICKET_URL ? (
+                <Link
+                  href={SUPPORT_TICKET_URL}
+                  style={{ color: "#2d5a3d", fontWeight: 600, textDecoration: "none" }}
+                >
+                  Submit a support ticket
+                </Link>
+              ) : (
+                <span style={{ color: "#9494a0", fontWeight: 500 }}>support tickets coming soon</span>
+              )}{" "}
+              and we&apos;ll look at adding it to the queue.
+            </div>
           </>
         </SectionCard>
 
