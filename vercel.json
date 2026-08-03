@@ -27,7 +27,7 @@
     },
     {
       "path": "/api/cron/retrieve-safesend",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/3 * * * *"
     }
   ],
   "headers": [
