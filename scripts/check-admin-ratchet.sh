@@ -33,7 +33,11 @@ cd "$(dirname "$0")/.."
 # 76 (was 75): + api/inbound/ses — the SES inbound webhook (unauthenticated SNS
 # delivery, no user context: resolves org from the recipient address inside the
 # handler and ingests via the shared pipeline, the exempt system-job category).
-BASELINE=76
+# 78 (was 76): + organizations/[orgId]/delete + .../recover — owner-gated org
+# lifecycle (soft-delete/recover the org itself). Operate on the organizations
+# row across the org boundary and must run while the org is locked out, so RLS
+# org-client isn't the right tool — admin client, owner-checked in-handler.
+BASELINE=78
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
