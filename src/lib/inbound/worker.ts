@@ -649,11 +649,43 @@ export async function runSafesendAttempt(
 }
 
 /** One retrieval per cron tick: oldest pending safesend delivery. */
-// Process this many pending SafeSend deliveries concurrently per tick. Each
-// boots a sandbox and may wait up to OTP_WAIT_MS (3.5m) for the code, so keep it
-// modest — the retrieve cron's 600s budget covers the slowest concurrent path.
+// Global concurrency cap per tick — total sandboxes booted, ACROSS all orgs.
+// Each boots a sandbox and may wait up to OTP_WAIT_MS (3.5m), so keep it modest;
+// the retrieve cron's 600s budget covers the slowest concurrent path.
 const SAFESEND_SWEEP_BATCH = 3;
 const SAFESEND_MAX_ATTEMPTS = 2; // matches MAX_ATTEMPTS in safesend.ts
+// Candidate pool to draw the fair slice from (oldest-first across all orgs).
+const SAFESEND_CANDIDATE_POOL = 60;
+
+interface PendingSafesend {
+  id: string;
+  organization_id: string;
+}
+
+/**
+ * Fair slice: round-robin across orgs from the oldest candidates, up to the
+ * global cap. When multiple orgs have pending deliveries, each is served before
+ * any org gets a second slot (no one org can monopolize the cap). When only one
+ * org has pending work, it fills every free slot and drains fast.
+ */
+export function fairSafesendPick<T extends PendingSafesend>(candidates: T[], cap: number): T[] {
+  const byOrg = new Map<string, T[]>();
+  for (const c of candidates) {
+    const q = byOrg.get(c.organization_id);
+    if (q) q.push(c);
+    else byOrg.set(c.organization_id, [c]);
+  }
+  const queues = [...byOrg.values()]; // each already oldest-first (query order)
+  const picked: T[] = [];
+  let round = 0;
+  while (picked.length < cap && queues.some((q) => q.length)) {
+    const q = queues[round % queues.length];
+    const next = q.shift();
+    if (next) picked.push(next);
+    round++;
+  }
+  return picked;
+}
 
 export async function processPendingSafesend(): Promise<{ ran: number }> {
   const admin = createAdminClient();
@@ -662,7 +694,7 @@ export async function processPendingSafesend(): Promise<{ ran: number }> {
   // leftover; per-row org isolation is fully preserved. No gmailConfigured gate
   // either — retrieveSafesend only uses the Gmail mailbox for the OPTIONAL inline
   // OTP wait; without it the code-relay path resumes the delivery.)
-  const { data: pending } = await admin
+  const { data: candidates } = await admin
     .from("inbound_deliveries")
     .select("id, organization_id, sender, subject, safesend_link, safesend_links, attempts")
     .eq("classification", "safesend")
@@ -670,11 +702,14 @@ export async function processPendingSafesend(): Promise<{ ran: number }> {
     .lt("attempts", SAFESEND_MAX_ATTEMPTS)
     .not("safesend_link", "is", null)
     .order("received_at", { ascending: true })
-    .limit(SAFESEND_SWEEP_BATCH);
-  if (!pending?.length) return { ran: 0 };
+    .limit(SAFESEND_CANDIDATE_POOL);
+  if (!candidates?.length) return { ran: 0 };
+  // Fair share across orgs, bounded by the global concurrency cap.
+  type SafesendRow = PendingSafesend & { attempts: number };
+  const pending = fairSafesendPick(candidates as unknown as SafesendRow[], SAFESEND_SWEEP_BATCH);
   await Promise.all(
     pending.map((d) =>
-      runSafesendAttempt(admin, d.organization_id as string, d as never).catch((err) =>
+      runSafesendAttempt(admin, d.organization_id, d as never).catch((err) =>
         console.error(`[safesend] ${d.id} failed:`, err),
       ),
     ),
