@@ -37,6 +37,21 @@ export type DueDateFormula =
   | { type: "formation_relative"; month_offset: number; day: number }
   | { type: "continuous" };
 
+/**
+ * Where a rule's claims were verified. `sources` is the authority basis
+ * (where the rule COMES FROM); `portal_url` remains the filing destination
+ * (where the user GOES TO FILE). Often the same site, conceptually different.
+ */
+export interface RuleSource {
+  url: string; // official government page this rule was verified against
+  authority: string; // display name: "California Secretary of State"
+  kind: "agency_page" | "statute" | "form_instructions";
+}
+
+// Bump on any rule change; drives the fleet re-sync + user-facing change
+// notes (rhodes-compliance-data-integrity-spec.md Phase 4).
+export const CATALOG_VERSION = 1;
+
 export interface ComplianceRule {
   id: string;
   jurisdiction: string;
@@ -60,6 +75,11 @@ export interface ComplianceRule {
   revenue_threshold?: { amount: number; description: string };
   applies_to_foreign?: boolean;
   applies_to_domestic?: boolean;
+  // ── Provenance (required after the Phase 3 verification audit) ──
+  sources?: RuleSource[]; // 1–2 per rule
+  last_verified_at?: string; // ISO date of last human-approved verification
+  verification_notes?: string; // e.g. "Fee is $800 min; first-year exemption expired 2024"
+  aliases?: string[]; // alternate names users/states use: ["franchise tax", "privilege tax"]
 }
 
 export const COMPLIANCE_RULES: ComplianceRule[] = [
@@ -1502,18 +1522,24 @@ export const COMPLIANCE_RULES: ComplianceRule[] = [
   {
     id: "FED_ALL_BOI",
     jurisdiction: "federal",
-    entity_types: ["llc", "corporation", "lp"],
+    // Deliberately matches nothing: FinCEN's interim final rule (Mar 21, 2025,
+    // 90 FR 13688) exempted all DOMESTIC reporting companies from BOI filing.
+    // Only foreign-formed companies registered to do business in the US must
+    // file, and Rhodes entities are domestic (formation_state is a US state).
+    // Definition kept so rule_id/history survive; becomes activation_mode:
+    // dormant if we ever track foreign-formed entities.
+    entity_types: [],
     obligation_type: "boi_report",
     name: "Beneficial Ownership Information (BOI) Report",
-    description: "FinCEN BOI report required for most entities. Entities formed before 2024 had until Jan 1, 2025 (currently under litigation — check current status). New entities must file within 90 days of formation.",
+    description: "FinCEN BOI report — no longer required for US-formed companies. FinCEN's interim final rule (March 21, 2025) exempted all domestic reporting companies; only foreign-formed companies registered to do business in the US must file.",
     frequency: "one_time",
     due_date: { type: "formation_relative", month_offset: 3, day: 0 },
     fee: { amount: 0, description: "No filing fee" },
     filed_with: "FinCEN",
     form_number: "BOIR",
     portal_url: "https://boiefiling.fincen.gov",
-    penalty_description: "$500/day civil penalty, criminal penalties up to $10,000 and/or 2 years imprisonment.",
-    notes: "Subject to ongoing litigation. CTA enforcement has been paused and resumed multiple times. Check current status.",
+    penalty_description: "Not applicable to domestic companies since March 2025.",
+    notes: "Exempted for domestic companies by FinCEN interim final rule, 90 FR 13688 (Mar 21, 2025). Rule retained for history; relevant only if foreign-formed entities are ever tracked.",
   },
 
   {
