@@ -37,7 +37,10 @@ cd "$(dirname "$0")/.."
 # WHILE the org is locked out (soft-deleted), so the RLS org-client can't reach
 # it — admin client, owner-checked in-handler. (Deletion itself is internal-only,
 # triggered by an ops script, not an app route.)
-BASELINE=77
+# 78 (was 77): + api/cron/hard-delete-orgs — the offboarding hard-delete cron
+# (system job, CRON_SECRET-authed, no user context): purges storage + org rows
+# via the hard_delete_organization RPC + orphaned member auth accounts.
+BASELINE=78
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
