@@ -44,16 +44,18 @@
     ],
     "overrides": {
       "sharp": "^0.35.3",
-      "postcss": "^8.5.18"
+      "postcss": "^8.5.18",
+      "brace-expansion@1": "^1.1.18",
+      "brace-expansion@2": "^2.1.4",
+      "brace-expansion@5": "^5.0.9",
+      "fast-uri": "^3.1.5",
+      "hono": "^4.12.34"
     },
     "auditConfig": {
       "ignoreGhsas": [
         "GHSA-mh99-v99m-4gvg",
         "GHSA-w5hq-g745-h8pq",
-        "GHSA-frvp-7c67-39w9",
-        "GHSA-rgw5-rvv9-x895",
-        "GHSA-7p8r-x3mc-p8w7",
-        "GHSA-8j4g-w8fx-2239"
+        "GHSA-frvp-7c67-39w9"
       ]
     }
   },
