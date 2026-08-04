@@ -84,6 +84,10 @@ export async function updateSession(request: NextRequest) {
     // message-signature verification in the route, not a session. Scoped to the
     // exact path so the other /api/inbound/* routes stay session-protected.
     request.nextUrl.pathname === "/api/inbound/ses" ||
+    // Stripe billing webhook: Stripe is not a Rhodes user. Authenticated by the
+    // Stripe signature over the raw body in the route, not a session. Scoped to
+    // the exact path so the other /api/billing/* routes stay session-protected.
+    request.nextUrl.pathname === "/api/billing/webhook" ||
     // Secure document share links: providers are NOT Rhodes users. Access is
     // gated by the unguessable token + server-side expiry/revocation checks.
     request.nextUrl.pathname.startsWith("/share") ||

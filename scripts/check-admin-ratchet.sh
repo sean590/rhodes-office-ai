@@ -43,7 +43,10 @@ cd "$(dirname "$0")/.."
 # 79 (was 78): + lib/billing/customer — the ONE billing module that touches the
 # organizations row (Stripe customer mirror). Billing is owner-gated in the
 # routes; the routes themselves use this helper, not the admin client directly.
-BASELINE=79
+# 80 (was 79): + lib/billing/webhook — the Stripe webhook lifecycle handler
+# (system webhook, no user context: Stripe-signature-authed in the route,
+# mirrors subscription state into the organizations row).
+BASELINE=80
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
