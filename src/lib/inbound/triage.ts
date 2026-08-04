@@ -72,8 +72,14 @@ const PORTAL_SENDER = [
 ];
 
 // Body/subject phrases that signal "a document is waiting for you somewhere".
+// DELIVERY *INTENT* only — never bare document nouns. A CPA thread mentions
+// "the tax return" / "K-1" / "capital account" in ordinary bookkeeping
+// conversation constantly; those are NOT deliveries. We require an action
+// ("ready/available/shared", "view/download your …", "secure file", "has sent")
+// so replies-about-documents don't get misread as fetch-failures. The
+// view/download construction allows an adjective ("view your tax return").
 const DELIVERY_PHRASE =
-  /secure (message|file|document|link)|document[s]? (are|is|has been)? ?(ready|available|shared|delivered|uploaded)|has (sent|shared) (a|the|your)|(view|download|access) (your|the) (file|document|return|statement|k-?1)|tax (return|package|document)|k-?1|capital (call|account)|distribution notice|protected message/i;
+  /secure (message|file|document|link)|document[s]? (are|is|has been)? ?(ready|available|shared|delivered|uploaded)|has (sent|shared) (a|the|your)|(view|download|access) (your|the)(\s\w+)? (file|document|return|statement|k-?1)|capital call|distribution notice|protected message/i;
 
 export type TriageResult = {
   classification: "attachment" | "safesend" | "needs_user" | "ignored";
@@ -171,11 +177,15 @@ export function triageMessage(
 
   const portalSender = PORTAL_SENDER.some((re) => re.test(msg.fromEmail) || re.test(msg.from));
   const deliveryish = DELIVERY_PHRASE.test(msg.subject) || DELIVERY_PHRASE.test(msg.bodyText);
+  // Links that could plausibly BE a delivery. A SafeSend DropOff (upload) link
+  // — standard CPA signature boilerplate — is where you SEND files, never a
+  // fetchable delivery, so it must not make an ordinary reply "deliveryish".
+  const deliveryLinks = msg.links.filter((l) => !SAFESEND_UPLOAD.test(l));
 
-  // A known provider (directory match or portal platform) talking about a
-  // document, or ANY sender clearly announcing a waiting document with a
+  // A known provider (directory match or portal platform) clearly announcing a
+  // document, or ANY sender announcing a waiting document with a fetchable
   // link, is a delivery Rhodes can't fetch in v1.
-  if (portalSender || opts.learnedDeliverySender || (opts.knownProviderSender && deliveryish) || (deliveryish && msg.links.length > 0)) {
+  if (portalSender || opts.learnedDeliverySender || (opts.knownProviderSender && deliveryish) || (deliveryish && deliveryLinks.length > 0)) {
     return {
       classification: "needs_user",
       reason: portalSender
