@@ -68,6 +68,18 @@ async function syncSubscription(admin: Admin, sub: Stripe.Subscription): Promise
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
   const admin = createAdminClient();
 
+  // Idempotency: atomically claim the event id (INSERT ... ON CONFLICT DO
+  // NOTHING). If nothing was inserted, Stripe is re-delivering an event we've
+  // already processed — skip, so non-idempotent side effects (the consent
+  // insert) run exactly once even under retries / concurrent deliveries.
+  const { data: claimed } = await admin
+    .from("stripe_events")
+    .upsert({ id: event.id, type: event.type }, { onConflict: "id", ignoreDuplicates: true })
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return;
+  }
+
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
