@@ -1,45 +1,44 @@
 /**
- * Plan catalog — the single source of truth for trial limits and the paid plan.
+ * Plan catalog — the single source of truth for trial allowance and the paid
+ * plan's prices.
  *
- * Stripe products/prices are created ONCE (setup script or dashboard, in test
- * mode first) and referenced here by id via env — code never hardcodes a Stripe
- * price id, so test/live and any re-pricing are just env swaps.
- *
- * Values below are from the go-live schedule; the founding $ price is finalized
- * on Day 14 (the price object can be swapped without code changes).
+ * Stripe products/prices are created ONCE (dashboard, test mode first) and
+ * referenced here by id via env — code never hardcodes a Stripe price id, so
+ * test/live and any re-pricing are just env swaps. Amounts below are for
+ * display/copy only; Stripe is the source of truth for what's charged.
  */
 
 export const TRIAL_DAYS = 30;
 
-// Trial guards (enforced Day 5): one entity, 100 documents.
-export const TRIAL_ENTITY_LIMIT = 1;
+// Trial doc allowance (enforced Day 5 at presign). Deliberately NO entity cap —
+// 100 docs is enough to stand up one or more entities, and multiple is a better
+// activation outcome than an artificial one-entity wall.
 export const TRIAL_DOC_LIMIT = 100;
 
-// Paid-plan visible meter: 200 documents / month.
+// Paid monthly-plan limit: 200 documents / month (the only visible meter).
 export const MONTHLY_DOC_METER = 200;
 
-export type PlanKey = "trial" | "founding";
+export type BillingInterval = "month" | "year";
 
-export interface Plan {
-  key: PlanKey;
-  name: string;
-  /** Stripe price id (from env; undefined until the price is created + wired). */
+export interface PriceRef {
+  interval: BillingInterval;
+  /** Display amount in USD (Stripe is the source of truth for the charge). */
+  amountUsd: number;
+  /** Stripe price id (from env; undefined until wired). */
   priceId: string | undefined;
-  interval: "month";
 }
 
-export const FOUNDING: Plan = {
-  key: "founding",
+/** The single paid plan at launch: "Founding", monthly or annual. */
+export const FOUNDING = {
+  key: "founding" as const,
   name: "Rhodes — Founding",
-  priceId: process.env.STRIPE_PRICE_FOUNDING_MONTHLY,
-  interval: "month",
+  prices: {
+    month: { interval: "month", amountUsd: 150, priceId: process.env.STRIPE_PRICE_FOUNDING_MONTHLY },
+    year: { interval: "year", amountUsd: 1500, priceId: process.env.STRIPE_PRICE_FOUNDING_ANNUAL },
+  } satisfies Record<BillingInterval, PriceRef>,
 };
 
-export const PLANS: Record<Exclude<PlanKey, "trial">, Plan> = {
-  founding: FOUNDING,
-};
-
-/** The price the checkout flow (Day 2) subscribes a converting trial to. */
-export function defaultPaidPriceId(): string | undefined {
-  return FOUNDING.priceId;
+/** Stripe price id for a billing interval (checkout, Day 2). */
+export function priceIdFor(interval: BillingInterval): string | undefined {
+  return FOUNDING.prices[interval].priceId;
 }
