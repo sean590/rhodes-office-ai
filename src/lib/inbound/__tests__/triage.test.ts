@@ -128,6 +128,40 @@ describe("triageMessage", () => {
     expect(r.classification).toBe("needs_user");
   });
 
+  // Regression (found live): a CPA-thread REPLY — bare "tax return" / "K-1"
+  // mentions in the quoted history, only link is the CPA signature's SafeSend
+  // DropOff (upload). Not a delivery; must NOT nudge.
+  it("CPA conversational reply (bare doc-nouns + signature upload link) → ignored", () => {
+    const r = triageMessage(
+      msg({
+        fromEmail: "leslie@channels.com",
+        subject: "Re: LADD Holdings LLC",
+        bodyText:
+          "Hi Hailey, the $19,331 was a distribution from Silverhawk. There is a Schwab account for LADD. " +
+          "We are waiting for the final tax return to be filed and copies of the final K-1s from Harris. " +
+          "In order to keep your information secure, please transfer files to BPW using our Secure Upload.",
+        links: ["https://exchange-taxpayer.safesendreturns.com/DropOff/jm70000w00000", "https://bpw.com"],
+      }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).toBe("ignored");
+  });
+
+  // A KNOWN provider (the CPA) mentioning doc types conversationally is still
+  // not a delivery without delivery intent.
+  it("known provider mentioning K-1/tax return as nouns (no intent) → ignored", () => {
+    const r = triageMessage(
+      msg({
+        fromEmail: "hsimms@bpw.com",
+        subject: "RE: LADD Holdings LLC",
+        bodyText: "Once we get your input we can provide preliminary financials. We still need the final K-1s and the tax return.",
+        links: ["https://bpw.com", "https://www.linkedin.com/company/bpw"],
+      }),
+      { knownProviderSender: true },
+    );
+    expect(r.classification).toBe("ignored");
+  });
+
   it("newsletter → ignored", () => {
     const r = triageMessage(
       msg({
