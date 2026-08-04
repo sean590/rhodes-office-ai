@@ -40,7 +40,10 @@ cd "$(dirname "$0")/.."
 # 78 (was 77): + api/cron/hard-delete-orgs — the offboarding hard-delete cron
 # (system job, CRON_SECRET-authed, no user context): purges storage + org rows
 # via the hard_delete_organization RPC + orphaned member auth accounts.
-BASELINE=78
+# 79 (was 78): + lib/billing/customer — the ONE billing module that touches the
+# organizations row (Stripe customer mirror). Billing is owner-gated in the
+# routes; the routes themselves use this helper, not the admin client directly.
+BASELINE=79
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
