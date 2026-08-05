@@ -1,8 +1,24 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { SIGNUP_ENABLED } from "@/lib/features";
 
 export default function SignupPage() {
+  const router = useRouter();
+
+  // While the Google OAuth app is under verification, self-serve signup is
+  // closed (SIGNUP_ENABLED off). Send would-be signups to the early-access
+  // screen instead of starting an OAuth flow that /auth/callback would deny.
+  // NEXT_PUBLIC_ is inlined at build, so this is a static decision — but do it
+  // in an effect (not a bare redirect at module scope) to keep SSR happy.
+  useEffect(() => {
+    if (!SIGNUP_ENABLED) router.replace("/access-restricted");
+  }, [router]);
+
+  if (!SIGNUP_ENABLED) return null;
+
   const handleGoogleSignup = async () => {
     // Intent flag read by /auth/callback so a brand-new user is routed to
     // onboarding instead of the invite-only deny path. Not a secret.

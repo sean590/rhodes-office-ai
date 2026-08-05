@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MFA_STATE_COOKIE, buildMfaStateValue, mfaStateCookieOptions } from "@/lib/utils/mfa-state";
+import { SIGNUP_ENABLED } from "@/lib/features";
 
 // Set on the /signup page before OAuth: distinguishes "start a trial" from an
 // ordinary login, so a brand-new user with no invite is routed to onboarding
@@ -95,9 +96,12 @@ export async function GET(request: Request) {
 
       // 3a. Self-serve signup: a new user who arrived via /signup gets their
       //     records bootstrapped and is routed to onboarding (trial org +
-      //     qualifying questions + clickwrap) rather than denied.
+      //     qualifying questions + clickwrap) rather than denied. Gated by
+      //     SIGNUP_ENABLED — while the Google OAuth app is under verification
+      //     the flag is off, so signup-intent users fall through to the
+      //     early-access deny below (only existing members/invitees get in).
       const signupIntent = (await cookies()).get(SIGNUP_INTENT_COOKIE)?.value === "1";
-      if (signupIntent) {
+      if (signupIntent && SIGNUP_ENABLED) {
         await ensureUserRecords(admin, data.user);
         const response = setFreshSessionCookies(NextResponse.redirect(`${origin}/welcome`));
         response.cookies.set(SIGNUP_INTENT_COOKIE, "", { maxAge: 0, path: "/" });

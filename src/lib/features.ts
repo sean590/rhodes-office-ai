@@ -20,3 +20,13 @@
  */
 export const PROVIDER_SENDING_ENABLED =
   process.env.NEXT_PUBLIC_ENABLE_PROVIDER_SENDING === "true";
+
+/**
+ * Self-serve signup (public /signup → trial org). OFF by default so the app
+ * stays invite/member-only while the Google OAuth app goes through external
+ * verification. When off, a signup attempt lands on the early-access/waitlist
+ * screen instead of creating a trial. Flip on at launch (Day 21):
+ * `NEXT_PUBLIC_ENABLE_SIGNUP=true`. NEXT_PUBLIC_ = inlined at build (client +
+ * server agree), so opening signup is a redeploy, not a runtime toggle.
+ */
+export const SIGNUP_ENABLED = process.env.NEXT_PUBLIC_ENABLE_SIGNUP === "true";

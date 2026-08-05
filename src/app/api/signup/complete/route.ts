@@ -14,6 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getRequestContext, logAuditEvent } from "@/lib/utils/audit";
 import { recordConsent, CONSENT_DOC_VERSION } from "@/lib/billing/consent";
 import { TRIAL_DAYS } from "@/lib/billing/plans";
+import { SIGNUP_ENABLED } from "@/lib/features";
 import { z } from "zod";
 
 const schema = z.object({
@@ -25,6 +26,14 @@ const schema = z.object({
 
 export async function POST(request: Request) {
   try {
+    // Server-side kill-switch: self-serve signup is closed while the Google
+    // OAuth app is under verification. The /signup page and /auth/callback also
+    // gate on this, but enforce it here too so the org-creating endpoint can't
+    // be hit directly.
+    if (!SIGNUP_ENABLED) {
+      return NextResponse.json({ error: "Signup is not open yet." }, { status: 403 });
+    }
+
     const user = await getCurrentUser();
     if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
