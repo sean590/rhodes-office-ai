@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { MFA_STATE_COOKIE, buildMfaStateValue, mfaStateCookieOptions } from "@/lib/utils/mfa-state";
+
+// Set on the /signup page before OAuth: distinguishes "start a trial" from an
+// ordinary login, so a brand-new user with no invite is routed to onboarding
+// instead of being denied.
+const SIGNUP_INTENT_COOKIE = "rhodes_signup_intent";
 
 const ACTIVITY_COOKIE = "rhodes_last_activity";
 const SESSION_START_COOKIE = "rhodes_session_start";
@@ -87,9 +93,19 @@ export async function GET(request: Request) {
         return response;
       }
 
-      // 3. No membership, no invite — deny access
-      //    Sign out so there's no lingering session
-      //    Do NOT create user_profiles or users records
+      // 3a. Self-serve signup: a new user who arrived via /signup gets their
+      //     records bootstrapped and is routed to onboarding (trial org +
+      //     qualifying questions + clickwrap) rather than denied.
+      const signupIntent = (await cookies()).get(SIGNUP_INTENT_COOKIE)?.value === "1";
+      if (signupIntent) {
+        await ensureUserRecords(admin, data.user);
+        const response = setFreshSessionCookies(NextResponse.redirect(`${origin}/welcome`));
+        response.cookies.set(SIGNUP_INTENT_COOKIE, "", { maxAge: 0, path: "/" });
+        return response;
+      }
+
+      // 3b. No membership, no invite, no signup intent — deny access.
+      //     Sign out so there's no lingering session.
       await supabase.auth.signOut();
       const email = encodeURIComponent(data.user.email || "");
       return NextResponse.redirect(`${origin}/access-restricted?email=${email}`);

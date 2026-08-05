@@ -46,7 +46,10 @@ cd "$(dirname "$0")/.."
 # 80 (was 79): + lib/billing/webhook — the Stripe webhook lifecycle handler
 # (system webhook, no user context: Stripe-signature-authed in the route,
 # mirrors subscription state into the organizations row).
-BASELINE=80
+# 81 (was 80): + api/signup/complete — self-serve signup bootstraps a BRAND-NEW
+# org (+ owner membership + profile + consent) before any org-scoped context
+# exists; same category as api/organizations POST, which is already counted.
+BASELINE=81
 
 # Count PRODUCTION files that reference the raw client. Excludes the wrapper and
 # the definition itself, plus test files (they legitimately mock createAdminClient
