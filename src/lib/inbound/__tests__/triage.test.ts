@@ -254,3 +254,69 @@ describe("triageMessage", () => {
     expect(r.classification).toBe("ignored");
   });
 });
+
+// Failure-catalog taxonomy: the structured code + host the worker stamps on the
+// row so the cross-org catalog can aggregate. (SafeSend retrieval codes are
+// stamped later, by runSafesendAttempt — not here.)
+describe("triage failure taxonomy", () => {
+  it("unrecognized secure-link host → portal_unsupported + that host", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@evil.example", links: ["https://vault.evil.example/SendLinkRedirect/abc123"] }),
+      { knownProviderSender: false },
+    );
+    expect(r.failureCode).toBe("portal_unsupported");
+    expect(r.failureHost).toBe("vault.evil.example");
+  });
+
+  it("recognized portal SENDER → portal_unsupported keyed on the sender domain", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@sharefile.com", subject: "Files shared with you" }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).toBe("needs_user");
+    expect(r.failureCode).toBe("portal_unsupported");
+    expect(r.failureHost).toBe("sharefile.com");
+  });
+
+  it("delivery-style unknown sender + link → delivery_unfetched + the link host", () => {
+    const r = triageMessage(
+      msg({
+        fromEmail: "noreply@unknownvault.io",
+        subject: "A secure document has been shared with you",
+        links: ["https://unknownvault.io/dl/1"],
+      }),
+      { knownProviderSender: false },
+    );
+    expect(r.failureCode).toBe("delivery_unfetched");
+    expect(r.failureHost).toBe("unknownvault.io");
+  });
+
+  it("dmarc=fail attachment hold → sender_unverified", () => {
+    const r = triageMessage(
+      msg({
+        attachments: [att("capital-call.pdf", "application/pdf")],
+        auth: { spf: "fail", dkim: "fail", dmarc: "fail", verified: false },
+      }),
+      { knownProviderSender: true, senderVerified: false },
+    );
+    expect(r.failureCode).toBe("sender_unverified");
+  });
+
+  it("a fetchable SafeSend row is NOT stamped here (retrieval decides its code)", () => {
+    const r = triageMessage(
+      msg({ fromEmail: "noreply@safesendreturns.com", links: ["https://www.safesendreturns.com/SendLinkRedirect/abc"], bodyText: "Your documents are ready" }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).toBe("safesend");
+    expect(r.failureCode ?? null).toBeNull();
+  });
+
+  it("a filed attachment carries no failure code", () => {
+    const r = triageMessage(
+      msg({ attachments: [att("k1-2025.pdf", "application/pdf")] }),
+      { knownProviderSender: false },
+    );
+    expect(r.classification).toBe("attachment");
+    expect(r.failureCode ?? null).toBeNull();
+  });
+});

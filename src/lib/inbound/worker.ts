@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { inboundNeedsYouEmail } from "@/lib/email-templates";
 import { gmailConfigured, listNewMessages, getAttachment, getMailboxAddress, type InboundMessage } from "./gmail";
 import { triageMessage } from "./triage";
+import { hostOf } from "./failure-catalog";
 
 /**
  * Inbound v1 worker (rhodes-inbound-v1-build-plan.md) — one poll pass:
@@ -85,7 +86,7 @@ export async function processInboundMail(): Promise<InboundRunResult> {
       console.error(`[INBOUND] message ${msg.id} failed:`, err);
       await admin
         .from("inbound_deliveries")
-        .update({ status: "failed", error: err instanceof Error ? err.message.slice(0, 500) : "unknown", updated_at: new Date().toISOString() })
+        .update({ status: "failed", failure_code: "handler_exception", error: err instanceof Error ? err.message.slice(0, 500) : "unknown", updated_at: new Date().toISOString() })
         .eq("gmail_message_id", msg.id);
     }
   }
@@ -184,6 +185,10 @@ async function handleMessage(
       status: "pending",
       provider_id: providerId,
       needs_user_reason: triage.classification === "needs_user" || triage.classification === "safesend" ? triage.reason : null,
+      // Failure taxonomy: needs_user outcomes are known now; safesend rows are
+      // still 'pending' (a retrieval attempt decides + stamps their code later).
+      failure_code: triage.failureCode ?? null,
+      failure_host: triage.failureHost ?? null,
       auth_results: msg.auth,
     })
     .select("id")
@@ -217,20 +222,33 @@ async function handleMessage(
         if (capReason) {
           await admin
             .from("inbound_deliveries")
-            .update({ status: "needs_user", needs_user_reason: capReason, updated_at: new Date().toISOString() })
+            .update({ status: "needs_user", failure_code: "flood_cap_held", needs_user_reason: capReason, updated_at: new Date().toISOString() })
             .eq("id", deliveryId);
           result.needsUser += 1;
           await notifyCapDigestOnce(admin, orgId);
           break;
         }
       }
-      const { batchId, documentIds } = await ingestAttachments(admin, orgId, msg, triage.ingestableAttachments);
+      let ingest: { batchId: string; documentIds: string[] };
+      try {
+        ingest = await ingestAttachments(admin, orgId, msg, triage.ingestableAttachments);
+      } catch (err) {
+        // Attachment present but couldn't be staged (corrupt/encrypted file,
+        // storage error). Distinct catalog class from a generic handler bug.
+        await admin
+          .from("inbound_deliveries")
+          .update({ status: "needs_user", failure_code: "attachment_unreadable", needs_user_reason: "an attachment couldn't be read — try uploading it directly", error: err instanceof Error ? err.message.slice(0, 300) : "unknown", updated_at: new Date().toISOString() })
+          .eq("id", deliveryId);
+        result.needsUser += 1;
+        await notifyNeedsUser(admin, orgId, msg, "an attachment couldn't be read", deliveryId);
+        break;
+      }
       await admin
         .from("inbound_deliveries")
-        .update({ status: "ingested", batch_id: batchId, document_ids: documentIds, updated_at: new Date().toISOString() })
+        .update({ status: "ingested", batch_id: ingest.batchId, document_ids: ingest.documentIds, updated_at: new Date().toISOString() })
         .eq("id", deliveryId);
       result.ingested += 1;
-      await recordInboundOutcome(admin, orgId, "inbound_filed", deliveryId, { sender: msg.fromEmail, files: documentIds.length });
+      await recordInboundOutcome(admin, orgId, "inbound_filed", deliveryId, { sender: msg.fromEmail, files: ingest.documentIds.length });
       await autoResolveOpenNudges(admin, orgId, providerId, msg.fromEmail, deliveryId);
       break;
     }
@@ -603,10 +621,13 @@ export async function runSafesendAttempt(
     }
   };
 
+  // Catalog dimension: the secure-link host behind whatever this attempt decides.
+  const failureHost = hostOf(delivery.safesend_link);
+
   if (delivery.attempts >= 2) {
     await admin
       .from("inbound_deliveries")
-      .update({ status: "needs_user", needs_user_reason: "safesend retrieval attempts exhausted — download it manually or forward the files", updated_at: new Date().toISOString() })
+      .update({ status: "needs_user", failure_code: "safesend_exhausted", failure_host: failureHost, needs_user_reason: "safesend retrieval attempts exhausted — download it manually or forward the files", updated_at: new Date().toISOString() })
       .eq("id", delivery.id);
     return;
   }
@@ -620,7 +641,7 @@ export async function runSafesendAttempt(
     if (result.outcome === "retrieved") {
       await admin
         .from("inbound_deliveries")
-        .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, relayed_access_code: null, updated_at: new Date().toISOString() })
+        .update({ status: "retrieved", batch_id: result.batchId, document_ids: result.documentIds, needs_user_reason: null, failure_code: null, failure_host: null, relayed_access_code: null, updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
       const { data: drow } = await admin.from("inbound_deliveries").select("provider_id").eq("id", delivery.id).maybeSingle();
       await recordInboundOutcome(admin, orgId, "inbound_retrieved", delivery.id, { sender: delivery.sender, files: result.files });
@@ -631,12 +652,12 @@ export async function runSafesendAttempt(
       // slot so a code forwarded late can't be typed into the NEXT attempt.
       await admin
         .from("inbound_deliveries")
-        .update({ status: "waiting_code", needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, relayed_access_code: null, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .update({ status: "waiting_code", failure_code: "otp_awaiting", failure_host: failureHost, needs_user_reason: `access code sent to ${result.recipient} — forward it to ${mailboxAddress}`, relayed_access_code: null, reminded_at: new Date().toISOString(), updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
     } else {
       await admin
         .from("inbound_deliveries")
-        .update({ status: "needs_user", needs_user_reason: result.reason, updated_at: new Date().toISOString() })
+        .update({ status: "needs_user", failure_code: result.code, failure_host: failureHost, needs_user_reason: result.reason, updated_at: new Date().toISOString() })
         .eq("id", delivery.id);
       await notifyNeedsUser(admin, orgId, {
         id: "", threadId: "", internalDate: Date.now(),
@@ -650,7 +671,7 @@ export async function runSafesendAttempt(
     console.error("[SAFESEND] attempt failed:", err);
     await admin
       .from("inbound_deliveries")
-      .update({ status: "needs_user", needs_user_reason: "secure-link retrieval hit an error — download it manually", error: err instanceof Error ? err.message.slice(0, 300) : "unknown", updated_at: new Date().toISOString() })
+      .update({ status: "needs_user", failure_code: "safesend_nav_failed", failure_host: failureHost, needs_user_reason: "secure-link retrieval hit an error — download it manually", error: err instanceof Error ? err.message.slice(0, 300) : "unknown", updated_at: new Date().toISOString() })
       .eq("id", delivery.id);
   }
 }
@@ -818,18 +839,27 @@ export async function autoResolveOpenNudges(
   }
 }
 
-/** 30-day skipped-mail purge (spec §3d): ignored rows shrink to the dedup stub. */
+/**
+ * 30-day metadata purge (spec §3d): aged rows shrink to a PII-free stub.
+ *   - ignored rows → dedup stub.
+ *   - terminal failure rows (needs_user/failed/waiting_code) → drop sender/
+ *     subject/prose but KEEP failure_code + failure_host, so the cross-org
+ *     failure catalog (migration 094) retains its aggregate dimensions forever
+ *     without holding customer email metadata (Option A, 2026-08-04).
+ * Success rows (ingested/retrieved) keep their sender as document provenance.
+ */
 export async function purgeIgnoredMetadata(admin: Admin, orgId: string) {
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
   try {
     await admin
       .from("inbound_deliveries")
       .update({ sender: null, subject: null, needs_user_reason: null, error: null })
       .eq("organization_id", orgId)
-      .eq("status", "ignored")
+      .in("status", ["ignored", "needs_user", "failed", "waiting_code", "dismissed"])
       .not("sender", "is", null)
-      .lt("received_at", new Date(Date.now() - 30 * 24 * 3600_000).toISOString());
+      .lt("received_at", cutoff);
   } catch (err) {
-    console.error("[INBOUND] ignored purge failed:", err);
+    console.error("[INBOUND] metadata purge failed:", err);
   }
 }
 

@@ -1,4 +1,5 @@
 import type { InboundMessage } from "./gmail";
+import { hostOf, type FailureCode } from "./failure-catalog";
 
 /**
  * Inbound triage — deterministic-first classification of a mailbox message.
@@ -89,6 +90,12 @@ export type TriageResult = {
   /** Every candidate download link in the body (multi-link threads) —
    * retrieval falls back to the next when one is expired/locked/rejected. */
   safesendLinks: string[];
+  /** Structured failure taxonomy for the catalog (needs_user cases known at
+   * triage time). null when triage can't yet decide the outcome (safesend rows
+   * are stamped later, by the retrieval attempt) or there's no failure. */
+  failureCode?: FailureCode | null;
+  /** Portal/secure-delivery host behind a portal_unsupported failure, if known. */
+  failureHost?: string | null;
 };
 
 export function triageMessage(
@@ -125,6 +132,7 @@ export function triageMessage(
         ingestableAttachments: [],
         safesendLink: null,
         safesendLinks: [],
+        failureCode: "sender_unverified",
       };
     }
     return {
@@ -160,18 +168,22 @@ export function triageMessage(
       ingestableAttachments: [],
       safesendLink: null,
       safesendLinks: [],
+      failureCode: "sender_unverified",
     };
   }
 
   // SendLinkRedirect-shaped link on a host we don't recognize: never visit it,
   // but never silently drop it either — could be a white-labeled SafeSend.
-  if (msg.links.some((l) => SAFESEND_DOWNLOAD.test(l) && !isSafesendHost(l))) {
+  const unknownSecureLink = msg.links.find((l) => SAFESEND_DOWNLOAD.test(l) && !isSafesendHost(l));
+  if (unknownSecureLink) {
     return {
       classification: "needs_user",
       reason: "secure link on an unrecognized host",
       ingestableAttachments: [],
       safesendLink: null,
       safesendLinks: [],
+      failureCode: "portal_unsupported",
+      failureHost: hostOf(unknownSecureLink),
     };
   }
 
@@ -186,6 +198,11 @@ export function triageMessage(
   // document, or ANY sender announcing a waiting document with a fetchable
   // link, is a delivery Rhodes can't fetch in v1.
   if (portalSender || opts.learnedDeliverySender || (opts.knownProviderSender && deliveryish) || (deliveryish && deliveryLinks.length > 0)) {
+    // portalSender = a recognized portal PLATFORM emailed a notification → the
+    // host worth cataloguing is the sender's own domain (e.g. sharefile.com).
+    // Otherwise it's a provider/delivery-style announcement carrying a link we
+    // don't auto-fetch in v1 → catalogue the link's host when present.
+    const senderDomain = msg.fromEmail.split("@").pop()?.toLowerCase() || null;
     return {
       classification: "needs_user",
       reason: portalSender
@@ -198,6 +215,8 @@ export function triageMessage(
       ingestableAttachments: [],
       safesendLink: null,
       safesendLinks: [],
+      failureCode: portalSender ? "portal_unsupported" : "delivery_unfetched",
+      failureHost: portalSender ? senderDomain : hostOf(deliveryLinks[0]),
     };
   }
 

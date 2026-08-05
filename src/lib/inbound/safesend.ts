@@ -6,6 +6,7 @@ import { sendEmail } from "@/lib/email";
 import { inboundNeedsYouEmail } from "@/lib/email-templates";
 import { waitForOtp, gmailConfigured } from "./gmail";
 import { SAFESEND_DRIVER_SOURCE } from "./safesend-driver";
+import type { FailureCode } from "./failure-catalog";
 
 /**
  * SafeSend auto-retrieval (usable-bar item B — the agentic fetch).
@@ -55,7 +56,7 @@ export type SafesendDelivery = {
 export type RetrievalResult =
   | { outcome: "retrieved"; batchId: string; documentIds: string[]; files: number }
   | { outcome: "waiting_code"; recipient: string }
-  | { outcome: "needs_user"; reason: string };
+  | { outcome: "needs_user"; reason: string; code: FailureCode };
 
 function isOrgForwarder(sender: string, subject: string | null): boolean {
   return /^\s*(fwd|fw):/i.test(subject ?? "");
@@ -109,15 +110,16 @@ export async function retrieveSafesend(
     // Wait for VERIFY_SENT (or terminal LOCKED/EXPIRED) before OTP-watching —
     // the code is only triggered by the Verify click.
     const early = await waitStatus(sandbox, ["VERIFY_SENT", "LOCKED", "EXPIRED", "FAILED"], 90_000);
-    if (early === "LOCKED") return { outcome: "needs_user", reason: "safesend link locked (too many attempts) — retry in ~30 minutes or download manually" };
-    if (early === "EXPIRED") return { outcome: "needs_user", reason: "safesend link expired — ask the sender to re-share, or upload manually" };
+    if (early === "LOCKED") return { outcome: "needs_user", code: "safesend_locked", reason: "safesend link locked (too many attempts) — retry in ~30 minutes or download manually" };
+    if (early === "EXPIRED") return { outcome: "needs_user", code: "link_expired", reason: "safesend link expired — ask the sender to re-share, or upload manually" };
     if (early === "FAILED wrong-address") {
       return {
         outcome: "needs_user",
+        code: "recipient_mismatch",
         reason: `SafeSend didn't accept ${recipient} as the recipient — the delivery was addressed to someone else. Forward the files directly, or have the original recipient forward the delivery email.`,
       };
     }
-    if (early?.startsWith("FAILED") || early === null) return { outcome: "needs_user", reason: `safesend wizard failed (${early ?? "no status"})` };
+    if (early?.startsWith("FAILED") || early === null) return { outcome: "needs_user", code: "safesend_nav_failed", reason: `safesend wizard failed (${early ?? "no status"})` };
 
     // Verify just fired → the code is now in flight to `recipient`, and the
     // session is live at the code screen. Prompt the forward NOW (while the
@@ -151,7 +153,7 @@ export async function retrieveSafesend(
       return { outcome: "retrieved", ...ingest };
     }
     if (final === "FAILED otp-timeout") return { outcome: "waiting_code", recipient };
-    return { outcome: "needs_user", reason: `safesend retrieval failed (${final ?? "no status"})` };
+    return { outcome: "needs_user", code: "safesend_nav_failed", reason: `safesend retrieval failed (${final ?? "no status"})` };
 
     async function ingestDownloads(admin: Admin, d: SafesendDelivery) {
       const ls = await sandbox.runCommand({ cmd: "ls", args: ["/vercel/sandbox/downloads"] });
