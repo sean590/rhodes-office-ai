@@ -58,6 +58,56 @@ export function withMarketingFooter(html: string): string {
   return html.includes("{{{RESEND_UNSUBSCRIBE_URL}}}") ? html : html + marketingFooter();
 }
 
+// Brand color (matches the signup page). Solid + gradient — Outlook ignores the
+// gradient and falls back to the solid background-color.
+const BRAND_GREEN = "#2d5a3d";
+
+/**
+ * Render a fully branded marketing email: Rhodes logo lockup + heading + body +
+ * optional CTA button + the CAN-SPAM footer. Table-based and inline-styled for
+ * email-client compatibility; the logo is drawn in CSS (no hosted image needed).
+ * Pass `bodyHtml` as one or more <p> blocks.
+ */
+export function renderMarketingEmail(opts: {
+  heading: string;
+  bodyHtml: string;
+  cta?: { label: string; url: string };
+  previewText?: string;
+}): string {
+  const preheader = opts.previewText
+    ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0">${opts.previewText}</div>`
+    : "";
+  const cta = opts.cta
+    ? `<tr><td style="padding:0 40px 32px 40px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>` +
+      `<td style="background:${BRAND_GREEN};border-radius:10px">` +
+      `<a href="${opts.cta.url}" style="display:inline-block;padding:12px 22px;font-size:15px;font-weight:600;color:#ffffff;text-decoration:none">${opts.cta.label}</a>` +
+      `</td></tr></table></td></tr>`
+    : "";
+  return (
+    `<!DOCTYPE html><html><body style="margin:0;padding:0;background:#f5f4f0">${preheader}` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f4f0;padding:32px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">` +
+    `<tr><td align="center"><table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #e8e6df;border-radius:16px;overflow:hidden">` +
+    // logo lockup
+    `<tr><td style="padding:32px 40px 8px 40px"><table role="presentation" cellpadding="0" cellspacing="0"><tr>` +
+    `<td style="width:40px;height:40px;background:${BRAND_GREEN};background-image:linear-gradient(135deg,${BRAND_GREEN},#3d7a53);border-radius:10px;color:#ffffff;font-size:20px;font-weight:700;text-align:center;line-height:40px">R</td>` +
+    `<td style="padding-left:12px;font-size:20px;font-weight:600;letter-spacing:-0.02em;color:#1a1a1f">Rhodes</td>` +
+    `</tr></table></td></tr>` +
+    // body
+    `<tr><td style="padding:16px 40px 8px 40px">` +
+    `<h1 style="margin:0 0 12px 0;font-size:22px;line-height:1.3;letter-spacing:-0.02em;color:#1a1a1f">${opts.heading}</h1>` +
+    opts.bodyHtml +
+    `</td></tr>` +
+    cta +
+    // footer
+    `<tr><td style="padding:20px 40px 28px 40px;border-top:1px solid #e8e6df">` +
+    `<p style="margin:0;font-size:12px;line-height:1.5;color:#9494a0">` +
+    `You're receiving this because you signed up for Rhodes updates.<br />` +
+    `<a href="{{{RESEND_UNSUBSCRIBE_URL}}}" style="color:#6b6b76">Unsubscribe</a> &middot; ${MARKETING_POSTAL_ADDRESS}` +
+    `</p></td></tr>` +
+    `</table></td></tr></table></body></html>`
+  );
+}
+
 /**
  * Idempotently add a recipient to the marketing segment. Best-effort: a
  * duplicate is a no-op and NEVER re-subscribes a contact who opted out (we don't
