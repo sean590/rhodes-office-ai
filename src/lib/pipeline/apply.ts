@@ -9,6 +9,7 @@ import { findDirectoryMatch, normalizeName } from "@/lib/utils/name-matching";
 import { invalidateOrgCaches } from "@/lib/utils/chat-context";
 import { logAuditEvent } from "@/lib/utils/audit";
 import { checkAndSatisfyExpectations } from "@/lib/utils/document-expectations";
+import { assertPlausibleMoney, impliedCapTableTotal, exceedsAnchor, MoneyError } from "@/lib/pipeline/money-guard";
 import {
   validateInvestmentTransactionLineItems,
   coerceLineItemCategories,
@@ -526,6 +527,41 @@ export async function applyActions(
         case "update_cap_table": {
           const capEntityId = item.data.entity_id as string;
           const investorName = item.data.investor_name as string;
+          const capContributed = item.data.capital_contributed as number | null | undefined;
+
+          // Money guard (origin: extraction wrote $350k as 35,000,000 — a 100×
+          // cents-scale error — which then surfaced verbatim in chat). Format +
+          // absolute ceiling first, then an anchor check: a member's implied
+          // total (capital ÷ ownership%) shouldn't dwarf the entity's linked
+          // investment committed capital. A thrown MoneyError is caught by the
+          // per-action handler below and surfaced for review, never written.
+          assertPlausibleMoney(capContributed, "capital contribution");
+          if (capContributed != null) {
+            const implied = impliedCapTableTotal(capContributed, item.data.ownership_pct as number | null);
+            if (implied !== null) {
+              const { data: linkedInv } = await supabase
+                .from("investments")
+                .select("id")
+                .eq("entity_id", capEntityId)
+                .eq("organization_id", options.orgId!);
+              const invIds = (linkedInv ?? []).map((r) => r.id as string);
+              if (invIds.length > 0) {
+                const { data: anchorRows } = await supabase
+                  .from("investment_investors")
+                  .select("committed_capital")
+                  .in("investment_id", invIds);
+                const anchorTotal = (anchorRows ?? []).reduce(
+                  (s, r) => s + (Number(r.committed_capital) || 0),
+                  0,
+                );
+                if (exceedsAnchor(implied, anchorTotal)) {
+                  throw new MoneyError(
+                    `capital contribution for ${investorName} implies a total of $${implied.toLocaleString()}, ~${Math.round(implied / anchorTotal)}× the entity's known invested capital ($${anchorTotal.toLocaleString()}) — likely a 100× (cents) error. Held for review.`,
+                  );
+                }
+              }
+            }
+          }
 
           if (item.data.replaces_investor_name) {
             await supabase
@@ -1027,6 +1063,7 @@ export async function applyActions(
         case "create_investment": {
           const invName = item.data.name as string;
           if (!invName) throw new Error("Investment name is required");
+          assertPlausibleMoney(item.data.committed_capital as number | null | undefined, "committed capital");
 
           // Create the investment (deal metadata only — no parent_entity_id, no capital/profit)
           const { data: newInvestment, error: invErr } = await supabase
@@ -1499,6 +1536,7 @@ export async function applyActions(
 
           const txnType = item.data.transaction_type as string;
           const txnAmount = Number(item.data.amount);
+          assertPlausibleMoney(txnAmount, "transaction amount");
           const txnDate = item.data.transaction_date as string;
           const txnDescription = (item.data.description as string) || null;
           const adjustsTransactionId = (item.data.adjusts_transaction_id as string) || null;
@@ -1609,6 +1647,7 @@ export async function applyActions(
           const entityId = resolveEntityId(item.data.entity_id);
           if (!investmentId) throw new Error("investment_id is required");
           if (!entityId) throw new Error("entity_id is required");
+          assertPlausibleMoney(item.data.committed_capital as number | null | undefined, "committed capital");
 
           const { data: existing, error: fetchErr } = await supabase
             .from("investment_investors")
@@ -1684,6 +1723,7 @@ export async function applyActions(
         case "update_investment_investor": {
           const id = item.data.investment_investor_id as string;
           if (!id) throw new Error("investment_investor_id is required");
+          assertPlausibleMoney(item.data.committed_capital as number | null | undefined, "committed capital");
 
           const { data: before, error: fetchErr } = await supabase
             .from("investment_investors")
