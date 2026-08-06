@@ -11,9 +11,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // itself reference the admin factory (keeps it out of the admin-usage ratchet).
 type Admin = SupabaseClient;
 
-// Version stamp for the ToS/Privacy the user agreed to. Bump when the legal
-// docs change (the drafts finalize on the Week-1 human lane); env-overridable.
-export const CONSENT_DOC_VERSION = process.env.CONSENT_DOC_VERSION || "2026-08-draft";
+// Version stamp for the ToS/Privacy the user agreed to (matches the published
+// docs' Last Updated date). Bump on any revision before open; env-overridable.
+export const CONSENT_DOC_VERSION = process.env.CONSENT_DOC_VERSION || "2026-08-04.v1";
 
 export type ConsentType =
   | "signup_clickwrap"

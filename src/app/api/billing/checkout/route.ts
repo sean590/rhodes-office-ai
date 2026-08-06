@@ -8,8 +8,10 @@
 import { NextResponse } from "next/server";
 import { requireOrg, isError } from "@/lib/utils/org-context";
 import { getStripe, stripeConfigured } from "@/lib/billing/stripe";
-import { priceIdFor, type BillingInterval } from "@/lib/billing/plans";
+import { type BillingInterval } from "@/lib/billing/plans";
+import { resolvePriceId } from "@/lib/billing/prices";
 import { ensureStripeCustomer } from "@/lib/billing/customer";
+import { getRequestContext } from "@/lib/utils/audit";
 
 export const maxDuration = 60;
 
@@ -27,7 +29,7 @@ export async function POST(request: Request) {
 
     const body = await request.json().catch(() => ({}));
     const interval: BillingInterval = body?.interval === "year" ? "year" : "month";
-    const priceId = priceIdFor(interval);
+    const priceId = await resolvePriceId(interval);
     if (!priceId) {
       return NextResponse.json({ error: `No Stripe price configured for ${interval}.` }, { status: 500 });
     }
@@ -35,6 +37,12 @@ export async function POST(request: Request) {
     const customerId = await ensureStripeCustomer(orgId, user.email);
     const origin = new URL(request.url).origin;
     const stripe = getStripe();
+
+    // Consent proof (audit A4): the affirmative act is this authenticated request,
+    // so capture ip/ua HERE (a server-to-server webhook has neither) and stash on
+    // the session metadata for the webhook's auto_renewal consent record. Stripe
+    // metadata values are strings ≤500 chars.
+    const reqCtx = getRequestContext(request.headers);
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -46,7 +54,11 @@ export async function POST(request: Request) {
       success_url: `${origin}/settings/billing?checkout=success`,
       cancel_url: `${origin}/settings/billing?checkout=cancelled`,
       subscription_data: { metadata: { organization_id: orgId } },
-      metadata: { organization_id: orgId },
+      metadata: {
+        organization_id: orgId,
+        consent_ip: reqCtx.ipAddress ?? "",
+        consent_ua: (reqCtx.userAgent ?? "").slice(0, 400),
+      },
     });
 
     return NextResponse.json({ url: session.url });

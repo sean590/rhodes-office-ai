@@ -8,7 +8,7 @@
 import type Stripe from "stripe";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "./stripe";
-import { recordConsent } from "./consent";
+import { recordConsent, CONSENT_DOC_VERSION } from "./consent";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -102,12 +102,15 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
       const orgId = session.metadata?.organization_id ?? null;
       // Auto-renewal consent trail: the customer entered a recurring
       // subscription at checkout (ARL record). ip/ua aren't available in a
-      // server-to-server webhook; the affirmative clickwrap is captured at
-      // signup (Day 4) — this records the recurring-billing agreement.
+      // server-to-server webhook, so the checkout route captured them at
+      // initiation and stashed them on the session metadata (audit A4).
       if (orgId) {
         await recordConsent(admin, {
           organizationId: orgId,
           consentType: "auto_renewal",
+          documentVersion: CONSENT_DOC_VERSION,
+          ipAddress: session.metadata?.consent_ip || null,
+          userAgent: session.metadata?.consent_ua || null,
           metadata: { stripe_session_id: session.id, mode: session.mode, subscription: session.subscription },
         });
       }
