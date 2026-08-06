@@ -29,6 +29,7 @@ import { dispatchAction } from "../apply-dispatch";
 import { resolveName } from "../resolve-names";
 import { getStateLabel } from "@/lib/constants";
 import type { Jurisdiction } from "@/lib/types/enums";
+import { WHOLE_DOLLARS_HINT } from "@/lib/pipeline/money-guard";
 
 
 // --- create_entity -----------------------------------------------------------
@@ -158,7 +159,7 @@ const updateMemberTool = simpleWriteTool(
     investor_type: z.string().optional(),
     units: z.number().optional().nullable(),
     ownership_pct: z.number(),
-    capital_contributed: z.number().optional().nullable(),
+    capital_contributed: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
   }),
   async (i, ctx) => `Update member "${i.investor_name}" on ${await resolveName(ctx, "entity", i.entity_id as string)}`,
   "entity", "entity_id",
@@ -213,7 +214,7 @@ const setCapTableTool = simpleWriteTool(
     investor_type: z.string(),
     units: z.number().optional().nullable(),
     ownership_pct: z.number(),
-    capital_contributed: z.number().optional().nullable(),
+    capital_contributed: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
     replaces_investor_name: z.string().optional().nullable(),
   }),
   async (i, ctx) => `Set cap-table entry: ${i.investor_name} at ${i.ownership_pct}% on ${await resolveName(ctx, "entity", i.entity_id as string)}`,
