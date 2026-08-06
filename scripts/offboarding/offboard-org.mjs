@@ -7,10 +7,14 @@
 // recoverable (owner self-serve, or `recover` here). A cron hard-deletes it
 // only after the grace elapses (Increment B).
 //
-// This is deliberately NOT wired to Stripe. Cancelling a subscription is a
-// separate billing action that must never delete data; offboarding is this.
+// Stripe: cancelling a subscription never deletes data, but offboarding a
+// customer who asked to leave DOES cancel their subscription so they stop being
+// billed (audit A12). `schedule` cancels the org's Stripe subscription (best-
+// effort, idempotent); `recover` does NOT re-subscribe — reactivating billing is
+// a deliberate separate action. Data deletion still only happens after the grace
+// window via the hard-delete cron.
 //
-// Usage (env: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY):
+// Usage (env: NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY + STRIPE_SECRET_KEY):
 //   set -a; source .env.local; set +a
 //   node scripts/offboarding/offboard-org.mjs status   <orgId>
 //   node scripts/offboarding/offboard-org.mjs schedule <orgId> "<exact org name>"
@@ -21,8 +25,38 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
+import Stripe from "stripe";
 
 const GRACE_DAYS = 30;
+
+// Cancel the org's Stripe subscription at offboard. Billing and data-deletion
+// are separate concerns (this script only touches Stripe on the way OUT), but a
+// customer who has asked to leave must stop being charged immediately — leaving
+// an active subscription on a deleted account is indefensible (audit A12).
+// Best-effort + idempotent: a missing key/subscription is a no-op, and re-running
+// after a partial failure is safe. `cancel()` (not cancel_at_period_end) ends
+// billing now and voids the upcoming draft invoice; any already-finalized invoice
+// is left for normal Stripe collection/refund.
+async function cancelStripeSubscription(org) {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) { console.log("  (STRIPE_SECRET_KEY not set — skipped Stripe cancel; cancel by hand)"); return; }
+  const subId = org.stripe_subscription_id;
+  if (!subId) { console.log("  (no Stripe subscription on record — nothing to cancel)"); return; }
+  const stripe = new Stripe(key);
+  try {
+    const existing = await stripe.subscriptions.retrieve(subId);
+    if (existing.status === "canceled") {
+      console.log(`  Stripe subscription ${subId} already canceled.`);
+      return;
+    }
+    await stripe.subscriptions.cancel(subId, { invoice_now: false, prorate: false });
+    console.log(`✓ Canceled Stripe subscription ${subId} (billing stops now).`);
+  } catch (e) {
+    // Never block offboarding on Stripe — surface loudly so support cancels by hand.
+    console.error(`  ⚠ Stripe cancel FAILED for ${subId}: ${e?.message || e}`);
+    console.error(`    Cancel manually in the Stripe dashboard before finishing offboarding.`);
+  }
+}
 
 // Best-effort member notification — support-triggered, so keep it factual.
 async function notifyMembers(db, orgId, orgName, scheduledFor) {
@@ -67,7 +101,7 @@ const db = createClient(url, key, { auth: { autoRefreshToken: false, persistSess
 
 const { data: org, error } = await db
   .from("organizations")
-  .select("id, name, deleted_at, deletion_scheduled_for, billing_status")
+  .select("id, name, deleted_at, deletion_scheduled_for, billing_status, stripe_subscription_id")
   .eq("id", orgId)
   .maybeSingle();
 if (error) { console.error("Query failed:", error.message); process.exit(1); }
@@ -106,6 +140,9 @@ if (mode === "schedule") {
   console.log(`✓ Scheduled "${org.name}" for deletion.`);
   console.log(`  Locked out now; recoverable until ${scheduledFor.toISOString()} (${GRACE_DAYS}-day grace).`);
   console.log(`  The owner can self-recover in-app, or run: offboard-org.mjs recover ${orgId}`);
+  // Stop billing immediately — the customer asked to leave. Runs after the
+  // soft-delete is recorded so an interrupted run still shows the org offboarded.
+  await cancelStripeSubscription(org);
   await notifyMembers(db, orgId, org.name, scheduledFor);
   process.exit(0);
 }
