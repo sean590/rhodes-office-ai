@@ -21,6 +21,7 @@ import { defineTool, type ToolDefinition } from "../schema";
 import { verifyResourceOwnership } from "../ownership";
 import { dispatchAction } from "../apply-dispatch";
 import { resolveName } from "../resolve-names";
+import { WHOLE_DOLLARS_HINT } from "@/lib/pipeline/money-guard";
 
 const LINE_ITEM_DESC = [
   "Contribution categories: subscription, management_fee, monitoring_fee,",
@@ -52,7 +53,7 @@ export const createInvestmentTool = defineTool({
     parent_entity_id: z.string().uuid().optional().nullable().describe("The internal entity making the initial investment — creates an investment_investor row."),
     capital_pct: z.number().optional().nullable(),
     profit_pct: z.number().optional().nullable(),
-    committed_capital: z.number().optional().nullable(),
+    committed_capital: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
     formation_state: z.string().optional().nullable(),
     description: z.string().optional().nullable(),
     preferred_return_pct: z.number().optional().nullable(),
@@ -134,7 +135,7 @@ export const addInvestmentInvestorTool = defineTool({
   inputSchema: z.object({
     investment_id: z.string().uuid(),
     entity_id: z.string().uuid(),
-    committed_capital: z.number().optional().nullable(),
+    committed_capital: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
     capital_pct: z.number().optional().nullable(),
     profit_pct: z.number().optional().nullable(),
   }),
@@ -161,7 +162,7 @@ export const updateInvestmentInvestorTool = defineTool({
   kind: "write",
   inputSchema: z.object({
     investment_investor_id: z.string().uuid(),
-    committed_capital: z.number().optional().nullable(),
+    committed_capital: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
     capital_pct: z.number().optional().nullable(),
     profit_pct: z.number().optional().nullable(),
   }),
@@ -456,7 +457,7 @@ export const setInvestmentAllocationsTool = defineTool({
     allocations: z.array(z.object({
       member_name: z.string(),
       allocation_pct: z.number(),
-      committed_amount: z.number().optional().nullable(),
+      committed_amount: z.number().optional().nullable().describe(WHOLE_DOLLARS_HINT),
     })),
   }),
   dryRun: async (input, ctx) => {
