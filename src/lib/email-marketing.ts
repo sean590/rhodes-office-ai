@@ -10,9 +10,11 @@
  * This module is the thin wrapper; transactional mail (offboarding, receipts,
  * deletion notices) stays on sendEmail() and is CAN-SPAM-exempt.
  *
- * Setup (one-time): create a "Marketing" Audience in Resend, set its id as
- * RESEND_MARKETING_AUDIENCE_ID. The physical postal address below is the other
- * CAN-SPAM requirement and is baked into every footer.
+ * Setup (done 2026-08-06): Resend "Marketing" segment
+ * 6c69add9-4f40-4585-b30e-3db8cf9b8493 (RESEND_MARKETING_SEGMENT_ID). Resend's
+ * model is contacts (global) + segments; broadcasts target a segmentId.
+ * `audienceId` is deprecated in the SDK. The physical postal address below is
+ * the other CAN-SPAM requirement and is baked into every footer.
  */
 import { Resend } from "resend";
 
@@ -27,10 +29,12 @@ function getResend(): Resend | null {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-function marketingAudienceId(): string {
-  const id = process.env.RESEND_MARKETING_AUDIENCE_ID;
-  if (!id) throw new Error("RESEND_MARKETING_AUDIENCE_ID is not set — create a marketing Audience in Resend first");
-  return id;
+// The Resend "Marketing" segment (created 2026-08-06). Not a secret — it's an
+// identifier, useless without RESEND_API_KEY — so it's a code default, env-
+// overridable if we ever rotate/segment further.
+const MARKETING_SEGMENT_ID = "6c69add9-4f40-4585-b30e-3db8cf9b8493";
+function marketingSegmentId(): string {
+  return process.env.RESEND_MARKETING_SEGMENT_ID || MARKETING_SEGMENT_ID;
 }
 
 /**
@@ -55,19 +59,19 @@ export function withMarketingFooter(html: string): string {
 }
 
 /**
- * Idempotently add a recipient to the marketing Audience. Best-effort: a
+ * Idempotently add a recipient to the marketing segment. Best-effort: a
  * duplicate is a no-op and NEVER re-subscribes a contact who opted out (we don't
  * pass unsubscribed:false, so Resend leaves an existing contact's consent as-is).
  */
-export async function addToMarketingAudience(
+export async function addMarketingContact(
   email: string,
   name?: { firstName?: string; lastName?: string },
 ): Promise<void> {
   const client = getResend();
   if (!client) throw new Error("RESEND_API_KEY not set");
   const { error } = await client.contacts.create({
-    audienceId: marketingAudienceId(),
     email,
+    segments: [{ id: marketingSegmentId() }],
     ...(name ?? {}),
   });
   // Duplicate contact is expected on re-runs; only surface real failures.
@@ -77,10 +81,10 @@ export async function addToMarketingAudience(
 }
 
 /**
- * Send a marketing blast as a Broadcast to the whole marketing Audience. Resend
- * injects the unsubscribe link, sets the List-Unsubscribe(-Post) headers, and
- * skips already-unsubscribed contacts — so no send-time suppression check is
- * needed on our side. Returns the broadcast id.
+ * Send a marketing blast as a Broadcast to the marketing segment. Resend injects
+ * the unsubscribe link, sets the List-Unsubscribe(-Post) headers, and skips
+ * already-unsubscribed contacts — so no send-time suppression check is needed on
+ * our side. Returns the broadcast id.
  */
 export async function sendMarketingBroadcast(params: {
   subject: string;
@@ -90,7 +94,7 @@ export async function sendMarketingBroadcast(params: {
   const client = getResend();
   if (!client) throw new Error("RESEND_API_KEY not set");
   const { data: created, error: createErr } = await client.broadcasts.create({
-    audienceId: marketingAudienceId(),
+    segmentId: marketingSegmentId(),
     from: params.from ?? FROM,
     subject: params.subject,
     html: withMarketingFooter(params.html),
