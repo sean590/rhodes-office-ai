@@ -51,18 +51,34 @@ async function syncSubscription(admin: Admin, sub: Stripe.Subscription): Promise
   }
   const item = sub.items.data[0];
   const periodEndUnix = item?.current_period_end ?? (sub as unknown as { current_period_end?: number }).current_period_end;
+  const status = mapSubStatus(sub.status);
   await admin
     .from("organizations")
     .update({
       billing_plan: "founding",
-      billing_status: mapSubStatus(sub.status),
+      billing_status: status,
       stripe_subscription_id: sub.id,
       stripe_price_id: item?.price?.id ?? null,
       current_period_end: periodEndUnix ? new Date(periodEndUnix * 1000).toISOString() : null,
       cancel_at_period_end: Boolean(sub.cancel_at_period_end),
+      // Clear the cancellation clock on any non-canceled sync (reactivation) so a
+      // future cancel restarts the 30-day retention window from scratch. `undefined`
+      // is omitted by supabase-js, so the canceled case is left to the stamp below.
+      subscription_ended_at: status === "canceled" ? undefined : null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", orgId);
+  if (status === "canceled") await stampSubscriptionEnded(admin, orgId);
+}
+
+/** Stamp the cancellation time ONCE (first canceled event wins) so the retention
+ *  clock isn't reset by a later re-delivery or a second canceled event. */
+async function stampSubscriptionEnded(admin: Admin, orgId: string): Promise<void> {
+  await admin
+    .from("organizations")
+    .update({ subscription_ended_at: new Date().toISOString() })
+    .eq("id", orgId)
+    .is("subscription_ended_at", null);
 }
 
 export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
@@ -115,6 +131,7 @@ export async function handleStripeEvent(event: Stripe.Event): Promise<void> {
           .from("organizations")
           .update({ billing_status: "canceled", cancel_at_period_end: false, updated_at: new Date().toISOString() })
           .eq("id", orgId);
+        await stampSubscriptionEnded(admin, orgId); // starts the 30-day retention clock
       }
       break;
     }
