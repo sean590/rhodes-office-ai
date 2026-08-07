@@ -46,8 +46,12 @@ jobs:
             echo "auth config intact"; exit 0
           fi
           echo "auth config drifted (site_url=$site google=$google) — restoring"
+          [ -n "$GOOGLE_SECRET" ] || { echo "GOOGLE_OAUTH_CLIENT_SECRET repo secret is empty — refusing to write a blank secret"; exit 1; }
           prod=$(curl -sf "https://api.supabase.com/v1/projects/flcrgrtrguulaeupyaza/config/auth" -H "Authorization: Bearer $SB_TOKEN")
-          jq -n             --arg cid "$(echo "$prod" | jq -r '.external_google_client_id')"             --arg csec "$(echo "$prod" | jq -r '.external_google_secret')"             '{site_url: "https://staging.rhodesoffice.ai",
+          # client_id is public (safe to copy from prod); the SECRET is masked in
+          # Supabase's GET response, so restoring it from prod writes garbage —
+          # use the real value from the GOOGLE_OAUTH_CLIENT_SECRET repo secret.
+          jq -n             --arg cid "$(echo "$prod" | jq -r '.external_google_client_id')"             --arg csec "$GOOGLE_SECRET"             '{site_url: "https://staging.rhodesoffice.ai",
               uri_allow_list: "https://staging.rhodesoffice.ai/**,https://staging.rhodesoffice.ai/auth/callback",
               external_google_enabled: true,
               external_google_client_id: $cid,
