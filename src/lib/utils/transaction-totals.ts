@@ -135,9 +135,24 @@ export function deriveTotalsFromTransactions(rows: TransactionTotalRow[]): Deriv
 export function deriveCalledCapitalByInvestor(
   rows: Array<TransactionTotalRow & { investment_investor_id: string }>
 ): Record<string, number> {
+  return deriveCalledCapitalByKey(rows, "investment_investor_id");
+}
+
+/**
+ * Generalized: called capital grouped by an arbitrary participant key. For a
+ * standalone-investor investment the key is `investment_investor_id`; for a
+ * cap-table-tied investment (909 Park) it's `cap_table_entry_id`. Rows whose key
+ * is null are skipped.
+ */
+export function deriveCalledCapitalByKey<K extends string>(
+  rows: Array<TransactionTotalRow & Partial<Record<K, string | null>>>,
+  keyField: K,
+): Record<string, number> {
   const out: Record<string, number> = {};
   for (const row of rows) {
     if (row.transaction_type !== "contribution") continue;
+    const key = row[keyField];
+    if (!key) continue;
     const amount = Number(row.amount);
     if (!Number.isFinite(amount)) continue;
     const lineItems = Array.isArray(row.line_items) ? row.line_items : [];
@@ -149,7 +164,7 @@ export function deriveCalledCapitalByInvestor(
         if (li.category === SUBSCRIPTION_CATEGORY) called += Number(li.amount) || 0;
       }
     }
-    out[row.investment_investor_id] = (out[row.investment_investor_id] || 0) + called;
+    out[key as string] = (out[key as string] || 0) + called;
   }
   return out;
 }

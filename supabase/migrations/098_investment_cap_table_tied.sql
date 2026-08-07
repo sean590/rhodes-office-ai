@@ -1,0 +1,13 @@
+-- "Tie to cap table" mode for an investment (opt-in, per investment).
+--
+-- When an investment IS a directly-owned managed entity (909 Park: 4 trusts own
+-- it, no holding company), its participants ARE the entity's cap table — one
+-- owner list, two records (entity for obligations, investment for transactions),
+-- so they can't drift. When tied:
+--   - participants + committed/called metrics derive from the entity cap table,
+--   - transactions attribute to a cap-table member (investment_transactions.cap_table_entry_id).
+--
+-- Default false so nothing changes for existing investments: holding-company
+-- investors (with per-deal internal allocations) and external-vehicle investments
+-- keep the standalone investment_investors model untouched.
+ALTER TABLE investments ADD COLUMN IF NOT EXISTS cap_table_tied BOOLEAN NOT NULL DEFAULT false;
