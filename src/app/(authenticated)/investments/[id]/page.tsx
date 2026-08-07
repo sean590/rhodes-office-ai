@@ -395,7 +395,7 @@ export default function InvestmentDetailPage() {
       )}
 
       {activeTab === "transactions" && (
-        <TransactionsTab investmentId={id} investors={investment.investors} isMobile={isMobile} onTransactionsChanged={fetchInvestment} />
+        <TransactionsTab investmentId={id} investors={investment.investors} capTableTied={!!investment.cap_table_tied} isMobile={isMobile} onTransactionsChanged={fetchInvestment} />
       )}
 
       {activeTab === "transfers" && (

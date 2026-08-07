@@ -40,6 +40,9 @@ interface ExistingTransaction {
 interface Props {
   investmentId: string;
   investors: InvestmentInvestor[];
+  /** Cap-table-tied: each investor row's id is a cap_table_entry_id, and saves
+   *  attribute via cap_table_entry_id instead of investment_investor_id. */
+  capTableTied?: boolean;
   /** When set, opens in EDIT mode — pre-fills all fields, PATCHes the
    *  original row on save. Used for fixing typos. */
   editOriginal?: ExistingTransaction | null;
@@ -93,6 +96,7 @@ function defaultCategoryFor(t: TxnType): TransactionLineItemCategory {
 export function AddTransactionModal({
   investmentId,
   investors,
+  capTableTied,
   editOriginal,
   adjustsOriginal,
   onClose,
@@ -308,7 +312,7 @@ export function AddTransactionModal({
         }
 
         const body: Record<string, unknown> = {
-          investment_investor_id: investorId,
+          ...(capTableTied ? { cap_table_entry_id: investorId } : { investment_investor_id: investorId }),
           transaction_type: txnType,
           amount: Math.round(deltaAmount * 100) / 100,
           transaction_date: date,
@@ -333,7 +337,7 @@ export function AddTransactionModal({
 
       // CREATE mode — plain POST.
       const body: Record<string, unknown> = {
-        investment_investor_id: investorId,
+        ...(capTableTied ? { cap_table_entry_id: investorId } : { investment_investor_id: investorId }),
         transaction_type: txnType,
         amount: newAmount,
         transaction_date: date,
@@ -419,11 +423,11 @@ export function AddTransactionModal({
           </button>
         </div>
 
-        {/* Investor */}
+        {/* Investor / cap-table member */}
         {investors.length > 1 && (
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 12, fontWeight: 600, color: "var(--muted)", display: "block", marginBottom: 4 }}>
-              Investing Entity
+              {capTableTied ? "Member (from cap table)" : "Investing Entity"}
             </label>
             <select
               value={investorId}
@@ -431,7 +435,7 @@ export function AddTransactionModal({
               disabled={isAdjust || isEdit}
               style={{ width: "100%", padding: "8px 12px", fontSize: 14, borderRadius: 8, border: "1px solid var(--line)", background: "#fff" }}
             >
-              <option value="">Select investor...</option>
+              <option value="">{capTableTied ? "Select member..." : "Select investor..."}</option>
               {investors.map((inv) => (
                 <option key={inv.id} value={inv.id}>
                   {inv.entity_name || "Unknown"}

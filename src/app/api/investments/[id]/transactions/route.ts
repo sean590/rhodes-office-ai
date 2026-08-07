@@ -79,14 +79,32 @@ export async function GET(
       }
     }
 
+    // For a cap-table-tied investment, resolve cap_table_entry_id → member name
+    // so the Transactions tab can show WHICH member made each contribution.
+    const capMemberNames: Record<string, string> = {};
+    const { data: inv } = await db.from("investments").select("cap_table_tied, entity_id").eq("id", id).single();
+    if (inv?.cap_table_tied && inv?.entity_id) {
+      const { data: members } = await db.raw
+        .from("cap_table_entries")
+        .select("id, investor_name, entities:investor_entity_id(name), directory_entries:investor_directory_id(name)")
+        .eq("entity_id", inv.entity_id);
+      for (const m of (members ?? []) as Array<Record<string, unknown>>) {
+        const ent = m.entities as { name: string } | null;
+        const dir = m.directory_entries as { name: string } | null;
+        capMemberNames[m.id as string] = (m.investor_name as string) || ent?.name || dir?.name || "";
+      }
+    }
+
     const transactions = (data || []).map((row: Record<string, unknown>) => {
       const dirEntry = row.directory_entries as { name: string } | null;
       const doc = row.documents as { name: string } | null;
       const { directory_entries: _, documents: _d, ...rest } = row;
+      const capId = row.cap_table_entry_id as string | null;
       return {
         ...rest,
         member_name: dirEntry?.name ?? null,
         document_name: doc?.name ?? null,
+        cap_table_member_name: capId ? (capMemberNames[capId] ?? null) : null,
         ...(investorEntityName ? { investor_entity_name: investorEntityName } : {}),
       };
     });
@@ -155,6 +173,7 @@ export async function POST(
     }
     const {
       investment_investor_id,
+      cap_table_entry_id,
       transaction_type,
       amount,
       transaction_date,
@@ -181,7 +200,7 @@ export async function POST(
       if (original.organization_id !== orgId) {
         return NextResponse.json({ error: "adjustment must belong to the same organization" }, { status: 403 });
       }
-      if (original.investment_investor_id !== investment_investor_id) {
+      if (investment_investor_id && original.investment_investor_id !== investment_investor_id) {
         return NextResponse.json({ error: "adjustment must reference the same investor position as the original" }, { status: 400 });
       }
     }
@@ -192,7 +211,8 @@ export async function POST(
       .from("investment_transactions")
       .insert({
         investment_id: id,
-        investment_investor_id,
+        investment_investor_id: investment_investor_id ?? null,
+        cap_table_entry_id: cap_table_entry_id ?? null,
         member_directory_id: null,
         transaction_type,
         amount,

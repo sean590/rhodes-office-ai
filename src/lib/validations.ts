@@ -534,7 +534,11 @@ export function validateInvestmentTransactionLineItems(input: {
 }
 
 export const createInvestmentTransactionSchema = z.object({
-  investment_investor_id: z.string().uuid("Investor position is required"),
+  // Exactly one of these attributes the movement: investment_investor_id for a
+  // standalone investment, cap_table_entry_id for a cap-table-tied one. Enforced
+  // in the superRefine below.
+  investment_investor_id: z.string().uuid().optional().nullable(),
+  cap_table_entry_id: z.string().uuid().optional().nullable(),
   transaction_type: z.enum(["contribution", "distribution", "return_of_capital"]),
   // Adjustments may carry negative amounts; non-adjustments must be positive.
   // The cross-field check is in the .superRefine below.
@@ -552,6 +556,9 @@ export const createInvestmentTransactionSchema = z.object({
   adjusts_transaction_id: z.string().uuid().nullable().optional(),
   adjustment_reason: z.string().max(1000).nullable().optional(),
 }).superRefine((data, ctx) => {
+  if (!data.investment_investor_id && !data.cap_table_entry_id) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "A participant is required", path: ["investment_investor_id"] });
+  }
   const isAdjustment = !!data.adjusts_transaction_id;
   if (!isAdjustment && data.amount <= 0) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Amount must be positive", path: ["amount"] });

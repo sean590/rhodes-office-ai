@@ -25,6 +25,9 @@ interface Transaction {
   document_name: string | null;
   member_name: string | null;
   investor_entity_name?: string | null;
+  // Cap-table-tied investments: the cap-table member this contribution belongs to.
+  cap_table_entry_id?: string | null;
+  cap_table_member_name?: string | null;
 }
 
 // Spec 036 categories.
@@ -56,6 +59,9 @@ function fmtSignedDollars(n: number): string {
 interface Props {
   investmentId: string;
   investors: InvestmentInvestor[];
+  /** When true, participants are cap-table members and transactions attribute
+   *  via cap_table_entry_id (the id on each investor row is a cap_table_entry_id). */
+  capTableTied?: boolean;
   isMobile: boolean;
   /** Fired after a save/delete that changes the investment's totals so the
    *  parent page can refetch its header stats (Called/Uncalled/Cash Invested). */
@@ -85,7 +91,7 @@ type ModalState =
   | { mode: "edit"; original: Transaction }
   | { mode: "adjust"; original: Transaction };
 
-export function TransactionsTab({ investmentId, investors, isMobile, onTransactionsChanged }: Props) {
+export function TransactionsTab({ investmentId, investors, capTableTied, isMobile, onTransactionsChanged }: Props) {
   void isMobile;
   const canDelete = useCan("records:delete");
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -150,7 +156,10 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
             const typeInfo = TXN_TYPE_COLORS[txn.transaction_type] || TXN_TYPE_COLORS.contribution;
             const memberSplits = memberSplitTxns.filter(c => c.parent_transaction_id === txn.id);
             const lineItems = Array.isArray(txn.line_items) ? txn.line_items : [];
+            // Tied investments attribute to a cap-table member (the "who");
+            // otherwise fall back to the investor (shown only when >1 investor).
             const investorName = investorNameMap.get(txn.investment_investor_id) || txn.investor_entity_name;
+            const whoLabel = txn.cap_table_member_name || (investors.length > 1 ? investorName : null);
             const hasLineItems = lineItems.length > 0;
             const isExpanded = expandedTxnIds.has(txn.id);
             const isAdjustment = !!txn.adjusts_transaction_id;
@@ -204,8 +213,8 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontSize: 13, color: "var(--faint)" }}>{fmtDate(txn.transaction_date)}</span>
                       <span style={{ fontSize: 12, fontWeight: 500, color: typeInfo.color }}>{typeInfo.label}</span>
-                      {investors.length > 1 && investorName && (
-                        <span style={{ fontSize: 11, color: "var(--faint)", background: "var(--hover)", padding: "1px 6px", borderRadius: 4 }}>{investorName}</span>
+                      {whoLabel && (
+                        <span style={{ fontSize: 11, color: "var(--faint)", background: "var(--hover)", padding: "1px 6px", borderRadius: 4 }}>{whoLabel}</span>
                       )}
                       {isAdjustment && (
                         <span
@@ -380,6 +389,7 @@ export function TransactionsTab({ investmentId, investors, isMobile, onTransacti
         <AddTransactionModal
           investmentId={investmentId}
           investors={investors}
+          capTableTied={capTableTied}
           editOriginal={modal.mode === "edit" ? modal.original : null}
           adjustsOriginal={modal.mode === "adjust" ? modal.original : null}
           onClose={() => setModal({ mode: "closed" })}
