@@ -29,6 +29,7 @@ interface InvestmentDetail {
   date_exited: string | null;
   preferred_return_pct: number | null;
   preferred_return_basis: string | null;
+  cap_table_tied: boolean | null;
   ai_overview: string | null;
   ai_overview_generated_at: string | null;
   ai_overview_stale: boolean | null;
@@ -385,8 +386,11 @@ export default function InvestmentDetailPage() {
           preferredReturnPct={investment.preferred_return_pct}
           preferredReturnBasis={investment.preferred_return_basis}
           totalContributed={investment.total_contributed}
+          capTableTied={!!investment.cap_table_tied}
+          entityId={investment.entity_id}
           isMobile={isMobile}
           onCoInvestorsChanged={fetchInvestment}
+          onTieChanged={fetchInvestment}
         />
       )}
 

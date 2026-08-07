@@ -7,10 +7,11 @@ import { logAuditEvent, getRequestContext, humanizeField, buildChanges } from "@
 import { updateInvestmentSchema } from "@/lib/validations";
 import {
   deriveTotalsFromTransactions,
-  deriveCalledCapitalByInvestor,
+  deriveCalledCapitalByKey,
   earliestContributionDate,
   type TransactionTotalRow,
 } from "@/lib/utils/transaction-totals";
+import { resolveParticipants } from "@/lib/investment-participants";
 
 /**
  * GET /api/investments/[id]
@@ -43,24 +44,11 @@ export async function GET(
       return NextResponse.json({ error: "Investment not found" }, { status: 404 });
     }
 
-    // Fetch investors with entity names
-    const { data: investorsRaw } = await supabase
-      .from("investment_investors")
-      .select("*, entities:entity_id(name, short_name)")
-      .eq("investment_id", id)
-      .eq("is_active", true);
-
-    const investors = (investorsRaw || []).map((row: Record<string, unknown>) => {
-      const entity = row.entities as { name: string; short_name: string | null } | null;
-      const { entities: _, ...rest } = row;
-      return {
-        ...rest,
-        entity_name: entity?.name ?? null,
-        entity_short_name: entity?.short_name ?? null,
-      };
-    });
-
-    const investorIds = investors.map((inv: Record<string, unknown>) => inv.id as string);
+    // Participants: cap-table members (tied) or investment_investors (standalone).
+    // The resolver returns a uniform shape + the transaction grouping key so
+    // metrics compute the same way regardless of source.
+    const { participants: investors, txnKey, tied } = await resolveParticipants(supabase, investment);
+    const investorIds = investors.map((inv) => inv.id);
 
     // Fetch co-investors with directory names
     const { data: coInvestorsRaw } = await supabase
@@ -74,9 +62,11 @@ export async function GET(
       return { ...rest, directory_entry_name: dirEntry?.name ?? null };
     });
 
-    // Compute participant count from allocations linked to these investors
+    // Participant count: tied → the cap-table members; standalone → allocations.
     let participantCount = 0;
-    if (investorIds.length > 0) {
+    if (tied) {
+      participantCount = investors.length;
+    } else if (investorIds.length > 0) {
       const { count } = await supabase
         .from("investment_allocations")
         .select("id", { count: "exact", head: true })
@@ -85,21 +75,19 @@ export async function GET(
       participantCount = count || 0;
     }
 
-    // Compute per-investor called capital + roll-up totals from parent-level
+    // Per-participant called capital + roll-up totals from parent-level
     // transactions (member-split children excluded by parent_transaction_id IS NULL).
-    // Spec 036: line items live in JSONB on each parent row.
-    let txns: Array<TransactionTotalRow & { investment_investor_id: string }> = [];
-    if (investorIds.length > 0) {
-      const { data } = await supabase
-        .from("investment_transactions")
-        .select("investment_investor_id, transaction_type, amount, line_items, adjusts_transaction_id, transaction_date")
-        .in("investment_investor_id", investorIds)
-        .is("parent_transaction_id", null);
-      txns = (data || []) as Array<TransactionTotalRow & { investment_investor_id: string }>;
-    }
+    // Fetched by investment_id (works for both keys); grouped by the resolver's
+    // txnKey — cap_table_entry_id (tied) or investment_investor_id (standalone).
+    const { data: txnData } = await supabase
+      .from("investment_transactions")
+      .select("investment_investor_id, cap_table_entry_id, transaction_type, amount, line_items, adjusts_transaction_id, transaction_date")
+      .eq("investment_id", id)
+      .is("parent_transaction_id", null);
+    const txns = (txnData || []) as Array<TransactionTotalRow & { investment_investor_id: string | null; cap_table_entry_id: string | null }>;
 
     const totals = deriveTotalsFromTransactions(txns);
-    const calledByInvestor = deriveCalledCapitalByInvestor(txns);
+    const calledByParticipant = deriveCalledCapitalByKey(txns, txnKey);
 
     if (totals.contribution_fallback_count > 0) {
       console.warn(
@@ -107,10 +95,10 @@ export async function GET(
       );
     }
 
-    // Enrich investors with called/uncalled capital
-    const enrichedInvestors = investors.map((inv: Record<string, unknown>) => {
+    // Enrich participants with called/uncalled capital
+    const enrichedInvestors = investors.map((inv) => {
       const committed = inv.committed_capital != null ? Number(inv.committed_capital) : null;
-      const called = calledByInvestor[inv.id as string] || 0;
+      const called = calledByParticipant[inv.id] || 0;
       return {
         ...inv,
         called_capital: called,
@@ -118,7 +106,7 @@ export async function GET(
       };
     });
 
-    const totalCommitted = enrichedInvestors.reduce((s: number, i: Record<string, unknown>) =>
+    const totalCommitted = enrichedInvestors.reduce((s: number, i) =>
       s + (i.committed_capital != null ? Number(i.committed_capital) : 0), 0);
 
     return NextResponse.json({
@@ -180,6 +168,17 @@ export async function PATCH(
       .select("*")
       .eq("id", id)
       .single();
+
+    // Tie-to-cap-table requires a linked managed entity (that's the owner list).
+    if (updates.cap_table_tied === true) {
+      const entityId = updates.entity_id ?? (existing as { entity_id?: string } | null)?.entity_id;
+      if (!entityId) {
+        return NextResponse.json(
+          { error: "Link this investment to a managed entity before tying it to the cap table." },
+          { status: 400 },
+        );
+      }
+    }
 
     const { data: investment, error } = await supabase
       .from("investments")

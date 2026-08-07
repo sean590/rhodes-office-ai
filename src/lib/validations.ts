@@ -343,6 +343,9 @@ export const updateInvestmentSchema = z.object({
   date_exited: z.string().optional().nullable(),
   preferred_return_pct: z.number().min(0).max(100).optional().nullable(),
   preferred_return_basis: z.enum(["capital_contributed", "capital_committed"]).optional().nullable(),
+  // Tie participants to the linked entity's cap table (a directly-owned managed
+  // entity that IS the investment). Requires entity_id — enforced in the handler.
+  cap_table_tied: z.boolean().optional(),
 });
 
 // ============================================================

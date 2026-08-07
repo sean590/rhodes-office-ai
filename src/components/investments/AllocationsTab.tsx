@@ -38,8 +38,11 @@ interface Props {
   preferredReturnPct: number | null;
   preferredReturnBasis: string | null;
   totalContributed: number;
+  capTableTied?: boolean;
+  entityId?: string | null;
   isMobile: boolean;
   onCoInvestorsChanged?: () => void;
+  onTieChanged?: () => void;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -53,11 +56,34 @@ function fmtDollars(n: number): string {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-export function AllocationsTab({ investmentId, investors, coInvestors, preferredReturnPct, preferredReturnBasis, totalContributed, isMobile: _isMobile, onCoInvestorsChanged }: Props) {
+export function AllocationsTab({ investmentId, investors, coInvestors, preferredReturnPct, preferredReturnBasis, totalContributed, capTableTied, entityId, isMobile: _isMobile, onCoInvestorsChanged, onTieChanged }: Props) {
   // Track allocations per investor
   const [allocsByInvestor, setAllocsByInvestor] = useState<Record<string, Allocation[]>>({});
   const [membersByInvestor, setMembersByInvestor] = useState<Record<string, Member[]>>({});
   const [loading, setLoading] = useState(true);
+
+  // "Tie to cap table" mode (for a directly-owned managed entity that IS the
+  // investment). When on, participants come from the entity cap table.
+  const [tieExplainer, setTieExplainer] = useState(false);
+  const [tieSaving, setTieSaving] = useState(false);
+  const toggleTie = async (next: boolean) => {
+    setTieSaving(true);
+    try {
+      const res = await fetch(`/api/investments/${investmentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cap_table_tied: next }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        alert(j.error || "Could not update.");
+      } else {
+        onTieChanged?.();
+      }
+    } finally {
+      setTieSaving(false);
+    }
+  };
 
   // Edit state
   const [editingInvestorId, setEditingInvestorId] = useState<string | null>(null);
@@ -226,12 +252,49 @@ export function AllocationsTab({ investmentId, investors, coInvestors, preferred
 
   return (
     <div>
+      {/* Tie-to-cap-table control (only meaningful for a linked managed entity). */}
+      {entityId && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginBottom: 16, background: capTableTied ? "rgba(45,90,61,0.06)" : "var(--hover)", border: `1px solid ${capTableTied ? "var(--green)" : "var(--line)"}`, borderRadius: 8, position: "relative" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: tieSaving ? "wait" : "pointer", fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
+            <input
+              type="checkbox"
+              checked={!!capTableTied}
+              disabled={tieSaving}
+              onChange={(e) => toggleTie(e.target.checked)}
+              style={{ cursor: "inherit" }}
+            />
+            Tie ownership to the entity cap table
+          </label>
+          <button
+            type="button"
+            onClick={() => setTieExplainer((v) => !v)}
+            aria-label="What does this do?"
+            style={{ width: 18, height: 18, borderRadius: 9, border: "1px solid var(--line)", background: "#fff", color: "var(--muted)", fontSize: 11, fontWeight: 700, cursor: "pointer", lineHeight: 1 }}
+          >i</button>
+          {capTableTied && (
+            <span style={{ fontSize: 12, color: "var(--muted)", marginLeft: "auto" }}>
+              Owners are managed on the entity&apos;s cap table.
+            </span>
+          )}
+          {tieExplainer && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 20, width: 380, maxWidth: "90vw", padding: 14, background: "#fff", border: "1px solid var(--line)", borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", fontSize: 12.5, lineHeight: 1.55, color: "var(--muted)" }}>
+              <div style={{ fontWeight: 600, color: "var(--ink)", marginBottom: 6 }}>Tie ownership to the cap table</div>
+              This investment is one of your managed entities that you own directly. Turn this on to use the <strong>entity&apos;s cap table as the single owner list</strong> for both records — so ownership can&apos;t drift between the entity and the investment. Participants, committed capital, and each member&apos;s called capital all come from the cap table, and contributions attribute to the member who made them.
+              <div style={{ marginTop: 8 }}>
+                Leave it <strong>off</strong> for an external fund you invest into, or a holding-company structure where members split each deal at different percentages (that uses the standalone investor + internal-allocation model).
+              </div>
+              <button type="button" onClick={() => setTieExplainer(false)} style={{ marginTop: 10, background: "none", border: "none", color: "var(--green)", fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>Got it</button>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Ownership table */}
       {(investors.length > 0 || coInvestors.length > 0) && (
         <div style={{ marginBottom: 28 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", margin: "0 0 12px" }}>
             <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0, color: "var(--ink)" }}>Ownership</h3>
-            {!editingInvestors && (
+            {!editingInvestors && !capTableTied && (
               <Button variant="secondary" onClick={() => {
                 setEditInternalInvestors(investors.map(inv => ({
                   id: inv.id,
